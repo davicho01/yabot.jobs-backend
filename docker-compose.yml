@@ -1,0 +1,135 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: yabot_jobs
+    ports:
+      - "5433:5432"
+    volumes:
+      - yabot_jobs_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  # Local Pub/Sub emulator — no real GCP project or credentials needed for
+  # dev. Point the app at it with:
+  #   GCP_PROJECT_ID=local-dev
+  #   PUBSUB_EMULATOR_HOST=localhost:8085   (or pubsub-emulator:8085 from inside this compose network)
+  # Omit PUBSUB_EMULATOR_HOST (and set GOOGLE_APPLICATION_CREDENTIALS
+  # instead) to run against a real GCP project — same code either way.
+  pubsub-emulator:
+    image: google/cloud-sdk:emulators
+    command: gcloud beta emulators pubsub start --host-port=0.0.0.0:8085
+    ports:
+      - "8085:8085"
+
+  # Local S3-compatible object storage for resumes — no real AWS account
+  # needed for dev. Point the app at it with:
+  #   RESUME_STORAGE_ENDPOINT_URL=http://localhost:9000   (or minio:9000 from inside this compose network)
+  #   RESUME_STORAGE_ACCESS_KEY_ID=minioadmin
+  #   RESUME_STORAGE_SECRET_ACCESS_KEY=minioadmin
+  # Omit RESUME_STORAGE_ENDPOINT_URL (and use real AWS credentials) to run
+  # against real S3 — same code either way.
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - yabot_jobs_resumes:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  # Headless-Chromium rendering, split into its own image so the
+  # api/worker/crawl-worker images don't carry Playwright's browser binary.
+  # Only the rare JS-rendered-site fallback (app/services/browser_fetch.py)
+  # calls this. See browser_fetch_service/README.md.
+  browser-fetch:
+    build: browser_fetch_service
+    ports:
+      - "8090:8080"
+    restart: unless-stopped
+
+  # One-shot: applies migrations, then exits. api/worker/crawl-worker all
+  # wait for this to finish successfully before starting.
+  migrate:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/yabot_jobs
+    command: alembic upgrade head
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+#  api:
+#    build: .
+#    env_file: .env
+#    environment:
+#      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/yabot_jobs
+#      PUBSUB_EMULATOR_HOST: pubsub-emulator:8085
+#      GCP_PROJECT_ID: local-dev
+#      RESUME_STORAGE_ENDPOINT_URL: http://minio:9000
+#      BROWSER_FETCH_SERVICE_URL: http://browser-fetch:8080
+#    command: uvicorn main:app --host 0.0.0.0 --port 8000
+#    ports:
+#      - "8000:8000"
+#    depends_on:
+#      migrate:
+#        condition: service_completed_successfully
+#      pubsub-emulator:
+#        condition: service_started
+#      minio:
+#        condition: service_healthy
+#    restart: unless-stopped
+
+  # Scan worker — consumes job-scan-requests. Run more than one of these to
+  # parallelize the scan backlog: `docker compose up -d --scale worker=3`.
+  worker:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/yabot_jobs
+      PUBSUB_EMULATOR_HOST: pubsub-emulator:8085
+      GCP_PROJECT_ID: local-dev
+      BROWSER_FETCH_SERVICE_URL: http://browser-fetch:8080
+    command: python worker.py
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      pubsub-emulator:
+        condition: service_started
+    restart: unless-stopped
+
+  # Discovery-crawl worker — consumes crawl-source-requests (see
+  # crawl_dispatcher.py). Also scalable: --scale crawl-worker=3.
+  crawl-worker:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/yabot_jobs
+      PUBSUB_EMULATOR_HOST: pubsub-emulator:8085
+      GCP_PROJECT_ID: local-dev
+      BROWSER_FETCH_SERVICE_URL: http://browser-fetch:8080
+    command: python crawl_worker.py
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      pubsub-emulator:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  yabot_jobs_pgdata:
+  yabot_jobs_resumes:

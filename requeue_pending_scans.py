@@ -1,0 +1,48 @@
+"""One-shot recovery: re-publish a scan request for every JobPostingUrl still
+stuck at "pending".
+
+A URL is only ever queued once, at creation time (see
+app.services.jobs.get_or_create_job_posting) — if that publish is lost
+(the local Pub/Sub emulator has no durability guarantee under heavy publish
+bursts, unlike real GCP Pub/Sub) the row is stranded at "pending" forever
+with nothing left to redeliver it. Safe to run anytime: process_scan_job is
+idempotent (it checks for an existing JobPosting before doing any work), so
+re-enqueueing a URL that's already mid-processing or already done is a
+no-op, not a duplicate.
+
+Usage: python requeue_pending_scans.py
+"""
+
+import logging
+
+from sqlalchemy import select
+
+from app.db.session import SessionLocal
+from app.models.enums import ScanStatus
+from app.models.job_url import JobPostingUrl
+from app.services.job_queue import enqueue_scan, ensure_topic_and_subscription
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("app.requeue_pending_scans")
+
+
+def main() -> None:
+    ensure_topic_and_subscription()
+
+    db = SessionLocal()
+    try:
+        url_ids = db.scalars(select(JobPostingUrl.id).where(JobPostingUrl.scan_status == ScanStatus.PENDING)).all()
+        logger.info("Re-queuing %d pending url(s).", len(url_ids))
+        for url_id in url_ids:
+            try:
+                enqueue_scan(url_id)
+            except Exception:
+                logger.exception("Failed to re-queue url_id=%s; skipping.", url_id)
+    finally:
+        db.close()
+
+    logger.info("Done.")
+
+
+if __name__ == "__main__":
+    main()
