@@ -55,9 +55,9 @@ gcloud artifacts repositories create "$REPO" \
 # ---------------------------------------------------------------------------
 
 create_secret_from_env() {
-  local secret_name="$1" env_var="$2"
+  local secret_name="$1" env_var="$2" env_file="${3:-.env}"
   local value
-  value="$(grep -E "^${env_var}=" .env | head -1 | cut -d= -f2-)"
+  value="$(grep -E "^${env_var}=" "$env_file" | head -1 | cut -d= -f2-)"
   printf '%s' "$value" | gcloud secrets create "$secret_name" --data-file=- \
     || printf '%s' "$value" | gcloud secrets versions add "$secret_name" --data-file=-
 }
@@ -66,8 +66,11 @@ create_secret_from_env database-url               DATABASE_URL
 create_secret_from_env api-key-encryption-key      API_KEY_ENCRYPTION_KEY
 create_secret_from_env scraperapi-key              SCRAPERAPI_KEY
 create_secret_from_env system-llm-api-key          SYSTEM_LLM_API_KEY
-create_secret_from_env resume-storage-access-key   RESUME_STORAGE_ACCESS_KEY_ID
-create_secret_from_env resume-storage-secret-key   RESUME_STORAGE_SECRET_ACCESS_KEY
+# Real AWS creds for the yabot-jobs-backend IAM user (scoped to just the
+# yabot.jobs-files bucket) — kept out of the local dev .env, which stays
+# pointed at MinIO. See deploy/.env.production.
+create_secret_from_env resume-storage-access-key   RESUME_STORAGE_ACCESS_KEY_ID     deploy/.env.production
+create_secret_from_env resume-storage-secret-key   RESUME_STORAGE_SECRET_ACCESS_KEY deploy/.env.production
 
 # NOTE: for Cloud SQL, DATABASE_URL should use the unix-socket form instead
 # of the local docker-compose one, e.g.:
