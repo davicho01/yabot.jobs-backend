@@ -35,6 +35,7 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
         with:
           version: latest
+          install_components: beta # gcloud beta run worker-pools
 
       - name: Set image tag
         run: echo "IMAGE_TAG=${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/backend:${GITHUB_SHA::7}" >> "$GITHUB_ENV"
