@@ -20,7 +20,10 @@ logger = logging.getLogger("app.jobs")
 
 
 def get_or_create_job_posting(
-    db: Session, raw_url: str, submitted_by_user_id: uuid.UUID | None
+    db: Session,
+    raw_url: str,
+    submitted_by_user_id: uuid.UUID | None,
+    crawl_source_id: uuid.UUID | None = None,
 ) -> tuple[JobPosting, JobPostingUrl]:
     """Resolve a submitted URL to a (shared, app-wide) JobPosting.
 
@@ -43,6 +46,7 @@ def get_or_create_job_posting(
             url_hash=hashed,
             domain=domain_of(normalized),
             submitted_by_user_id=submitted_by_user_id,
+            crawl_source_id=crawl_source_id,
         )
         db.add(url_row)
         db.flush()

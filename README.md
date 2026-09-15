@@ -51,6 +51,7 @@ Set these in `.env` (loaded automatically by `app/core/config.py`).
 | `FRONTEND_BASE_URL` | No | `http://localhost:3000` | Where the emailed magic link points the browser (a frontend route that reads `?token=...` and POSTs it to `/auth/verify`). Also used for CORS `allow_origins`. |
 | `SESSION_COOKIE_NAME` | No | `session_token` | |
 | `SESSION_COOKIE_SECURE` | No | `false` | Set `true` behind HTTPS in real deployments. |
+| `ADMIN_EMAILS` | No | unset | Comma-separated emails auto-promoted to the `admin` role on login/creation. There's no admin UI to grant the role — this is the only way to create one. |
 | `RESUME_STORAGE_BUCKET` | No | `yabot-resumes` | S3(-compatible) bucket for uploaded resumes and generated tailored-resume files. |
 | `RESUME_STORAGE_ENDPOINT_URL` | No | unset | Set to `http://localhost:9000` to use the local MinIO (see below) instead of real AWS S3. |
 | `RESUME_STORAGE_REGION` | No | `us-east-1` | |

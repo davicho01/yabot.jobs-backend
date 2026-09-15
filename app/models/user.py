@@ -7,7 +7,7 @@ from sqlalchemy import DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-from app.models.enums import UserStatus
+from app.models.enums import UserRole, UserStatus
 from app.models.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
@@ -31,6 +31,7 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(
         String(20), default=UserStatus.INVITED, nullable=False
     )
+    role: Mapped[str] = mapped_column(String(20), default=UserRole.USER, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     magic_link_tokens: Mapped[list["MagicLinkToken"]] = relationship(

@@ -49,6 +49,12 @@ class JobPostingUrl(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     submitted_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
     )
+    # Which CrawlSource discovered this URL (null for user-submitted ones).
+    # SET NULL rather than CASCADE: deleting/rejecting a source shouldn't
+    # take down listings that were genuinely found there.
+    crawl_source_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("crawl_sources.id", ondelete="SET NULL"), index=True
+    )
 
     submitted_by: Mapped["User | None"] = relationship()
     postings: Mapped[list["JobPosting"]] = relationship(

@@ -10,6 +10,11 @@ class UserStatus(StrEnum):
     DISABLED = "disabled"
 
 
+class UserRole(StrEnum):
+    USER = "user"
+    ADMIN = "admin"
+
+
 class LlmProvider(StrEnum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"

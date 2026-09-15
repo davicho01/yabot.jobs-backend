@@ -87,5 +87,14 @@ class Settings(BaseSettings):
     # False for local http dev; set true behind https in real deployments.
     session_cookie_secure: bool = False
 
+    # Comma-separated emails auto-promoted to admin on login/creation (see
+    # app.services.auth.get_or_create_user). There's no admin UI to grant
+    # the role yet — this env var is the only way to create one.
+    admin_emails: str = ""
+
+    @property
+    def admin_email_set(self) -> set[str]:
+        return {e.strip().lower() for e in self.admin_emails.split(",") if e.strip()}
+
 
 settings = Settings()

@@ -62,7 +62,7 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
         return
 
     for url in urls:
-        get_or_create_job_posting(db, url, submitted_by_user_id=None)
+        get_or_create_job_posting(db, url, submitted_by_user_id=None, crawl_source_id=source.id)
 
     source.last_crawled_at = datetime.now(timezone.utc)
     source.last_job_count = len(urls)

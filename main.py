@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import api_keys, applications, auth, auth_tokens, crawl_sources, jobs, resumes
+from app.api.routes import admin, api_keys, applications, auth, auth_tokens, crawl_sources, jobs, resumes
 from app.core.config import settings
 from app.services.resume_storage import ensure_bucket_exists
 
@@ -38,6 +38,7 @@ app.include_router(jobs.router)
 app.include_router(applications.router)
 app.include_router(crawl_sources.router)
 app.include_router(resumes.router)
+app.include_router(admin.router)
 
 
 @app.get("/health")

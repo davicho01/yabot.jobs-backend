@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.security import generate_token, hash_token
 from app.models.auth import MagicLinkToken, PersonalAccessToken, UserSession
-from app.models.enums import UserStatus
+from app.models.enums import UserRole, UserStatus
 from app.models.user import User
 
 
@@ -19,9 +19,14 @@ def get_or_create_user(db: Session, email: str) -> User:
     email = email.strip().lower()
     user = db.scalar(select(User).where(User.email == email))
     if user is None:
-        user = User(email=email, status=UserStatus.INVITED)
+        role = UserRole.ADMIN if email in settings.admin_email_set else UserRole.USER
+        user = User(email=email, status=UserStatus.INVITED, role=role)
         db.add(user)
         db.flush()
+    elif email in settings.admin_email_set and user.role != UserRole.ADMIN:
+        # Self-heals an existing account if its email is added to
+        # ADMIN_EMAILS later, without needing a manual DB edit.
+        user.role = UserRole.ADMIN
     return user
 
 
