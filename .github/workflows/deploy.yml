@@ -39,8 +39,21 @@ jobs:
       - name: Set image tag
         run: echo "IMAGE_TAG=${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/backend:${GITHUB_SHA::7}" >> "$GITHUB_ENV"
 
+      # Native docker build/push instead of `gcloud builds submit`: Cloud
+      # Build's client-side source upload to the auto-created
+      # ${PROJECT_ID}_cloudbuild staging bucket kept failing for the
+      # WIF-impersonated service account ("forbidden from accessing the
+      # bucket") even after granting cloudbuild.builds.editor,
+      # serviceusage.serviceUsageConsumer, and bucket-level
+      # storage.objectAdmin — the same failure a human owner also hits
+      # locally unless their ADC quota project is set, which doesn't apply
+      # to WIF-issued tokens. Building directly on the runner sidesteps that
+      # staging bucket entirely and only needs artifactregistry.writer.
+      - run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
       - name: Build and push image
-        run: gcloud builds submit --tag "$IMAGE_TAG" --project="$PROJECT_ID" .
+        run: |
+          docker build -t "$IMAGE_TAG" .
+          docker push "$IMAGE_TAG"
 
       - name: Run database migrations
         run: |
