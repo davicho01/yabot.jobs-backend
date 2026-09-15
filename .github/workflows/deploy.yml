@@ -1,0 +1,79 @@
+name: Deploy
+
+# Redeploys api/worker/crawl-worker/crawl-dispatcher with the new image/source
+# on every push to main. One-time setup (API enablement, Cloud SQL instance,
+# secrets, IAM bindings, Scheduler job) lives in deploy/gcloud-deploy.sh and
+# is NOT part of this workflow — see that script's comments before changing
+# infra, not just code.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write # required for Workload Identity Federation
+
+env:
+  PROJECT_ID: yabotjobs
+  REGION: us-central1
+  SQL_REGION: us-east1
+  REPO: yabot-jobs
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/487584214286/locations/global/workloadIdentityPools/github/providers/github-provider
+          service_account: github-deployer@yabotjobs.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: latest
+
+      - name: Set image tag
+        run: echo "IMAGE_TAG=${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/backend:${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Build and push image
+        run: gcloud builds submit --tag "$IMAGE_TAG" --project="$PROJECT_ID" .
+
+      - name: Run database migrations
+        run: |
+          gcloud run jobs deploy migrate --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID"
+          gcloud run jobs execute migrate --region="$REGION" --project="$PROJECT_ID" --wait
+
+      - name: Deploy api
+        run: gcloud run deploy api --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID"
+
+      # Worker pools are a newer gcloud surface (`gcloud beta run worker-pools`)
+      # that can fail to load with "No module named 'grpc'" depending on the
+      # SDK's bundled Python — installing grpcio here is a harmless no-op if
+      # the SDK already has it, and fixes it if not (see deploy/gcloud-deploy.sh
+      # for the same issue seen locally).
+      - name: Install grpcio for worker-pools beta command
+        run: pip install --user grpcio
+
+      - name: Deploy worker pool
+        run: gcloud beta run worker-pools deploy worker --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID"
+
+      - name: Deploy crawl-worker pool
+        run: gcloud beta run worker-pools deploy crawl-worker --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID"
+
+      # Cloud Functions redeploys from source, not the container image built
+      # above. GOOGLE_FUNCTION_SOURCE is required because this repo's own
+      # main.py is the FastAPI app, not the dispatcher entry point.
+      - name: Deploy crawl-dispatcher
+        run: |
+          gcloud functions deploy crawl-dispatcher \
+            --gen2 \
+            --region="$REGION" \
+            --project="$PROJECT_ID" \
+            --runtime=python313 \
+            --source=. \
+            --entry-point=dispatch \
+            --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=crawl_dispatcher.py

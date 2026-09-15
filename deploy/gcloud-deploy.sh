@@ -262,11 +262,14 @@ gcloud scheduler jobs create http crawl-dispatch-daily \
   --oidc-token-audience="$FUNCTION_URL"
 
 # ---------------------------------------------------------------------------
-# Redeploys after this point (new image, no infra changes):
-#   gcloud builds submit --tag "${IMAGE}:$(git rev-parse --short HEAD)" .
-#   gcloud run jobs execute migrate --region="$REGION" --wait
-#   gcloud run deploy api --image="$IMAGE_TAG" --region="$REGION"
-#   gcloud beta run worker-pools deploy worker --image="$IMAGE_TAG" --region="$REGION"
-#   gcloud beta run worker-pools deploy crawl-worker --image="$IMAGE_TAG" --region="$REGION"
-#   gcloud functions deploy crawl-dispatcher --gen2 --region="$REGION" --source=. --entry-point=dispatch
+# Redeploys after this point (new image/source, no infra changes) — this is
+# also exactly what .github/workflows/deploy.yml runs on every push to main:
+#   gcloud builds submit --tag "${IMAGE}:$(git rev-parse --short HEAD)" --project="$PROJECT_ID" .
+#   gcloud run jobs deploy migrate --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID"
+#   gcloud run jobs execute migrate --region="$REGION" --project="$PROJECT_ID" --wait
+#   gcloud run deploy api --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID"
+#   gcloud beta run worker-pools deploy worker --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID"
+#   gcloud beta run worker-pools deploy crawl-worker --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID"
+#   gcloud functions deploy crawl-dispatcher --gen2 --region="$REGION" --project="$PROJECT_ID" \
+#     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=crawl_dispatcher.py
 # ---------------------------------------------------------------------------
