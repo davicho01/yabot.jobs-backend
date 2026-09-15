@@ -131,9 +131,12 @@ create_secret_from_env resume-storage-access-key   RESUME_STORAGE_ACCESS_KEY_ID 
 create_secret_from_env resume-storage-secret-key   RESUME_STORAGE_SECRET_ACCESS_KEY deploy/.env.production
 
 # Non-secret, shared across api/worker/crawl-worker:
-COMMON_ENV="GCP_PROJECT_ID=${PROJECT_ID},BROWSER_FETCH_SERVICE_URL=${BROWSER_FETCH_SERVICE_URL},FRONTEND_BASE_URL=https://app.yabot.jobs,SESSION_COOKIE_SECURE=true,SYSTEM_LLM_PROVIDER=deepseek,SYSTEM_LLM_MODEL=deepseek-v4-flash,RESUME_STORAGE_BUCKET=yabot.jobs-files,RESUME_STORAGE_REGION=us-east-1"
+COMMON_ENV="GCP_PROJECT_ID=${PROJECT_ID},BROWSER_FETCH_SERVICE_URL=${BROWSER_FETCH_SERVICE_URL},FRONTEND_BASE_URL=https://yabot.jobs,SESSION_COOKIE_SECURE=true,SYSTEM_LLM_PROVIDER=deepseek,SYSTEM_LLM_MODEL=deepseek-v4-flash,RESUME_STORAGE_BUCKET=yabot.jobs-files,RESUME_STORAGE_REGION=us-east-1"
 
-COMMON_SECRETS="DATABASE_URL=database-url:latest,API_KEY_ENCRYPTION_KEY=api-key-encryption-key:latest,SCRAPERAPI_KEY=scraperapi-key:latest,SYSTEM_LLM_API_KEY=system-llm-api-key:latest,RESUME_STORAGE_ACCESS_KEY_ID=resume-storage-access-key:latest,RESUME_STORAGE_SECRET_ACCESS_KEY=resume-storage-secret-key:latest"
+# EMAIL_SENDER_* map to the same underlying secrets as RESUME_STORAGE_* —
+# both are the yabot-jobs-backend IAM user's credentials (S3 + SES policies
+# attached to one user), not separate secrets.
+COMMON_SECRETS="DATABASE_URL=database-url:latest,API_KEY_ENCRYPTION_KEY=api-key-encryption-key:latest,SCRAPERAPI_KEY=scraperapi-key:latest,SYSTEM_LLM_API_KEY=system-llm-api-key:latest,RESUME_STORAGE_ACCESS_KEY_ID=resume-storage-access-key:latest,RESUME_STORAGE_SECRET_ACCESS_KEY=resume-storage-secret-key:latest,EMAIL_SENDER_ACCESS_KEY_ID=resume-storage-access-key:latest,EMAIL_SENDER_SECRET_ACCESS_KEY=resume-storage-secret-key:latest"
 
 # ---------------------------------------------------------------------------
 # 2. Build & push the shared image (api/worker/crawl-worker/migrate all use it)

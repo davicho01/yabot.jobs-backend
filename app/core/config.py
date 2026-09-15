@@ -66,6 +66,17 @@ class Settings(BaseSettings):
     # Unset just means that fallback is skipped.
     browser_fetch_service_url: str | None = None
 
+    # AWS SES for magic-link login emails (see app/services/email.py).
+    # from_address's domain must be a verified SES identity. Credentials are
+    # separate from resume storage's (even though both currently point at
+    # the same IAM user) so either can be rotated/scoped independently.
+    # Leaving the keys unset makes send_magic_link_email() log-only, so
+    # local dev works without any AWS setup.
+    email_from_address: str = "noreply@yabot.jobs"
+    email_sender_region: str = "us-east-1"
+    email_sender_access_key_id: str | None = None
+    email_sender_secret_access_key: str | None = None
+
     magic_link_ttl_minutes: int = 15
     session_ttl_days: int = 30
 
