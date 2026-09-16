@@ -260,8 +260,14 @@ resolves under the new adapter and `status: "active"` in the same request —
 `ats_type` is re-derived from `board_url` automatically, and the request is
 rejected with `422` if it still doesn't resolve to a supported platform. If
 a platform turns out unsupportable instead, `PATCH` with just `status:
-"rejected"`. `PATCH` also still toggles `is_active` (pause/resume without
-losing history); `DELETE` removes a source entirely.
+"rejected"`. `DELETE` removes a source entirely.
+
+`POST /admin/crawl-sources/{id}/crawl` publishes a one-off crawl request for
+a single `active` source — the same message the daily `crawl_dispatcher.py`
+fan-out sends, picked up and processed by `crawl_worker.py` exactly like a
+scheduled run. Useful for verifying one company's adapter (or re-crawling
+after fixing it) without waiting for the next scheduled dispatch or
+triggering every other active source too.
 
 **Terminal 4 — crawl worker** (alongside the three processes above; already
 running as its own service if you used `docker compose up -d` instead):

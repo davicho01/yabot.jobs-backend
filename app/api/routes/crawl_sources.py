@@ -12,6 +12,7 @@ from app.schemas.admin import CrawlSourceStatsRead, ScanDayCount
 from app.schemas.crawl_source import CrawlSourceCreate, CrawlSourceRead, CrawlSourceUpdate
 from app.services import admin as admin_service
 from app.services.ats_adapters import detect_ats_source, detect_embedded_ats_source
+from app.services.crawl_queue import enqueue_crawl, ensure_topic_and_subscription
 
 router = APIRouter(prefix="/admin/crawl-sources", tags=["admin"], dependencies=[Depends(get_current_admin_user)])
 
@@ -82,6 +83,28 @@ def update_crawl_source(
             detail="A crawl source for this board_url already exists.",
         ) from exc
     return source
+
+
+@router.post("/{source_id}/crawl", status_code=status.HTTP_202_ACCEPTED)
+def trigger_crawl_source(source_id: uuid.UUID, db: Session = Depends(get_db)) -> dict:
+    """Publish a one-off crawl request for a single source, same message
+    crawl_dispatcher.py's daily fan-out sends — crawl_worker.py picks it up
+    and processes it exactly like any scheduled dispatch. Lets an admin
+    verify one company's adapter (or re-crawl after fixing it) without
+    waiting for the next scheduled run or triggering every other active
+    source too.
+    """
+    source = db.get(CrawlSource, source_id)
+    if source is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Crawl source not found.")
+    if source.status != CrawlSourceStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Only an active crawl source can be crawled.",
+        )
+    ensure_topic_and_subscription()
+    enqueue_crawl(source.id)
+    return {"queued": True}
 
 
 @router.delete("/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
