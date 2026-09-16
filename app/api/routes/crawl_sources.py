@@ -11,7 +11,7 @@ from app.models.enums import CrawlSourceStatus
 from app.schemas.admin import CrawlSourceStatsRead
 from app.schemas.crawl_source import CrawlSourceCreate, CrawlSourceRead, CrawlSourceUpdate
 from app.services import admin as admin_service
-from app.services.ats_adapters import detect_ats_source
+from app.services.ats_adapters import detect_ats_source, detect_embedded_ats_source
 
 router = APIRouter(prefix="/admin/crawl-sources", tags=["admin"], dependencies=[Depends(get_current_admin_user)])
 
@@ -56,7 +56,15 @@ def update_crawl_source(
         try:
             new_ats_type, _ = detect_ats_source(data["board_url"])
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+            # Same embedded fallback register_discovered_board uses —
+            # white-label platforms (Clinch, Oracle Fusion, TalentBrew, ...)
+            # have no static URL shape, so a "pending" row for one of them
+            # can only ever resolve here, never through detect_ats_source
+            # alone.
+            embedded = detect_embedded_ats_source(data["board_url"])
+            if embedded is None:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+            new_ats_type, _ = embedded
         data["ats_type"] = new_ats_type
     if new_status == CrawlSourceStatus.ACTIVE and not new_ats_type:
         raise HTTPException(
