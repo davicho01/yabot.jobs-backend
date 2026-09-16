@@ -113,6 +113,20 @@ _SALARY_RANGE_RE = re.compile(
     """,
     re.IGNORECASE | re.VERBOSE,
 )
+# Some listings (e.g. amazon.jobs, verified live) state pay as a single
+# figure rather than a range, e.g. "Austin, TX, USA - 116,100.00 USD
+# Annually" — same currency-code-before-or-after-the-amount shape as the
+# range regex above, but anchored on a trailing pay-period word so it
+# doesn't fire on arbitrary standalone numbers in the description.
+_SALARY_SINGLE_RE = re.compile(
+    rf"""
+    (?:(?P<cur1>{_CURRENCY_CODES})\s*)?(?P<sym1>[\$£€])?\s*
+    (?P<amount>\d[\d,]*(?:\.\d+)?)
+    \s*(?:(?P<cur2>{_CURRENCY_CODES}))?
+    \s*(?:annually|per\s+year|/\s*yr\b|per\s+annum|hourly|per\s+hour|/\s*hr\b)
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
 
 
 def normalize_url(raw_url: str) -> str:
@@ -354,24 +368,42 @@ def _salary_from_text(text: str | None) -> tuple[int | None, int | None, str | N
     if not text:
         return None, None, None
 
-    match = _SALARY_RANGE_RE.search(text)
+    # .search() alone would settle for the *first* number-dash-number shape
+    # in the text and bail — verified live on an amazon.jobs posting whose
+    # description opens with an unrelated "8-10" (years of experience) that
+    # has no currency marker, well before the real "26.25 - 29.75 USD
+    # hourly" pay range further down. Walk every candidate instead and take
+    # the first one that actually carries a currency signal.
+    for match in _SALARY_RANGE_RE.finditer(text):
+        cur1, sym1, cur2, sym2, cur3 = match.group("cur1", "sym1", "cur2", "sym2", "cur3")
+        if not (cur1 or sym1 or cur2 or sym2 or cur3):
+            continue
+
+        try:
+            salary_min = round(float(match.group("min").replace(",", "")))
+            salary_max = round(float(match.group("max").replace(",", "")))
+        except ValueError:
+            continue
+        if salary_min > salary_max:
+            salary_min, salary_max = salary_max, salary_min
+
+        currency = cur1 or cur2 or cur3 or _CURRENCY_SYMBOLS.get(sym1 or sym2 or "")
+        return salary_min, salary_max, currency.upper() if currency else None
+
+    # No range found — some listings (see _SALARY_SINGLE_RE) state a single
+    # flat figure instead of a range.
+    match = _SALARY_SINGLE_RE.search(text)
     if match is None:
         return None, None, None
 
-    cur1, sym1, cur2, sym2, cur3 = match.group("cur1", "sym1", "cur2", "sym2", "cur3")
-    if not (cur1 or sym1 or cur2 or sym2 or cur3):
-        return None, None, None
-
+    cur1, sym1, cur2 = match.group("cur1", "sym1", "cur2")
     try:
-        salary_min = round(float(match.group("min").replace(",", "")))
-        salary_max = round(float(match.group("max").replace(",", "")))
+        amount = round(float(match.group("amount").replace(",", "")))
     except ValueError:
         return None, None, None
-    if salary_min > salary_max:
-        salary_min, salary_max = salary_max, salary_min
 
-    currency = cur1 or cur2 or cur3 or _CURRENCY_SYMBOLS.get(sym1 or sym2 or "")
-    return salary_min, salary_max, currency.upper() if currency else None
+    currency = cur1 or cur2 or _CURRENCY_SYMBOLS.get(sym1 or "")
+    return amount, amount, currency.upper() if currency else None
 
 
 _MAX_LOCATION_LENGTH = 255  # matches JobPosting.location's column width
@@ -722,6 +754,83 @@ def _oracle_fusion_description_of(job_data: dict[str, Any]) -> str | None:
     return _html_to_formatted_text(html) if html else None
 
 
+# amazon.jobs ships no JobPosting JSON-LD and no embedded JSON blob (unlike
+# Apple's SPA) — it's a plain server-rendered page, so the full description
+# lives directly in the HTML as a sequence of
+# <div class="section"><h2>Heading</h2><p>...</p></div> blocks under
+# #job-detail-body (Description / Basic Qualifications / Preferred
+# Qualifications, in that order — verified on a live posting). The
+# pay-range disclosure required by US pay-transparency law is embedded as
+# free text at the tail of the last section rather than its own field, so
+# stitching every section together (not just "Description") is what
+# surfaces it to _salary_from_text downstream. Location/team/job-category
+# live separately in a <div class="sidebar"> of
+# <div class="association {kind}-icon">...<ul class="association-content">
+# blocks.
+_AMAZON_SECTION_RE = re.compile(r'<div class="section"><h2[^>]*>(.*?)</h2>', re.IGNORECASE | re.DOTALL)
+_AMAZON_ASSOCIATION_RE = re.compile(
+    r'<div class="association ([a-z-]+)-icon[^"]*"[^>]*>.*?<ul class="association-content">(.*?)</ul>',
+    re.IGNORECASE | re.DOTALL,
+)
+_AMAZON_ASSOCIATION_ITEM_RE = re.compile(r"<(?:li|a)[^>]*>(.*?)</(?:li|a)>", re.IGNORECASE | re.DOTALL)
+
+
+def _amazon_association_values(html: str, kind: str) -> list[str]:
+    values: list[str] = []
+    for assoc_kind, content in _AMAZON_ASSOCIATION_RE.findall(html):
+        if assoc_kind.lower() != kind:
+            continue
+        for item in _AMAZON_ASSOCIATION_ITEM_RE.findall(content):
+            text = _clean_text(item)
+            if text and text not in values:
+                values.append(text)
+    return values
+
+
+def _amazon_location_of(html: str) -> str | None:
+    location = ", ".join(_amazon_association_values(html, "location"))
+    if location and len(location) > _MAX_LOCATION_LENGTH:
+        location = location[: _MAX_LOCATION_LENGTH - 3] + "..."
+    return location or None
+
+
+def _amazon_workplace_type_of(location: str | None) -> str:
+    # The sidebar never states remote/hybrid/onsite explicitly — "virtual"
+    # showing up in the location text itself is the only on-page signal
+    # observed; a plain city/state/country location implies onsite.
+    if location is None:
+        return WorkplaceType.UNKNOWN
+    return WorkplaceType.REMOTE if "virtual" in location.lower() else WorkplaceType.ONSITE
+
+
+def _amazon_description_of(html: str) -> str | None:
+    body_start = html.find('id="job-detail-body"')
+    if body_start == -1:
+        return None
+    body_end = html.find('class="sidebar"', body_start)
+    body_html = html[body_start : body_end if body_end != -1 else len(html)]
+    # The cut above lands mid-attribute inside the sidebar's opening <div
+    # tag, leaving a dangling unclosed "<div " that _html_to_formatted_text
+    # can't strip (its tag regex requires a closing ">") and that would
+    # otherwise leak into the rendered description as literal text.
+    if body_html.rfind("<") > body_html.rfind(">"):
+        body_html = body_html[: body_html.rfind("<")]
+
+    headings = list(_AMAZON_SECTION_RE.finditer(body_html))
+    if not headings:
+        return None
+
+    sections = []
+    for i, heading in enumerate(headings):
+        title = _clean_text(heading.group(1))
+        if not title:
+            continue
+        end = headings[i + 1].start() if i + 1 < len(headings) else len(body_html)
+        sections.append(f"<h3>{title}</h3>" + body_html[heading.end() : end])
+    combined = "".join(sections)
+    return _html_to_formatted_text(combined) if combined else None
+
+
 def _extract_google_job_body(html: str) -> str | None:
     start_match = _GOOGLE_QUALIFICATIONS_START_RE.search(html)
     if start_match is None:
@@ -962,15 +1071,19 @@ def scan_job_url(url: str) -> ScanResult:
         apple_job_data = _extract_apple_job_data(html)
         eightfold_job_data = _fetch_eightfold_job_data(str(response.url), html)
         oracle_job_data = _fetch_oracle_fusion_job_data(str(response.url))
+        amazon_location = _amazon_location_of(html)
         location = (
             gh_location
             or (_apple_location_of(apple_job_data) if apple_job_data else None)
             or (eightfold_job_data.get("location") if eightfold_job_data else None)
             or (_oracle_fusion_location_of(oracle_job_data) if oracle_job_data else None)
+            or amazon_location
             or location
         )
         if workplace_type == WorkplaceType.UNKNOWN and oracle_job_data:
             workplace_type = _oracle_fusion_workplace_type_of(oracle_job_data)
+        if workplace_type == WorkplaceType.UNKNOWN and amazon_location:
+            workplace_type = _amazon_workplace_type_of(amazon_location)
         employment_type = (
             _oracle_fusion_employment_type_of(oracle_job_data) if oracle_job_data else EmploymentType.UNKNOWN
         )
@@ -991,6 +1104,7 @@ def scan_job_url(url: str) -> ScanResult:
             or (_html_to_formatted_text(eightfold_job_data.get("jobDescription")) if eightfold_job_data else None)
             or (_oracle_fusion_description_of(oracle_job_data) if oracle_job_data else None)
             or (_apple_description_of(apple_job_data) if apple_job_data else None)
+            or _amazon_description_of(html)
             or fallback_description
             or og_description
         )
