@@ -50,7 +50,17 @@ def get_or_create_job_posting(
         )
         db.add(url_row)
         db.flush()
-        register_discovered_board(db, raw_url)
+        if crawl_source_id is None:
+            # Only a genuinely user-submitted URL should grow the crawl
+            # surface. A URL the crawler itself just discovered already
+            # belongs to a known, active board — re-running board
+            # detection on it is redundant at best, and actively wrong for
+            # adapters that store board_url verbatim (TalentBrew, Clinch,
+            # Oracle Fusion): each individual job URL would fail the
+            # existing-board_url check and register as its own brand-new
+            # "active" CrawlSource, which the dispatcher would then also
+            # crawl.
+            register_discovered_board(db, raw_url)
         posting = _create_pending_posting(db, url_row)
         # Committed before publishing, not just flushed: the worker reads
         # this row on a separate DB connection, and a flush is only visible

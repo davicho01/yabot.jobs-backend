@@ -21,6 +21,19 @@ def detect_ats_source(url: str) -> tuple[str, str]:
     raise ValueError(f"Couldn't detect a supported ATS from url={url!r}.")
 
 
+def board_key_for(ats_type: str, board_url: str) -> str | None:
+    """Re-derive board_key from a *stored* board_url — the same
+    board_key-or-match resolution list_job_urls uses. None means either an
+    unsupported ats_type or a board_url that doesn't actually look like one
+    of that platform's boards.
+    """
+    adapter = _ADAPTERS_BY_TYPE.get(ats_type)
+    if adapter is None:
+        return None
+    key_fn = adapter.board_key or adapter.match
+    return key_fn(board_url) if key_fn else None
+
+
 def list_job_urls(ats_type: str, board_url: str) -> list[str]:
     """Discovery only: return every current job-posting URL for a company's
     board. Field extraction (title, salary, etc.) is left entirely to the
@@ -34,8 +47,7 @@ def list_job_urls(ats_type: str, board_url: str) -> list[str]:
     adapter = _ADAPTERS_BY_TYPE.get(ats_type)
     if adapter is None:
         raise ValueError(f"Unsupported ats_type: {ats_type!r}")
-    key_fn = adapter.board_key or adapter.match
-    key = key_fn(board_url) if key_fn else None
+    key = board_key_for(ats_type, board_url)
     if key is None:
         raise ValueError(f"board_url={board_url!r} doesn't look like a {ats_type} board")
     return adapter.fetch_jobs(key)

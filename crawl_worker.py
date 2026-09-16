@@ -3,9 +3,11 @@
 Consumes crawl-source-requests messages published by crawl_dispatcher.py:
 for each, lists every current job URL for that company's board (via the
 ATS's own public API — see app.services.ats_adapters) and hands each one to
-the normal get_or_create_job_posting flow, exactly like a user-submitted
-URL. Genuinely new URLs get queued onto the *existing* job-scan topic and
-picked up by worker.py; already-known ones are a no-op.
+the normal get_or_create_job_posting flow, passing crawl_source_id so it
+skips board (re-)registration — that only happens for genuinely
+user-submitted URLs, see get_or_create_job_posting. Genuinely new URLs get
+queued onto the *existing* job-scan topic and picked up by worker.py;
+already-known ones are a no-op.
 
 Run multiple instances of this process to crawl many companies in parallel —
 it's a normal Pub/Sub pull subscription, so messages are split across
