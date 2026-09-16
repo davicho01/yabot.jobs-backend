@@ -20,6 +20,7 @@ from app.services.adapters import (
     oracle_fusion,
     personio,
     recruitee,
+    talentbrew,
     workable,
     workday,
 )
@@ -42,5 +43,6 @@ ADAPTERS: list[AtsAdapter] = [
     apple.ADAPTER,
     oracle_fusion.ADAPTER,
     clinch.ADAPTER,
+    talentbrew.ADAPTER,
     eightfold.ADAPTER,
 ]

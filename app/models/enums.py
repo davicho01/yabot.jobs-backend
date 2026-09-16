@@ -61,6 +61,7 @@ class AtsType(StrEnum):
     EIGHTFOLD = "eightfold"
     ORACLE_FUSION = "oracle_fusion"
     CLINCH = "clinch"
+    TALENTBREW = "talentbrew"
     # Single-company, in-house career sites (not a platform other companies
     # use) — board_key is a fixed constant, not a variable company slug.
     AMAZON = "amazon"
