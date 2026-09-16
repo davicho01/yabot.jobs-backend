@@ -9,7 +9,7 @@ from app.services.adapters.base import TIMEOUT, AtsAdapter
 _ADP_JOBS_URL = "https://workforcenow.adp.com/mascsr/default/careercenter/public/events/staffing/v1/job-requisitions"
 _ADP_JOB_URL = (
     "https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html"
-    "?cid={cid}&ccId={cc_id}&type=JS&lang=en_US&selectedMenuKey=CareerCenter&jobId={job_id}"
+    "?cid={cid}{cc_id_param}&type=JS&lang=en_US&selectedMenuKey=CareerCenter&jobId={job_id}"
 )
 _ADP_PAGE_SIZE = 50
 # ADP client career sites (one company's own postings) run nowhere near
@@ -19,24 +19,28 @@ _ADP_URL_RE = re.compile(r"workforcenow\.adp\.com", re.IGNORECASE)
 
 
 def _match(url: str) -> str | None:
-    # Unlike the other platforms, ADP needs two identifiers, not one — the
-    # client id (cid) and the career-center id (ccId), both only visible in
-    # a client's careers URL query string, not a single path segment (and
+    # ADP's client id (cid) is the only identifier every client careers URL
+    # has — visible in the query string, not a single path segment (and
     # query param order isn't guaranteed, so this parses the query string
-    # properly rather than trying a positional regex).
+    # properly rather than trying a positional regex). The career-center id
+    # (ccId) disambiguates clients with more than one career center, but
+    # most clients have just one and their URLs simply omit it — the
+    # job-requisitions API happily returns that one default career center's
+    # postings with cid alone, so ccId is optional here too.
     if not _ADP_URL_RE.search(url):
         return None
     query = parse_qs(urlsplit(url).query)
     cid = query.get("cid", [None])[0]
     cc_id = query.get("ccId", [None])[0]
-    if not (cid and cc_id):
+    if not cid:
         return None
-    return f"{cid}/{cc_id}"
+    return f"{cid}/{cc_id or ''}"
 
 
 def _board_url(board_key: str) -> str:
     cid, cc_id = board_key.split("/")
-    return f"https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid={cid}&ccId={cc_id}"
+    cc_id_param = f"&ccId={cc_id}" if cc_id else ""
+    return f"https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid={cid}{cc_id_param}"
 
 
 def _fetch_jobs(board_key: str) -> list[str]:
@@ -45,6 +49,8 @@ def _fetch_jobs(board_key: str) -> list[str]:
     # buries its externally-visible job id inside a generic key/value bag
     # (customFieldGroup.stringFields) rather than a top-level field.
     cid, cc_id = board_key.split("/")
+    cc_id_param = {"ccId": cc_id} if cc_id else {}
+    cc_id_url_param = f"&ccId={cc_id}" if cc_id else ""
 
     urls: list[str] = []
     skip = 0
@@ -53,7 +59,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
             _ADP_JOBS_URL,
             params={
                 "cid": cid,
-                "ccId": cc_id,
+                **cc_id_param,
                 "lang": "en_US",
                 "locale": "en_US",
                 "$top": _ADP_PAGE_SIZE,
@@ -75,7 +81,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
                 None,
             )
             if job_id:
-                urls.append(_ADP_JOB_URL.format(cid=cid, cc_id=cc_id, job_id=job_id))
+                urls.append(_ADP_JOB_URL.format(cid=cid, cc_id_param=cc_id_url_param, job_id=job_id))
         if len(requisitions) < _ADP_PAGE_SIZE:
             break
         skip += _ADP_PAGE_SIZE
