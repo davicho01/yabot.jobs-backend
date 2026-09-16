@@ -151,79 +151,68 @@ python worker.py
 ## Discovery crawler
 
 Besides user-submitted URLs, the app can automatically discover new postings
-from a fixed list of company career boards you configure — currently
-Greenhouse, Lever, Ashby, BambooHR, Personio, Workday, JazzHR, Recruitee, and
-Breezy HR (multi-tenant ATS platforms used by many companies), plus Amazon,
-Google, and Apple (single-company, in-house career sites — see note below).
-Most use a real public API (no scraping, no bot-detection risk); JazzHR,
-Google, and Apple have no public API, so their discovery scrapes structured
-data out of the page instead — more fragile than the others (see notes
-below). Either way this only *discovers* URLs; each one is handed to the
-same scan pipeline as a manually-submitted URL, so extraction logic lives in
-exactly one place.
+from a company's career board across every ATS platform it recognizes. Each
+platform's adapter lives in its own file under `app/services/adapters/` (see
+`app/services/adapters/__init__.py` for the full registry) — currently
+Greenhouse, Lever, Ashby, BambooHR, Personio, Workday, JazzHR, Recruitee,
+Breezy HR, Workable, and ADP (multi-tenant ATS platforms used by many
+companies); Amazon, Google, and Apple (single-company, in-house career sites
+— see note below); and Oracle Fusion, Clinch, and Eightfold (white-label
+platforms — the board lives on the company's own domain rather than a
+shared ATS host). Most use a real public API (no scraping, no
+bot-detection risk); JazzHR, Google, and Apple have no public API, so their
+discovery scrapes structured data out of the page instead — more fragile
+than the others (see notes below). Either way this only *discovers* URLs;
+each one is handed to the same scan pipeline as a manually-submitted URL, so
+extraction logic lives in exactly one place.
 
 **Add a board to watch — just paste a careers/job URL:**
 ```bash
 curl -X POST http://localhost:8000/crawl-sources \
   -H "Content-Type: application/json" -H "Cookie: session_token=..." \
-  -d '{"name": "BambooHR", "url": "https://job-boards.greenhouse.io/bamboohr17/jobs/6004765004"}'
+  -d '{"name": "BambooHR", "board_url": "https://job-boards.greenhouse.io/bamboohr17/jobs/6004765004"}'
 ```
-The `ats_type` and `board_token` are auto-detected from the URL's shape —
-any job URL or the board's own listing URL both work, including a specific
-Workday job URL (all three of its identifier parts are still present in the
-path). If the URL doesn't match a supported platform (e.g. an iCIMS/Jibe
-board like GitHub's — see below), you'll get a `422` telling you so.
+`ats_type` (and whatever internal identifier that platform's adapter needs)
+is auto-detected from the URL's shape — any job URL or the board's own
+listing URL both work, including a specific Workday job URL (all three of
+its identifier parts are still present in the path). If the URL doesn't
+match a supported platform (e.g. an iCIMS/Jibe board like GitHub's — see
+below), you'll get a `422` telling you so.
 
-**Or specify `ats_type` + `board_token` explicitly instead of `url`** (exactly
-one of the two forms is required, not both):
-```bash
-curl -X POST http://localhost:8000/crawl-sources \
-  -H "Content-Type: application/json" -H "Cookie: session_token=..." \
-  -d '{"name": "BambooHR", "ats_type": "greenhouse", "board_token": "bamboohr17"}'
-```
-`ats_type` is one of `"greenhouse"`, `"lever"`, `"ashby"`, `"bamboohr"`,
-`"personio"`, `"workday"`, `"jazzhr"`, `"recruitee"`, `"breezyhr"`,
-`"amazon"`, `"google"`, `"apple"`; `board_token` is the company slug from
-their careers URL for the first nine — the last three are single-company
-sites with no variable slug, so `board_token` is just a fixed placeholder
-(`"amazon"`/`"google"`/`"apple"`), same as `ats_type`:
-
-| `ats_type` | Careers URL shape | `board_token` example |
-|---|---|---|
-| `greenhouse` | `job-boards.greenhouse.io/{board_token}/...` | `bamboohr17` |
-| `lever` | `jobs.lever.co/{board_token}/...` | `palantir` |
-| `ashby` | `jobs.ashbyhq.com/{board_token}/...` | `ramp` |
-| `bamboohr` | `{board_token}.bamboohr.com/careers/...` | `recess` |
-| `personio` | `{board_token}.jobs.personio.de/...` | `personio` |
-| `workday` | `{company}.{instance}.myworkdayjobs.com/{site}/...` | `salesforce/wd12/External_Career_Site` (Bank of America: `ghr/wd1/Lateral-US`) |
-| `jazzhr` | `{board_token}.applytojob.com/apply/...` | `ilsos` |
-| `recruitee` | `{board_token}.recruitee.com/...` | `strata` |
-| `breezyhr` | `{board_token}.breezy.hr/...` | `duolingo` |
-| `amazon` | `amazon.jobs/...` | `amazon` (fixed) |
-| `google` | `google.com/about/careers/...` | `google` (fixed) |
-| `apple` | `jobs.apple.com/...` | `apple` (fixed) |
-
-**JazzHR has no public API, unlike the other eight.** Its `/apply/jobs`
+**JazzHR has no public API, unlike most of the others.** Its `/apply/jobs`
 listing page is scraped for job IDs via regex — deterministic today, but
 unlike a real API there's no contract, so a JazzHR page redesign could
 silently stop finding new postings until someone notices and updates the
-adapter (`app/services/ats_adapters.py`).
+adapter (`app/services/adapters/jazzhr.py`).
 
 **Workday is different from the rest in two ways.** It needs three pieces of
 information, not one — company slug, Workday instance number (e.g. `wd12`,
 not visible in the careers URL; find it by opening the company's careers
-page and checking the URL/network requests), and the career site name —
-encoded as `"company/instance/site"` in `board_token`. And rather than
-returning every open role, it only returns postings whose `postedOn` is
-literally `"Posted Today"` (Workday's own field), since some companies have
-1000+ open roles and re-discovering all of them every day would mean dozens
-of paginated requests for no benefit — already-known URLs are deduped either
-way, so daily runs only need what's new. A 200-posting safety cap still
-applies in case one company posts an unusually large batch in a single day.
+page and checking the URL/network requests), and the career site name, all
+three recovered straight out of the URL. And rather than returning every
+open role, it only returns postings whose `postedOn` is literally `"Posted
+Today"` (Workday's own field), since some companies have 1000+ open roles
+and re-discovering all of them every day would mean dozens of paginated
+requests for no benefit — already-known URLs are deduped either way, so
+daily runs only need what's new. A 200-posting safety cap still applies in
+case one company posts an unusually large batch in a single day.
+
+**ADP, Oracle Fusion, Clinch, and Eightfold each have their own quirk.** ADP
+needs two identifiers, not one — `cid` and `ccId`, both only visible in the
+careers URL's query string. Oracle Fusion and Clinch are white-label — the
+board lives on the company's own domain rather than a shared ATS host, so
+their `CrawlSource.board_url` is stored exactly as submitted instead of
+being reconstructed into a canonical form (see
+`app/services/adapters/oracle_fusion.py`/`clinch.py`). Eightfold is
+white-label too, but with no static URL shape to detect it by at all — it's
+only ever recognized by fetching the page and checking for a
+platform-specific signature, then guess-and-verifying the tenant's internal
+"domain" identifier against its own API (`app/services/adapters/eightfold.py`).
 
 **Amazon, Google, and Apple are single-company, in-house career sites, not
-platforms other companies use** — there's no `board_token` variability, so
-`ats_type` alone identifies the whole board. None have a real public API:
+platforms other companies use** — there's no board-specific identifier at
+all, `ats_type` alone identifies the whole board. None have a real public
+API:
 
 - **Amazon** (`amazon.jobs/en/search.json`) is at least a clean,
   unauthenticated JSON endpoint (verified: 10,000+ live postings) — same
@@ -259,18 +248,20 @@ bookkeeping only.
 
 | `status` | Meaning |
 |---|---|
-| `pending` | Detected platform isn't implemented yet (`ats_type`/`board_token` are null; `detected_domain` names the site) — a candidate for a future adapter. |
+| `pending` | Detected platform isn't implemented yet (`ats_type` is null; `board_url` is just the site's domain root) — a candidate for a future adapter. |
 | `active` | Platform is implemented; crawled on every dispatch. |
 | `rejected` | Investigated and found unsupportable (no viable public API) — won't be re-flagged by future submissions from the same domain. |
 
 `PATCH /crawl-sources/{id}` moves a board along this lifecycle: once an
-adapter for a `pending` platform is verified and implemented (a new
-`_list_*_jobs` function in `app/services/ats_adapters.py` plus an `AtsType`
-value), fill in `ats_type`+`board_token` and set `status: "active"` in the
-same request (rejected with `422` if `status: "active"` is set without
-both). If a platform turns out unsupportable instead, `PATCH` with just
-`status: "rejected"`. `PATCH` also still toggles `is_active` (pause/resume
-without losing history); `DELETE` removes a source entirely.
+adapter for a `pending` platform is verified and implemented (a new file
+under `app/services/adapters/` exporting an `AtsAdapter`, registered in
+`app/services/adapters/__init__.py`), set `board_url` to a URL that
+resolves under the new adapter and `status: "active"` in the same request —
+`ats_type` is re-derived from `board_url` automatically, and the request is
+rejected with `422` if it still doesn't resolve to a supported platform. If
+a platform turns out unsupportable instead, `PATCH` with just `status:
+"rejected"`. `PATCH` also still toggles `is_active` (pause/resume without
+losing history); `DELETE` removes a source entirely.
 
 **Terminal 4 — crawl worker** (alongside the three processes above; already
 running as its own service if you used `docker compose up -d` instead):
