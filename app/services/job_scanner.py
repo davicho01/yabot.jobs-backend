@@ -915,6 +915,45 @@ def _extract_greenhouse_remix_field(html: str, pattern: re.Pattern[str]) -> str 
         return None
 
 
+# Workday job pages do embed schema.org JobPosting JSON-LD, so they never
+# reach the no-JSON-LD fallback branch below — but Workday generates that
+# JSON-LD's `description` field as plain text with every tag stripped, not
+# HTML, so it has no paragraph breaks, headings, or bullet points left to
+# convert into Markdown (verified against a live posting: the JSON-LD
+# description was one unbroken run of sentences). The same job's public
+# `wday/cxs` JSON API — the same one Workday's own SPA calls client-side,
+# keyed by the visible job path — returns the original
+# `jobPostingInfo.jobDescription` HTML with its structure intact.
+_WORKDAY_JOB_URL_RE = re.compile(
+    r"([a-zA-Z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[A-Z]{2}/)?([^/?]+)(/job/[^?#]+)",
+    re.IGNORECASE,
+)
+_WORKDAY_JOB_DETAIL_URL = "https://{company}.{instance}.myworkdayjobs.com/wday/cxs/{company}/{site}{job_path}"
+
+
+def _fetch_workday_job_data(url: str) -> dict[str, Any] | None:
+    match = _WORKDAY_JOB_URL_RE.search(url)
+    if match is None:
+        return None
+    company, instance, site, job_path = match.groups()
+    try:
+        response = httpx.get(
+            _WORKDAY_JOB_DETAIL_URL.format(company=company, instance=instance, site=site, job_path=job_path),
+            timeout=10.0,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return None
+    data = response.json()
+    return data if isinstance(data, dict) else None
+
+
+def _workday_description_of(job_data: dict[str, Any]) -> str | None:
+    posting_info = job_data.get("jobPostingInfo")
+    description = posting_info.get("jobDescription") if isinstance(posting_info, dict) else None
+    return _html_to_formatted_text(description) if isinstance(description, str) else None
+
+
 @dataclass
 class ScanResult:
     success: bool
@@ -1131,7 +1170,12 @@ def scan_job_url(url: str) -> ScanResult:
 
     hiring_org = job_ld.get("hiringOrganization")
     company_name = hiring_org.get("name") if isinstance(hiring_org, dict) else None
-    description = _html_to_formatted_text(job_ld.get("description")) or fallback_description
+    workday_job_data = _fetch_workday_job_data(str(response.url))
+    description = (
+        (_workday_description_of(workday_job_data) if workday_job_data else None)
+        or _html_to_formatted_text(job_ld.get("description"))
+        or fallback_description
+    )
 
     salary_min, salary_max, salary_currency = _salary_of(job_ld)
     if salary_min is None and salary_max is None:
