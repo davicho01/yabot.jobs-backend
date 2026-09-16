@@ -7,12 +7,15 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin_user, get_db
 from app.models.crawl_source import CrawlSource
-from app.models.enums import CrawlSourceStatus
+from app.models.enums import CrawlSourceStatus, ScanStatus
+from app.models.job_url import JobPostingUrl
 from app.schemas.admin import CrawlSourceStatsRead, ScanDayCount
 from app.schemas.crawl_source import CrawlSourceCreate, CrawlSourceRead, CrawlSourceUpdate
 from app.services import admin as admin_service
 from app.services.ats_adapters import detect_ats_source, detect_embedded_ats_source
 from app.services.crawl_queue import enqueue_crawl, ensure_topic_and_subscription
+from app.services.job_queue import enqueue_scan
+from app.services.job_queue import ensure_topic_and_subscription as ensure_scan_topic_and_subscription
 
 router = APIRouter(prefix="/admin/crawl-sources", tags=["admin"], dependencies=[Depends(get_current_admin_user)])
 
@@ -105,6 +108,38 @@ def trigger_crawl_source(source_id: uuid.UUID, db: Session = Depends(get_db)) ->
     ensure_topic_and_subscription()
     enqueue_crawl(source.id)
     return {"queued": True}
+
+
+@router.post("/{source_id}/rescan", status_code=status.HTTP_202_ACCEPTED)
+def rescan_crawl_source(source_id: uuid.UUID, db: Session = Depends(get_db)) -> dict:
+    """Re-queue a scan for every JobPostingUrl this source has discovered
+    so far, e.g. after fixing/improving its ATS adapter — lets already-
+    scanned postings pick up the fix immediately instead of only refreshing
+    the next time each one happens to be re-crawled.
+
+    Resets each row to PENDING before publishing: process_scan_job (the
+    same handler a fresh submission's scan request hits) no-ops on a
+    non-PENDING url_row, so leaving scan_status at SUCCESS/FAILED would make
+    the worker just skip every message this enqueues.
+    """
+    source = db.get(CrawlSource, source_id)
+    if source is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Crawl source not found.")
+
+    url_rows = db.scalars(select(JobPostingUrl).where(JobPostingUrl.crawl_source_id == source_id)).all()
+    if not url_rows:
+        return {"queued": 0}
+
+    for url_row in url_rows:
+        url_row.scan_status = ScanStatus.PENDING
+        url_row.scan_error = None
+    db.commit()  # committed, not just flushed — the worker reads url_row on a separate connection
+
+    ensure_scan_topic_and_subscription()
+    for url_row in url_rows:
+        enqueue_scan(url_row.id)
+
+    return {"queued": len(url_rows)}
 
 
 @router.delete("/{source_id}", status_code=status.HTTP_204_NO_CONTENT)

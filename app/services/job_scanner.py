@@ -97,15 +97,16 @@ _OG_WORKPLACE_TYPE_WORDS = {
 _CURRENCY_SYMBOLS = {"$": "USD", "£": "GBP", "€": "EUR"}
 _CURRENCY_CODES = "USD|CAD|AUD|NZD|GBP|EUR|CHF|JPY|INR"
 # Matches things like "USD $124,000.00 - USD $329,200.00", "$120,000-$160,000",
-# or "50,000 - 65,000 GBP" — two amounts joined by a dash/"to", with a
-# currency code/symbol before either amount and/or trailing the range.
+# "50,000 - 65,000 GBP", or "between $216,200 and $394,000" — two amounts
+# joined by a dash/"to"/"and", with a currency code/symbol before either
+# amount and/or trailing the range.
 # Many pay-transparency-law job descriptions state a salary range in prose
 # even when the page's structured data (if any) omits or zeroes it out.
 _SALARY_RANGE_RE = re.compile(
     rf"""
     (?:(?P<cur1>{_CURRENCY_CODES})\s*)?(?P<sym1>[\$£€])?\s*
     (?P<min>\d[\d,]*(?:\.\d+)?)
-    \s*(?:-|–|to)\s*
+    \s*(?:-|–|\bto\b|\band\b)\s*
     (?:(?P<cur2>{_CURRENCY_CODES})\s*)?(?P<sym2>[\$£€])?\s*
     (?P<max>\d[\d,]*(?:\.\d+)?)
     (?:\s*(?P<cur3>{_CURRENCY_CODES}))?
@@ -507,6 +508,57 @@ def _apple_posted_at_of(job_data: dict[str, Any]) -> date | None:
         return date.fromisoformat(posting_date[:10])
     except ValueError:
         return None
+
+
+def _apple_title_of(job_data: dict[str, Any]) -> str | None:
+    title = job_data.get("postingTitle")
+    return _clean_text(title) if isinstance(title, str) else None
+
+
+# responsibilities/*Qualifications are plain text, one bullet item per
+# line (verified on a live posting) rather than an HTML <ul>/<li> list like
+# Oracle's equivalents, so each line needs an explicit "- " marker before
+# going through _html_to_formatted_text — otherwise it survives as an
+# unbulleted paragraph and the list structure is lost.
+def _apple_bulleted(text: str) -> str:
+    return "\n".join(f"- {line.strip()}" for line in text.split("\n") if line.strip())
+
+
+# postingFooters carries the Pay & Benefits / EEO Statement / Accessibility
+# / Application Deadline sections that render below Preferred Qualifications
+# on the real posting, keyed by postLocationId (one entry per job location;
+# taking the first is fine since they're the same boilerplate/comp text
+# per-region rather than per-job). Each has its own displayOrder, so sort on
+# that rather than trusting dict iteration order.
+def _apple_posting_footer_sections(job_data: dict[str, Any]) -> list[tuple[str, str]]:
+    footers = job_data.get("postingFooters")
+    if not isinstance(footers, list) or not footers:
+        return []
+    first = footers[0]
+    if not isinstance(first, dict):
+        return []
+    sections = first.get("localizations", {}).get("en_US")
+    if not isinstance(sections, list):
+        return []
+    ordered = sorted(
+        (s for s in sections if isinstance(s, dict) and isinstance(s.get("content"), str) and s["content"].strip()),
+        key=lambda s: s.get("displayOrder", 0),
+    )
+    return [(s.get("name") or "", s["content"]) for s in ordered]
+
+
+def _apple_description_of(job_data: dict[str, Any]) -> str | None:
+    sections = [job_data.get("jobSummary"), job_data.get("description")]
+    if job_data.get("responsibilities"):
+        sections.append("<h3>Responsibilities</h3>" + _apple_bulleted(job_data["responsibilities"]))
+    if job_data.get("minimumQualifications"):
+        sections.append("<h3>Minimum Qualifications</h3>" + _apple_bulleted(job_data["minimumQualifications"]))
+    if job_data.get("preferredQualifications"):
+        sections.append("<h3>Preferred Qualifications</h3>" + _apple_bulleted(job_data["preferredQualifications"]))
+    for name, content in _apple_posting_footer_sections(job_data):
+        sections.append(f"<h3>{name}</h3>" + content if name else content)
+    html = "\n\n".join(s for s in sections if isinstance(s, str) and s.strip())
+    return _html_to_formatted_text(html) if html else None
 
 
 # Eightfold-powered white-label career sites (e.g. jobs.twilio.com,
@@ -936,6 +988,7 @@ def scan_job_url(url: str) -> ScanResult:
             or _extract_google_job_body(html)
             or (_html_to_formatted_text(eightfold_job_data.get("jobDescription")) if eightfold_job_data else None)
             or (_oracle_fusion_description_of(oracle_job_data) if oracle_job_data else None)
+            or (_apple_description_of(apple_job_data) if apple_job_data else None)
             or fallback_description
             or og_description
         )
@@ -944,6 +997,7 @@ def scan_job_url(url: str) -> ScanResult:
             success=True,
             title=(eightfold_job_data.get("name") if eightfold_job_data else None)
             or (oracle_job_data.get("Title") if oracle_job_data else None)
+            or (_apple_title_of(apple_job_data) if apple_job_data else None)
             or og_title
             or fallback_title,
             description=description,
