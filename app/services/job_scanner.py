@@ -716,6 +716,8 @@ def _oracle_fusion_description_of(job_data: dict[str, Any]) -> str | None:
         sections.append("<h3>Responsibilities</h3>" + job_data["ExternalResponsibilitiesStr"])
     if job_data.get("ExternalQualificationsStr"):
         sections.append("<h3>Qualifications</h3>" + job_data["ExternalQualificationsStr"])
+    if job_data.get("CorporateDescriptionStr"):
+        sections.append("<h3>About Us</h3>" + job_data["CorporateDescriptionStr"])
     html = "".join(s for s in sections if isinstance(s, str) and s.strip())
     return _html_to_formatted_text(html) if html else None
 
