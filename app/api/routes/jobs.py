@@ -1,4 +1,5 @@
 import uuid
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select
@@ -47,20 +48,26 @@ def submit_job_url(
 def list_job_urls(
     q: str | None = None,
     location: str | None = None,
-    remote_only: bool = False,
+    company: str | None = None,
+    posted_within_days: int | None = Query(None, ge=1),
+    workplace_type: WorkplaceType | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> JobListRead:
     stmt = select(JobPostingUrl)
-    if q or location or remote_only:
+    if q or location or company or posted_within_days or workplace_type:
         stmt = stmt.join(JobPosting, JobPosting.url_id == JobPostingUrl.id).distinct()
         if q:
             stmt = stmt.where(JobPosting.title.ilike(f"%{q}%"))
         if location:
             stmt = stmt.where(JobPosting.location.ilike(f"%{location}%"))
-        if remote_only:
-            stmt = stmt.where(JobPosting.workplace_type == WorkplaceType.REMOTE)
+        if company:
+            stmt = stmt.where(JobPosting.company_name.ilike(f"%{company}%"))
+        if posted_within_days:
+            stmt = stmt.where(JobPosting.posted_at >= date.today() - timedelta(days=posted_within_days))
+        if workplace_type:
+            stmt = stmt.where(JobPosting.workplace_type == workplace_type)
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
 
