@@ -62,7 +62,7 @@ class AtsType(StrEnum):
     ORACLE_FUSION = "oracle_fusion"
     CLINCH = "clinch"
     # Single-company, in-house career sites (not a platform other companies
-    # use) — board_token is a fixed constant, not a variable company slug.
+    # use) — board_key is a fixed constant, not a variable company slug.
     AMAZON = "amazon"
     GOOGLE = "google"
     APPLE = "apple"
@@ -73,7 +73,7 @@ class CrawlSourceStatus(StrEnum):
     # board awaiting its first crawl) — a queue of platforms worth
     # investigating.
     PENDING = "pending"
-    # ats_type/board_token known and being crawled daily.
+    # ats_type/board_key known and being crawled daily.
     ACTIVE = "active"
     # Investigated; no viable public API, will never be implemented.
     REJECTED = "rejected"

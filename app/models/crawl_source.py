@@ -25,7 +25,7 @@ class CrawlSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     rather than stored separately, since they're fully recoverable from the
     URL for every supported platform (see
     app.services.ats_adapters.detect_ats_source /
-    app.services.ats_adapters.canonical_board_url).
+    app.services.ats_adapters.board_url_for_key).
 
     A row can also represent a *not-yet-supported* board: when a submitted
     job URL doesn't match any implemented ATS platform, it's recorded here

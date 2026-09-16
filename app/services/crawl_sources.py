@@ -6,16 +6,14 @@ from sqlalchemy.orm import Session
 
 from app.models.crawl_source import CrawlSource
 from app.models.enums import AtsType, CrawlSourceStatus
-from app.services.ats_adapters import canonical_board_url, detect_ats_source, detect_embedded_ats_source
+from app.services.ats_adapters import board_url_for_key, detect_ats_source, detect_embedded_ats_source
 from app.services.job_scanner import domain_of, normalize_url
 
-# These two ats_types are white-label platforms with no shared, ATS-hosted
-# canonical URL to reconstruct (each company's own domain *is* the board),
-# so board_url is just the literal submitted URL, verbatim, rather than a
-# templated one — see app.services.ats_adapters.list_job_urls, which
-# already re-derives whatever it needs (host, siteNumber, ...) straight out
-# of that URL rather than relying on a specific canonical shape.
-_VERBATIM_BOARD_URL_ATS_TYPES = {AtsType.ORACLE_FUSION, AtsType.CLINCH}
+# ADP's board_key ("cid/ccId") is a pair of opaque client ids, not a
+# company slug like every other adapter's — _company_name below can't tell
+# that apart from a real slug by shape alone, so it's called out here
+# explicitly rather than guessed at.
+_NO_COMPANY_SLUG_ATS_TYPES = {AtsType.ADP}
 
 logger = logging.getLogger("app.crawl_sources")
 
@@ -32,23 +30,40 @@ def register_discovered_board(db: Session, url: str) -> None:
     it) — a queue of platforms worth investigating and implementing.
     """
     try:
-        ats_type, board_token = detect_ats_source(url)
+        ats_type, board_key = detect_ats_source(url)
     except ValueError:
         embedded = detect_embedded_ats_source(url)
         if embedded is None:
             domain = domain_of(normalize_url(url))
             _upsert(db, name=domain, ats_type=None, board_url=f"https://{domain}", status=CrawlSourceStatus.PENDING)
             return
-        ats_type, board_token = embedded
+        ats_type, board_key = embedded
 
-    board_url = url if ats_type in _VERBATIM_BOARD_URL_ATS_TYPES else canonical_board_url(ats_type, board_token)
+    board_url = board_url_for_key(ats_type, board_key, url)
     _upsert(
         db,
-        name=f"{ats_type}/{board_token}",
+        name=_company_name(ats_type, board_key, url),
         ats_type=ats_type,
         board_url=board_url,
         status=CrawlSourceStatus.ACTIVE,
     )
+
+
+def _company_name(ats_type: str, board_key: str, url: str) -> str:
+    """A human-readable label for the admin list — cosmetic only, not used
+    for dedup or lookup (see board_url). board_key's first "/"-segment is
+    the company slug for most platforms (e.g. Greenhouse's "anthropic",
+    Workday's "salesforce/wd12/..."), so humanize that directly. A few
+    platforms don't encode a company slug there at all — Oracle
+    Fusion/Clinch/Eightfold's first segment is a hostname (contains a
+    "."), and ADP's is a pair of opaque client ids (see
+    _NO_COMPANY_SLUG_ATS_TYPES) — domain is the best fallback label
+    available for those without an extra network fetch.
+    """
+    slug = board_key.split("/")[0]
+    if not slug or "." in slug or ats_type in _NO_COMPANY_SLUG_ATS_TYPES:
+        return domain_of(normalize_url(url))
+    return slug.replace("-", " ").replace("_", " ").title()
 
 
 def _upsert(db: Session, *, name: str, ats_type: str | None, board_url: str, status: str) -> None:

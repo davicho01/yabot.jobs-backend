@@ -54,7 +54,7 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
     try:
         urls = list_job_urls(source.ats_type, source.board_url)
     except Exception as exc:
-        # A bad board_token or an ATS outage isn't retryable by nacking —
+        # A bad board_key or an ATS outage isn't retryable by nacking —
         # record it and move on, same as any other scan failure in this app.
         logger.warning("Failed to list jobs for %s: %s", source.name, exc)
         source.last_error = str(exc)
