@@ -36,9 +36,20 @@ def _detect_embedded(url: str) -> str | None:
         response.raise_for_status()
     except httpx.HTTPError:
         return None
-    if _CLINCH_SIGNATURE not in response.text:
+    host = urlsplit(str(response.url)).netloc
+    if _CLINCH_SIGNATURE in response.text:
+        return host
+    # Some tenants front their marketing pages with bot-protection (AWS WAF
+    # Bot Control, verified against careers.upstart.com) that challenges a
+    # plain httpx fetch — no signature string, no job content, just an
+    # empty 202 — even though sitemap.xml (what _fetch_jobs actually reads
+    # day to day) sits behind no such protection. A sitemap that genuinely
+    # contains /jobs/ postings is just as strong a signal as the marketing
+    # page's signature string, so fall back to it.
+    try:
+        return host if _fetch_jobs(host) else None
+    except (httpx.HTTPError, ElementTree.ParseError):
         return None
-    return urlsplit(str(response.url)).netloc
 
 
 def _board_key(url: str) -> str | None:
