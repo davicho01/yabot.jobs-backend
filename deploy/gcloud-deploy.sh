@@ -212,7 +212,7 @@ gcloud beta run worker-pools deploy crawl-worker \
   --instances=1
 
 # ---------------------------------------------------------------------------
-# 6. crawl-dispatcher — Cloud Function (2nd gen), triggered daily by Scheduler
+# 6. crawl-dispatcher — Cloud Function (2nd gen), triggered hourly by Scheduler
 #    Deploys from source (this repo), entry point is dispatch() in
 #    crawl_dispatcher.py.
 #
@@ -247,7 +247,7 @@ gcloud run services update crawl-dispatcher \
   --add-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION"
 
 # Give Cloud Scheduler's service account permission to invoke the function,
-# then wire up the daily cron trigger via OIDC (no public HTTP exposure).
+# then wire up the hourly cron trigger via OIDC (no public HTTP exposure).
 
 FUNCTION_URL="$(gcloud functions describe crawl-dispatcher --gen2 --region="$REGION" --format='value(serviceConfig.uri)')"
 
@@ -256,9 +256,9 @@ gcloud functions add-invoker-policy-binding crawl-dispatcher \
   --region="$REGION" \
   --member="serviceAccount:${PROJECT_ID}@appspot.gserviceaccount.com"
 
-gcloud scheduler jobs create http crawl-dispatch-daily \
+gcloud scheduler jobs create http crawl-dispatch-hourly \
   --location="$REGION" \
-  --schedule="0 6 * * *" \
+  --schedule="0 * * * *" \
   --uri="$FUNCTION_URL" \
   --http-method=POST \
   --oidc-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com" \
