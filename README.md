@@ -168,7 +168,7 @@ extraction logic lives in exactly one place.
 
 **Add a board to watch — just paste a careers/job URL:**
 ```bash
-curl -X POST http://localhost:8000/crawl-sources \
+curl -X POST http://localhost:8000/admin/crawl-sources \
   -H "Content-Type: application/json" -H "Cookie: session_token=..." \
   -d '{"name": "BambooHR", "board_url": "https://job-boards.greenhouse.io/bamboohr17/jobs/6004765004"}'
 ```
@@ -236,14 +236,14 @@ API:
 above. A URL on a platform we already support silently adds (or reuses) an
 `"active"` `CrawlSource` for that company — so simply submitting one job
 from a new company is enough for the daily crawler to start picking up all
-of that company's future postings, no separate `POST /crawl-sources` call
+of that company's future postings, no separate `POST /admin/crawl-sources` call
 needed. A URL on a platform we don't recognize is instead recorded as a
 `"pending"` source keyed by domain (one row per unrecognized site, however
 many people submit from it) — a queue of platforms worth investigating. This
 never blocks or fails the job submission itself; it's best-effort
 bookkeeping only.
 
-`GET /crawl-sources` lists every board with `last_crawled_at`/
+`GET /admin/crawl-sources` lists every board with `last_crawled_at`/
 `last_job_count`/`last_error`, plus `status`:
 
 | `status` | Meaning |
@@ -252,7 +252,7 @@ bookkeeping only.
 | `active` | Platform is implemented; crawled on every dispatch. |
 | `rejected` | Investigated and found unsupportable (no viable public API) — won't be re-flagged by future submissions from the same domain. |
 
-`PATCH /crawl-sources/{id}` moves a board along this lifecycle: once an
+`PATCH /admin/crawl-sources/{id}` moves a board along this lifecycle: once an
 adapter for a `pending` platform is verified and implemented (a new file
 under `app/services/adapters/` exporting an `AtsAdapter`, registered in
 `app/services/adapters/__init__.py`), set `board_url` to a URL that

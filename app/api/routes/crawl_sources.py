@@ -5,13 +5,15 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_current_admin_user, get_db
 from app.models.crawl_source import CrawlSource
 from app.models.enums import CrawlSourceStatus
+from app.schemas.admin import CrawlSourceStatsRead
 from app.schemas.crawl_source import CrawlSourceCreate, CrawlSourceRead, CrawlSourceUpdate
+from app.services import admin as admin_service
 from app.services.ats_adapters import detect_ats_source
 
-router = APIRouter(prefix="/crawl-sources", tags=["crawl-sources"], dependencies=[Depends(get_current_user)])
+router = APIRouter(prefix="/admin/crawl-sources", tags=["admin"], dependencies=[Depends(get_current_admin_user)])
 
 
 @router.get("", response_model=list[CrawlSourceRead])
@@ -80,3 +82,11 @@ def delete_crawl_source(source_id: uuid.UUID, db: Session = Depends(get_db)) -> 
     if source is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Crawl source not found.")
     db.delete(source)
+
+
+@router.get("/{source_id}/stats", response_model=CrawlSourceStatsRead)
+def get_crawl_source_stats(source_id: uuid.UUID, db: Session = Depends(get_db)) -> dict:
+    source = db.get(CrawlSource, source_id)
+    if source is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Crawl source not found.")
+    return admin_service.get_crawl_source_stats(db, source)

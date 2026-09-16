@@ -22,6 +22,7 @@ class CrawlSourceCreate(BaseModel):
 
 class CrawlSourceUpdate(BaseModel):
     is_active: bool | None = None
+    name: str | None = Field(default=None, min_length=1)
     # Set this (together with status="active") to promote a "pending"
     # board once an adapter for it has been verified and implemented — or
     # set status="rejected" alone if it turns out unsupportable. ats_type
