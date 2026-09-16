@@ -78,6 +78,13 @@ class CrawlSourceStatus(StrEnum):
     ACTIVE = "active"
     # Investigated; no viable public API, will never be implemented.
     REJECTED = "rejected"
+    # Investigated and determined the row itself is wrong and shouldn't
+    # exist — e.g. a stale duplicate of a board that's active under a
+    # different (canonical) board_url — rather than "can't be crawled."
+    # A human-review marker only: never delete a row outright (see
+    # DELETE /admin/crawl-sources/{id}), just flag it here and leave the
+    # actual delete to a human who's confirmed it.
+    DELETE = "delete"
 
 
 class ApplicationStatus(StrEnum):

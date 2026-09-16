@@ -1,8 +1,10 @@
 # Implementing a pending crawl source
 
-A runbook for resolving one `CrawlSource` row with `status: "pending"` — either
-by implementing a new ATS adapter for it, recognizing it as a platform we
-already support, or marking it `"rejected"`. Written so any LLM (or human)
+A runbook for resolving one `CrawlSource` row with `status: "pending"` —
+either by implementing a new ATS adapter for it, recognizing it as a
+platform we already support, marking it `"rejected"`, or flagging it
+`"delete"` if the row itself is a stale duplicate. Written so any
+LLM (or human)
 with repo access, shell access, and a web-fetching tool can follow it
 end-to-end without additional guidance. Read `app/services/adapters/base.py`'s
 `AtsAdapter` docstring and two or three existing adapters (`ashby.py` for a
@@ -22,8 +24,11 @@ the domain, `ats_type` is `null`, `board_url` is `https://{domain}`. Your job
 is to turn that into either:
 
 - an `active` row with the right `ats_type`, a corrected `board_url`, and the
-  real company name, backed by a working adapter, or
-- a `rejected` row, if the platform genuinely can't be crawled.
+  real company name, backed by a working adapter,
+- a `rejected` row, if the platform genuinely can't be crawled, or
+- a `delete` row, if the row itself turns out to be wrong (almost
+  always a stale duplicate of a board that's already `active` under a
+  different, canonical `board_url` — see step 6b).
 
 ## 0.5 Point the playbook at a target
 
@@ -122,6 +127,10 @@ If, after exhausting steps 1–4, there's still no way to enumerate job URLs
 disallows automated access, CAPTCHA-gated), this platform gets `rejected` —
 skip to step 6.
 
+If instead the platform *is* crawlable but you find this exact company
+already has a working `active` row under a different `board_url` (this
+`pending` row is just a stale duplicate) — skip to step 6b instead.
+
 ## 2. Get the real company name
 
 Don't guess the name from the domain or slug — `_company_name()` in
@@ -218,6 +227,39 @@ Leave `name`/`board_url` as-is (the domain placeholder) — `rejected` means
 "investigated, not worth revisiting," not "cleaned up." Once rejected, this
 domain won't be re-flagged by future job submissions from the same site (see
 `register_discovered_board`'s `_upsert` dedup-by-`board_url` behavior).
+
+## 6b. Or: flag it for deletion
+
+Sometimes the platform is perfectly crawlable and the row is still wrong —
+the company already has a working `active` row under a different, canonical
+`board_url` (a domain-placeholder row alongside a real one, most often: some
+earlier job submission carried enough to resolve via `detect_ats_source`/
+`detect_embedded_ats_source` and got auto-activated by
+`register_discovered_board`, while this `pending` row is a leftover from a
+different submission — e.g. the bare marketing-site URL — that didn't). The
+tell is usually a `409 "A crawl source for this board_url already exists"`
+when you try step 5's PATCH with the canonical `board_url`. Before
+concluding that, check for the duplicate explicitly:
+
+```bash
+curl -H "Authorization: Bearer $CRAWL_ADMIN_TOKEN" "$CRAWL_ADMIN_BASE_URL/admin/crawl-sources" \
+  | jq '[.[] | select(.name | test("<company>"; "i"))]'
+```
+
+If you find another row for the same company already `active` (ideally
+already with a recent `last_crawled_at`), this `pending` row
+is redundant — flag it rather than trying to force it to `active` too:
+
+```bash
+curl -X PATCH "$CRAWL_ADMIN_BASE_URL/admin/crawl-sources/{source_id}" \
+  -H "Authorization: Bearer $CRAWL_ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"status": "delete"}'
+```
+
+`delete` is a human-review marker, not an actual deletion — **never call
+`DELETE /admin/crawl-sources/{id}` yourself**, even here. Flag it, tell the
+user which row and why (which other row it duplicates), and let them decide
+whether to actually delete it via that endpoint or the DB directly.
 
 ## 7. Ship it
 
