@@ -59,6 +59,8 @@ class AtsType(StrEnum):
     WORKABLE = "workable"
     ADP = "adp"
     EIGHTFOLD = "eightfold"
+    ORACLE_FUSION = "oracle_fusion"
+    CLINCH = "clinch"
     # Single-company, in-house career sites (not a platform other companies
     # use) — board_token is a fixed constant, not a variable company slug.
     AMAZON = "amazon"

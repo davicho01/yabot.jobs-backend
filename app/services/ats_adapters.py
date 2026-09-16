@@ -76,6 +76,11 @@ _ADP_PAGE_SIZE = 50
 _ADP_MAX_JOBS = 500
 _EIGHTFOLD_SEARCH_PAGE_SIZE = 20
 _EIGHTFOLD_MAX_JOBS = 500
+_ORACLE_FUSION_JOBS_URL = "https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
+_ORACLE_FUSION_JOB_URL = "https://{host}/hcmUI/CandidateExperience/en/sites/{site_number}/job/{job_id}"
+_ORACLE_FUSION_PAGE_SIZE = 25
+_ORACLE_FUSION_MAX_JOBS = 500
+_CLINCH_MAX_JOBS = 500
 
 
 def list_job_urls(ats_type: str, board_url: str) -> list[str]:
@@ -94,6 +99,8 @@ def list_job_urls(ats_type: str, board_url: str) -> list[str]:
     """
     if ats_type == AtsType.EIGHTFOLD:
         return _list_eightfold_jobs(board_url)
+    if ats_type == AtsType.CLINCH:
+        return _list_clinch_jobs(board_url)
 
     _, board_token = detect_ats_source(board_url)
 
@@ -125,6 +132,8 @@ def list_job_urls(ats_type: str, board_url: str) -> list[str]:
         return _list_workable_jobs(board_token)
     if ats_type == AtsType.ADP:
         return _list_adp_jobs(board_token)
+    if ats_type == AtsType.ORACLE_FUSION:
+        return _list_oracle_fusion_jobs(board_token)
     raise ValueError(f"Unsupported ats_type: {ats_type!r}")
 
 
@@ -316,6 +325,75 @@ def _list_adp_jobs(board_token: str) -> list[str]:
         skip += _ADP_PAGE_SIZE
 
     return urls[:_ADP_MAX_JOBS]
+
+
+def _list_oracle_fusion_jobs(board_token: str) -> list[str]:
+    # Free, public, unauthenticated REST API — the same one Oracle's own
+    # candidate-experience UI calls client-side, no key required. Like
+    # Workday, needs two identifiers, not one: the tenant host (e.g.
+    # eeho.fa.us2.oraclecloud.com) and the site number (a company can run
+    # multiple career sites off the same host), encoded as "host/site" in
+    # board_token. PostedDate is a per-job field (verified sortBy=
+    # POSTING_DATES_DESC returns newest first), so this uses the same
+    # "today only" early-exit as Workday/Amazon/Apple.
+    host, _, site_number = board_token.partition("/")
+    if not site_number:
+        raise ValueError(f"Oracle Fusion board_token must be 'host/site_number', got {board_token!r}")
+
+    urls: list[str] = []
+    offset = 0
+    today = datetime.now(timezone.utc).date()
+    while len(urls) < _ORACLE_FUSION_MAX_JOBS:
+        response = httpx.get(
+            _ORACLE_FUSION_JOBS_URL.format(host=host),
+            params={
+                "onlyData": "true",
+                "expand": "requisitionList",
+                "finder": (
+                    f"findReqs;siteNumber={site_number},limit={_ORACLE_FUSION_PAGE_SIZE},"
+                    f"offset={offset},sortBy=POSTING_DATES_DESC"
+                ),
+            },
+            timeout=_TIMEOUT,
+        )
+        response.raise_for_status()
+        items = response.json().get("items", [])
+        requisitions = items[0].get("requisitionList", []) if items else []
+        if not requisitions:
+            break
+
+        todays = [r for r in requisitions if r.get("PostedDate") == today.isoformat()]
+        urls.extend(
+            _ORACLE_FUSION_JOB_URL.format(host=host, site_number=site_number, job_id=r["Id"])
+            for r in todays
+            if r.get("Id")
+        )
+        if len(todays) < len(requisitions) or len(requisitions) < _ORACLE_FUSION_PAGE_SIZE:
+            break
+        offset += _ORACLE_FUSION_PAGE_SIZE
+
+    return urls[:_ORACLE_FUSION_MAX_JOBS]
+
+
+def _list_clinch_jobs(board_url: str) -> list[str]:
+    # No public jobs API, but Clinch (a white-label career-site CMS —
+    # board_token is the tenant's own domain, there's no shared
+    # clinch.io host to point at) publishes a standard sitemap.xml that
+    # cleanly separates job postings (/jobs/{slug}) from marketing/blog
+    # pages (verified against a live instance). Small volume in practice
+    # (~100 jobs), so no "today only" filtering — just a safety cap like
+    # every other adapter's _MAX_JOBS.
+    host = urlsplit(board_url).netloc
+    response = httpx.get(f"https://{host}/sitemap.xml", timeout=_TIMEOUT)
+    response.raise_for_status()
+    root = ElementTree.fromstring(response.content)
+    ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+    urls = [
+        loc.text
+        for loc in root.findall(".//sm:loc", ns)
+        if loc.text and urlsplit(loc.text).path.startswith("/jobs/")
+    ]
+    return urls[:_CLINCH_MAX_JOBS]
 
 
 def _eightfold_domain_is_valid(host: str, domain: str) -> bool:
@@ -524,17 +602,31 @@ _DETECT_WORKDAY_RE = re.compile(
 # both out reliably, so this only recognizes the domain and detect_ats_source
 # parses the query string properly below.
 _DETECT_ADP_RE = re.compile(r"workforcenow\.adp\.com", re.IGNORECASE)
+# Oracle Fusion Recruiting Cloud's two-part token (tenant host, site number)
+# both live in the path, so unlike ADP a single regex recovers both —
+# .search() rather than a full match, so this matches straight out of a
+# full job-posting URL (.../sites/{site}/job/{id}) as readily as a bare
+# board URL.
+_DETECT_ORACLE_FUSION_RE = re.compile(
+    r"([a-zA-Z0-9.-]+\.oraclecloud\.com)/hcmUI/CandidateExperience/[a-z]{2}/sites/([^/]+)", re.IGNORECASE
+)
 # Some companies white-label Greenhouse onto their own domain (e.g.
 # harness.io/company/jobs/apply?gh_jid=...) via Greenhouse's embeddable JS
 # widget rather than linking out to boards.greenhouse.io directly — the
 # board token isn't visible in the URL at all in that case (only a numeric
 # job id, in gh_jid), so _DETECT_PATTERNS above can never match it.
-_GH_EMBED_JOB_ID_PARAM = "gh_jid="
 # Greenhouse ships more than one embed variant with the same `?for=`
 # token — job_board/js (harness.io) and job_app (instacart.careers) both
 # verified live — so this matches any `embed/.../...?for=` shape rather
 # than one specific script path.
 _GH_EMBED_TOKEN_RE = re.compile(r"greenhouse\.io/embed/[a-zA-Z_/]*\?for=([a-zA-Z0-9_-]+)", re.IGNORECASE)
+# Some sites instead fetch the job from Greenhouse's API server-side and
+# stitch it into their own page (e.g. coalitioninc.com's Next.js-rendered
+# job pages) — no embed script appears anywhere in the HTML, but gh_jid
+# still leaks through wherever that fetched job data gets serialized into
+# the page (its own absolute_url field, in Coalition's case) — verified
+# live. Used as a fallback below when the embed-script check above misses.
+_GH_EMBED_JOB_ID_RE = re.compile(r"gh_jid=(\d+)")
 # Ashby's white-label embed (e.g. anrok.com/careers?ashby_jid=...) has no
 # static equivalent of Greenhouse's embed-script token — verified against a
 # real instance (superhuman.com) that the board name only ever appears in a
@@ -582,6 +674,11 @@ def detect_ats_source(url: str) -> tuple[str, str]:
         cc_id = query.get("ccId", [None])[0]
         if cid and cc_id:
             return AtsType.ADP, f"{cid}/{cc_id}"
+
+    oracle_match = _DETECT_ORACLE_FUSION_RE.search(url)
+    if oracle_match:
+        host, site_number = oracle_match.groups()
+        return AtsType.ORACLE_FUSION, f"{host}/{site_number}"
 
     for ats_type, fixed_token, pattern in _DETECT_FIXED_TOKEN_PATTERNS:
         if pattern.search(url):
@@ -651,12 +748,23 @@ def canonical_board_url(ats_type: str, board_token: str) -> str:
     return template.format(token=board_token)
 
 
+_COMPANY_SUFFIXES = ("incorporated", "corp", "inc", "llc", "ltd", "group", "co")
+
+
 def _candidate_slugs_from_domain(domain: str) -> list[str]:
     """A handful of plausible board-name guesses from a company's domain,
-    cheapest/most-likely first — e.g. "www.anrok.com" -> ["anrok"].
+    cheapest/most-likely first — e.g. "www.anrok.com" -> ["anrok"]. Also
+    strips a trailing corporate suffix as a second guess (verified against
+    a real board: "coalitioninc.com" -> "coalition") — wrong guesses just
+    fail the caller's verification step harmlessly, same as any other
+    candidate here.
     """
     label = domain.lower().removeprefix("www.").split(".")[0]
-    return [label]
+    candidates = [label]
+    for suffix in _COMPANY_SUFFIXES:
+        if label.endswith(suffix) and len(label) > len(suffix):
+            candidates.append(label[: -len(suffix)])
+    return list(dict.fromkeys(candidates))  # dedupe, keep order
 
 
 def _candidate_eightfold_domains(host: str) -> list[str]:
@@ -673,18 +781,39 @@ def _candidate_eightfold_domains(host: str) -> list[str]:
     return list(dict.fromkeys(candidates))  # dedupe, keep order
 
 
+def _greenhouse_board_has_job(slug: str, job_id: str) -> bool:
+    try:
+        response = httpx.get(f"{_GREENHOUSE_JOBS_URL.format(board_token=slug)}/{job_id}", timeout=_TIMEOUT)
+    except httpx.HTTPError:
+        return False
+    return response.status_code == 200
+
+
 def _detect_embedded_greenhouse(url: str) -> tuple[str, str] | None:
-    if _GH_EMBED_JOB_ID_PARAM not in url:
-        return None
     try:
         response = httpx.get(url, timeout=_TIMEOUT, follow_redirects=True)
         response.raise_for_status()
     except httpx.HTTPError:
         return None
+
+    # Fast path: the embeddable-widget script names the board directly —
+    # authoritative, no guessing needed.
     match = _GH_EMBED_TOKEN_RE.search(response.text)
-    if not match:
+    if match:
+        return AtsType.GREENHOUSE, match.group(1)
+
+    # Fallback: no embed script, but gh_jid leaked through somewhere in the
+    # page anyway (see _GH_EMBED_JOB_ID_RE above) — guess-and-verify a board
+    # slug from the domain, same two-tier pattern as Ashby's embed detector.
+    job_id_match = _GH_EMBED_JOB_ID_RE.search(response.text)
+    if not job_id_match:
         return None
-    return AtsType.GREENHOUSE, match.group(1)
+    job_id = job_id_match.group(1)
+    domain = urlsplit(url).netloc
+    for slug in _candidate_slugs_from_domain(domain):
+        if _greenhouse_board_has_job(slug, job_id):
+            return AtsType.GREENHOUSE, slug
+    return None
 
 
 def _ashby_board_has_job(slug: str, job_id: str) -> bool:
@@ -756,7 +885,52 @@ def _detect_embedded_eightfold(url: str) -> tuple[str, str] | None:
     return None
 
 
-_EMBEDDED_DETECTORS = [_detect_embedded_greenhouse, _detect_embedded_ashby, _detect_embedded_eightfold]
+_CLINCH_SIGNATURE = "clinchtalent.com"
+
+
+def _detect_embedded_clinch(url: str) -> tuple[str, str] | None:
+    try:
+        response = httpx.get(url, timeout=_TIMEOUT, follow_redirects=True)
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return None
+    if _CLINCH_SIGNATURE not in response.text:
+        return None
+    return AtsType.CLINCH, urlsplit(str(response.url)).netloc
+
+
+# Workable's short link form (apply.workable.com/j/{code}) carries no
+# account slug, unlike the account-prefixed form _DETECT_PATTERNS above
+# matches — but it 301-redirects to that same account-prefixed URL
+# (verified live), so following the redirect and re-running the normal
+# Workable pattern against the resolved URL recovers the account slug.
+_WORKABLE_SHORTLINK_RE = re.compile(r"apply\.workable\.com/j/[a-zA-Z0-9]+", re.IGNORECASE)
+
+
+def _detect_workable_shortlink(url: str) -> tuple[str, str] | None:
+    if not _WORKABLE_SHORTLINK_RE.search(url):
+        return None
+    try:
+        response = httpx.get(url, timeout=_TIMEOUT, follow_redirects=True)
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return None
+    for ats_type, pattern in _DETECT_PATTERNS:
+        if ats_type != AtsType.WORKABLE:
+            continue
+        match = pattern.search(str(response.url))
+        if match:
+            return AtsType.WORKABLE, match.group(1)
+    return None
+
+
+_EMBEDDED_DETECTORS = [
+    _detect_embedded_greenhouse,
+    _detect_embedded_ashby,
+    _detect_embedded_eightfold,
+    _detect_embedded_clinch,
+    _detect_workable_shortlink,
+]
 
 
 def detect_embedded_ats_source(url: str) -> tuple[str, str] | None:
