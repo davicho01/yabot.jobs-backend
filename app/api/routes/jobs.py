@@ -11,14 +11,9 @@ from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
 from app.models.user import User
 from app.schemas.job import JobDetailRead, JobListRead, JobUrlSubmit
-from app.services.jobs import ensure_user_applicant, get_or_create_job_posting, rescan_job_url
+from app.services.jobs import ensure_user_applicant, get_or_create_job_posting, rescan_job_url, to_job_detail
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
-
-
-def _to_detail(url_row: JobPostingUrl) -> JobDetailRead:
-    latest_posting = url_row.postings[0] if url_row.postings else None
-    return JobDetailRead(url=url_row, posting=latest_posting)
 
 
 @router.post(
@@ -41,7 +36,7 @@ def submit_job_url(
         response.status_code = status.HTTP_202_ACCEPTED
     db.flush()
     db.refresh(url_row)
-    return _to_detail(url_row)
+    return to_job_detail(url_row)
 
 
 @router.get("", response_model=JobListRead)
@@ -73,7 +68,7 @@ def list_job_urls(
 
     stmt = stmt.order_by(JobPostingUrl.created_at.desc()).limit(page_size).offset((page - 1) * page_size)
     url_rows = db.scalars(stmt).all()
-    return JobListRead(items=[_to_detail(row) for row in url_rows], total=total, page=page, page_size=page_size)
+    return JobListRead(items=[to_job_detail(row) for row in url_rows], total=total, page=page, page_size=page_size)
 
 
 # Registered before /{url_id} so "locations" isn't swallowed by that route's
@@ -95,7 +90,7 @@ def get_job_url(url_id: uuid.UUID, db: Session = Depends(get_db)) -> JobDetailRe
     url_row = db.get(JobPostingUrl, url_id)
     if url_row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job URL not found.")
-    return _to_detail(url_row)
+    return to_job_detail(url_row)
 
 
 @router.post("/{url_id}/rescan", response_model=JobDetailRead)
@@ -110,4 +105,4 @@ def rescan_job(
     rescan_job_url(db, url_row)
     db.flush()
     db.refresh(url_row)
-    return _to_detail(url_row)
+    return to_job_detail(url_row)

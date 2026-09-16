@@ -15,8 +15,14 @@ from app.services.job_llm_extractor import LlmExtraction, extract_with_llm, html
 from app.services.job_queue import enqueue_scan
 from app.services.job_scanner import ScanResult, domain_of, normalize_url, scan_job_url, url_hash
 from app.services.llm_client import LlmError
+from app.schemas.job import JobDetailRead
 
 logger = logging.getLogger("app.jobs")
+
+
+def to_job_detail(url_row: JobPostingUrl) -> JobDetailRead:
+    latest_posting = url_row.postings[0] if url_row.postings else None
+    return JobDetailRead(url=url_row, posting=latest_posting)
 
 
 def get_or_create_job_posting(
