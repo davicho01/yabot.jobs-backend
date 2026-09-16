@@ -1,6 +1,15 @@
+from datetime import date
+
 from pydantic import BaseModel, ConfigDict
 
 from app.schemas.crawl_source import CrawlSourceRead
+
+
+class ScanDayCount(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    date: date
+    count: int
 
 
 class WindowCounts(BaseModel):

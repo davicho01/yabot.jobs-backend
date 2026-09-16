@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_admin_user, get_db
 from app.models.crawl_source import CrawlSource
 from app.models.enums import CrawlSourceStatus
-from app.schemas.admin import CrawlSourceStatsRead
+from app.schemas.admin import CrawlSourceStatsRead, ScanDayCount
 from app.schemas.crawl_source import CrawlSourceCreate, CrawlSourceRead, CrawlSourceUpdate
 from app.services import admin as admin_service
 from app.services.ats_adapters import detect_ats_source, detect_embedded_ats_source
@@ -98,3 +98,13 @@ def get_crawl_source_stats(source_id: uuid.UUID, db: Session = Depends(get_db)) 
     if source is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Crawl source not found.")
     return admin_service.get_crawl_source_stats(db, source)
+
+
+@router.get("/{source_id}/scans-by-day", response_model=list[ScanDayCount])
+def get_crawl_source_scans_by_day(
+    source_id: uuid.UUID, days: int = Query(90, ge=1, le=365), db: Session = Depends(get_db)
+) -> list[dict]:
+    source = db.get(CrawlSource, source_id)
+    if source is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Crawl source not found.")
+    return admin_service.get_scans_by_day(db, days=days, crawl_source_id=source_id)

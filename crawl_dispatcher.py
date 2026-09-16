@@ -33,11 +33,7 @@ def main() -> None:
 
     db = SessionLocal()
     try:
-        sources = db.scalars(
-            select(CrawlSource).where(
-                CrawlSource.is_active.is_(True), CrawlSource.status == CrawlSourceStatus.ACTIVE
-            )
-        ).all()
+        sources = db.scalars(select(CrawlSource).where(CrawlSource.status == CrawlSourceStatus.ACTIVE)).all()
         logger.info("Dispatching crawl for %d active source(s).", len(sources))
         for source in sources:
             try:

@@ -244,7 +244,7 @@ never blocks or fails the job submission itself; it's best-effort
 bookkeeping only.
 
 `GET /admin/crawl-sources` lists every board with `last_crawled_at`/
-`last_job_count`/`last_error`, plus `status`:
+`last_error`, plus `status`:
 
 | `status` | Meaning |
 |---|---|

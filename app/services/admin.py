@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -44,6 +45,32 @@ def get_dashboard_stats(db: Session) -> dict:
         "user_activity": _window_counts(db, User, User.last_login_at),
         "application_scans": _window_counts(db, JobPostingUrl, JobPostingUrl.last_scanned_at),
     }
+
+
+def get_scans_by_day(db: Session, days: int, crawl_source_id: uuid.UUID | None = None) -> list[dict]:
+    """Daily scan counts for the last `days` days (today inclusive), with
+    zero-filled gaps so the chart has one point per calendar day regardless
+    of scan activity — the frontend buckets these into week/month views."""
+    now = datetime.now(timezone.utc)
+    start = (now - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    stmt = (
+        select(
+            func.date_trunc("day", JobPostingUrl.last_scanned_at).label("day"),
+            func.count().label("count"),
+        )
+        .where(JobPostingUrl.last_scanned_at >= start)
+        .group_by("day")
+    )
+    if crawl_source_id is not None:
+        stmt = stmt.where(JobPostingUrl.crawl_source_id == crawl_source_id)
+
+    counts_by_day = {row.day.date(): row.count for row in db.execute(stmt).all()}
+
+    return [
+        {"date": day, "count": counts_by_day.get(day, 0)}
+        for day in (start.date() + timedelta(days=i) for i in range(days))
+    ]
 
 
 def get_crawl_source_stats(db: Session, source: CrawlSource) -> dict:
