@@ -78,12 +78,25 @@ _EIGHTFOLD_SEARCH_PAGE_SIZE = 20
 _EIGHTFOLD_MAX_JOBS = 500
 
 
-def list_job_urls(ats_type: str, board_token: str) -> list[str]:
+def list_job_urls(ats_type: str, board_url: str) -> list[str]:
     """Discovery only: return every current job-posting URL for a company's
     board. Field extraction (title, salary, etc.) is left entirely to the
     existing scan pipeline (app.services.job_scanner) once each URL is
     submitted via get_or_create_job_posting — this just finds the URLs.
+
+    Takes the board's canonical URL rather than a pre-extracted token —
+    every platform's token is fully recoverable from that URL via
+    detect_ats_source, so CrawlSource only needs to persist the URL (see
+    canonical_board_url below for the reverse direction). Eightfold is the
+    one exception: its tenant "domain" identifier isn't derivable by string
+    matching alone, so it resolves its own identifier internally instead
+    (see _list_eightfold_jobs).
     """
+    if ats_type == AtsType.EIGHTFOLD:
+        return _list_eightfold_jobs(board_url)
+
+    _, board_token = detect_ats_source(board_url)
+
     if ats_type == AtsType.GREENHOUSE:
         return _list_greenhouse_jobs(board_token)
     if ats_type == AtsType.LEVER:
@@ -112,8 +125,6 @@ def list_job_urls(ats_type: str, board_token: str) -> list[str]:
         return _list_workable_jobs(board_token)
     if ats_type == AtsType.ADP:
         return _list_adp_jobs(board_token)
-    if ats_type == AtsType.EIGHTFOLD:
-        return _list_eightfold_jobs(board_token)
     raise ValueError(f"Unsupported ats_type: {ats_type!r}")
 
 
@@ -307,19 +318,37 @@ def _list_adp_jobs(board_token: str) -> list[str]:
     return urls[:_ADP_MAX_JOBS]
 
 
-def _list_eightfold_jobs(board_token: str) -> list[str]:
+def _eightfold_domain_is_valid(host: str, domain: str) -> bool:
+    # A wrong guess fails outright (e.g. Netflix's 403 "PCSX is not enabled
+    # for this user") rather than succeeding with an empty result, so this
+    # can't mistake "no open roles right now" for "wrong domain".
+    try:
+        response = httpx.get(
+            f"https://{host}/api/pcsx/search", params={"domain": domain, "start": 0, "num": 1}, timeout=_TIMEOUT
+        )
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return False
+    return True
+
+
+def _list_eightfold_jobs(board_url: str) -> list[str]:
     # Free, public API — no key required, but only when the company hasn't
     # disabled it on their instance (Netflix returns 403 "PCSX is not
     # enabled for this user" on the very same endpoint that works fine for
     # Twilio; nothing on our end to do about that). Two identifiers, not
     # one: the host actually serving the career site (e.g. jobs.twilio.com
-    # — every company's own domain, not a shared one) and the "domain"
-    # value that host's API expects to identify the tenant (usually, but
-    # not always, the host's registrable domain) — encoded as "host/domain"
-    # in board_token, same "/"-joined convention as Workday/ADP.
-    host, _, domain = board_token.partition("/")
-    if not domain:
-        raise ValueError(f"Eightfold board_token must be 'host/domain', got {board_token!r}")
+    # — every company's own domain, not a shared one, recovered directly
+    # from board_url) and the "domain" value that host's API expects to
+    # identify the tenant (usually, but not always, the host's registrable
+    # domain) — not derivable from the URL alone, so it's cheaply
+    # re-resolved on every crawl via the same candidate-guessing
+    # detect_embedded_ats_source uses at discovery time, rather than
+    # cached anywhere.
+    host = urlsplit(board_url).netloc
+    domain = next((d for d in _candidate_eightfold_domains(host) if _eightfold_domain_is_valid(host, d)), None)
+    if domain is None:
+        raise ValueError(f"Couldn't resolve an Eightfold tenant domain for host={host!r}")
 
     urls: list[str] = []
     start = 0
@@ -474,6 +503,10 @@ _DETECT_PATTERNS: list[tuple[str, re.Pattern]] = [
     # form (apply.workable.com/j/{code}) resolves to the same job but doesn't
     # carry the account slug this needs, so it just won't match.
     (AtsType.WORKABLE, re.compile(r"apply\.workable\.com/([^/?]+)/j/", re.IGNORECASE)),
+    # The bare board page (no specific job), e.g. as stored in
+    # CrawlSource.board_url — (?!j/) excludes the ambiguous shortlink shape
+    # above, which the pattern above already claims.
+    (AtsType.WORKABLE, re.compile(r"apply\.workable\.com/(?!j/)([^/?]+)/?(?:\?|$)", re.IGNORECASE)),
 ]
 # These three are single-company sites, so there's no variable token to
 # capture from the URL — the pattern just recognizes the domain, and the
@@ -563,6 +596,59 @@ def detect_ats_source(url: str) -> tuple[str, str]:
         f"Couldn't detect a supported ATS from url={url!r}. "
         "Provide ats_type and board_token explicitly instead."
     )
+
+
+# The inverse of detect_ats_source for every platform whose token is a plain
+# string substitution into a known URL shape — used by canonical_board_url
+# below. Workday, ADP, and Eightfold aren't here since their tokens need
+# more than one placeholder filled from a "/"-joined value (or, for
+# Eightfold, aren't part of a canonical URL at all — see canonical_board_url).
+_CANONICAL_BOARD_URL_TEMPLATES: dict[str, str] = {
+    AtsType.GREENHOUSE: "https://boards.greenhouse.io/{token}",
+    AtsType.LEVER: "https://jobs.lever.co/{token}",
+    AtsType.ASHBY: "https://jobs.ashbyhq.com/{token}",
+    AtsType.BAMBOOHR: "https://{token}.bamboohr.com/careers",
+    AtsType.PERSONIO: "https://{token}.jobs.personio.de/",
+    AtsType.JAZZHR: "https://{token}.applytojob.com/apply/jobs",
+    AtsType.RECRUITEE: "https://{token}.recruitee.com/",
+    AtsType.BREEZYHR: "https://{token}.breezy.hr/",
+    AtsType.WORKABLE: "https://apply.workable.com/{token}/",
+    AtsType.AMAZON: "https://www.amazon.jobs",
+    AtsType.GOOGLE: "https://www.google.com/about/careers",
+    AtsType.APPLE: "https://jobs.apple.com",
+}
+
+
+def canonical_board_url(ats_type: str, board_token: str) -> str:
+    """The canonical, human-visitable board URL for (ats_type, board_token)
+    — the inverse of detect_ats_source for every platform where the token
+    is purely string-derivable. Used to compute CrawlSource.board_url (both
+    going forward, in register_discovered_board, and for the one-time
+    migration backfilling existing rows) so it always round-trips back
+    through detect_ats_source / list_job_urls.
+
+    Eightfold has no such canonical URL — the company's own career-site
+    host *is* the board, there's no separate ATS-hosted page to point at —
+    so board_token's host segment is used as-is; see _list_eightfold_jobs
+    for how the rest of the identifier gets (re-)resolved from that host.
+    """
+    if ats_type == AtsType.WORKDAY:
+        company, instance, site = board_token.split("/")
+        return _WORKDAY_JOB_BASE_URL.format(company=company, instance=instance, site=site)
+    if ats_type == AtsType.ADP:
+        cid, cc_id = board_token.split("/")
+        return (
+            "https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html"
+            f"?cid={cid}&ccId={cc_id}"
+        )
+    if ats_type == AtsType.EIGHTFOLD:
+        host, _, _domain = board_token.partition("/")
+        return f"https://{host}"
+
+    template = _CANONICAL_BOARD_URL_TEMPLATES.get(ats_type)
+    if template is None:
+        raise ValueError(f"No canonical board URL for ats_type={ats_type!r}")
+    return template.format(token=board_token)
 
 
 def _candidate_slugs_from_domain(domain: str) -> list[str]:

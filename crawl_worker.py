@@ -52,7 +52,7 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
         return
 
     try:
-        urls = list_job_urls(source.ats_type, source.board_token)
+        urls = list_job_urls(source.ats_type, source.board_url)
     except Exception as exc:
         # A bad board_token or an ATS outage isn't retryable by nacking —
         # record it and move on, same as any other scan failure in this app.
@@ -61,13 +61,27 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
         source.last_crawled_at = datetime.now(timezone.utc)
         return
 
+    failed = 0
     for url in urls:
-        get_or_create_job_posting(db, url, submitted_by_user_id=None, crawl_source_id=source.id)
+        try:
+            get_or_create_job_posting(db, url, submitted_by_user_id=None, crawl_source_id=source.id)
+        except Exception as exc:
+            # One bad URL (malformed link, a transient publish failure, ...)
+            # used to propagate out of this function and skip the
+            # last_crawled_at/last_job_count update below entirely — and
+            # since _handle_message nacks on any exception, a *deterministic*
+            # per-URL failure left the source's stats permanently stale
+            # across every redelivery. Roll back so this URL's partial work
+            # doesn't poison the session for the rest of the batch, then
+            # keep going.
+            db.rollback()
+            failed += 1
+            logger.warning("Failed to process discovered URL %s for %s: %s", url, source.name, exc)
 
     source.last_crawled_at = datetime.now(timezone.utc)
     source.last_job_count = len(urls)
-    source.last_error = None
-    logger.info("Crawled %s: %d job URL(s) discovered.", source.name, len(urls))
+    source.last_error = f"{failed} of {len(urls)} discovered URL(s) failed to process." if failed else None
+    logger.info("Crawled %s: %d job URL(s) discovered (%d failed).", source.name, len(urls), failed)
 
 
 def _handle_message(message: pubsub_v1.subscriber.message.Message) -> None:

@@ -22,22 +22,19 @@ def list_crawl_sources(db: Session = Depends(get_db)) -> list[CrawlSourceRead]:
 
 @router.post("", response_model=CrawlSourceRead, status_code=status.HTTP_201_CREATED)
 def create_crawl_source(payload: CrawlSourceCreate, db: Session = Depends(get_db)) -> CrawlSource:
-    if payload.url:
-        try:
-            ats_type, board_token = detect_ats_source(payload.url)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
-    else:
-        ats_type, board_token = payload.ats_type, payload.board_token
+    try:
+        ats_type, _ = detect_ats_source(payload.board_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
 
-    source = CrawlSource(name=payload.name, ats_type=ats_type, board_token=board_token)
+    source = CrawlSource(name=payload.name, ats_type=ats_type, board_url=payload.board_url)
     db.add(source)
     try:
         db.flush()
     except IntegrityError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A crawl source for this ats_type/board_token already exists.",
+            detail="A crawl source for this board_url already exists.",
         ) from exc
     return source
 
@@ -52,12 +49,17 @@ def update_crawl_source(
 
     data = payload.model_dump(exclude_unset=True)
     new_status = data.get("status", source.status)
-    new_ats_type = data.get("ats_type", source.ats_type)
-    new_board_token = data.get("board_token", source.board_token)
-    if new_status == CrawlSourceStatus.ACTIVE and not (new_ats_type and new_board_token):
+    new_ats_type = source.ats_type
+    if "board_url" in data:
+        try:
+            new_ats_type, _ = detect_ats_source(data["board_url"])
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+        data["ats_type"] = new_ats_type
+    if new_status == CrawlSourceStatus.ACTIVE and not new_ats_type:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="status can only be 'active' once ats_type and board_token are set.",
+            detail="status can only be 'active' once board_url resolves to a supported ats_type.",
         )
 
     for field, value in data.items():
@@ -67,7 +69,7 @@ def update_crawl_source(
     except IntegrityError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A crawl source for this ats_type/board_token already exists.",
+            detail="A crawl source for this board_url already exists.",
         ) from exc
     return source
 

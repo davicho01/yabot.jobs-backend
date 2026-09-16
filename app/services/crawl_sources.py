@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models.crawl_source import CrawlSource
 from app.models.enums import CrawlSourceStatus
-from app.services.ats_adapters import detect_ats_source, detect_embedded_ats_source
+from app.services.ats_adapters import canonical_board_url, detect_ats_source, detect_embedded_ats_source
 from app.services.job_scanner import domain_of, normalize_url
 
 logger = logging.getLogger("app.crawl_sources")
@@ -29,57 +29,28 @@ def register_discovered_board(db: Session, url: str) -> None:
         embedded = detect_embedded_ats_source(url)
         if embedded is None:
             domain = domain_of(normalize_url(url))
-            _upsert(
-                db,
-                name=domain,
-                ats_type=None,
-                board_token=None,
-                detected_domain=domain,
-                status=CrawlSourceStatus.PENDING,
-            )
+            _upsert(db, name=domain, ats_type=None, board_url=f"https://{domain}", status=CrawlSourceStatus.PENDING)
             return
         ats_type, board_token = embedded
 
+    board_url = canonical_board_url(ats_type, board_token)
     _upsert(
         db,
         name=f"{ats_type}/{board_token}",
         ats_type=ats_type,
-        board_token=board_token,
-        detected_domain=None,
+        board_url=board_url,
         status=CrawlSourceStatus.ACTIVE,
     )
 
 
-def _upsert(
-    db: Session,
-    *,
-    name: str,
-    ats_type: str | None,
-    board_token: str | None,
-    detected_domain: str | None,
-    status: str,
-) -> None:
-    query = select(CrawlSource)
-    query = (
-        query.where(CrawlSource.ats_type == ats_type, CrawlSource.board_token == board_token)
-        if ats_type is not None
-        else query.where(CrawlSource.detected_domain == detected_domain)
-    )
-    if db.scalar(query) is not None:
+def _upsert(db: Session, *, name: str, ats_type: str | None, board_url: str, status: str) -> None:
+    if db.scalar(select(CrawlSource).where(CrawlSource.board_url == board_url)) is not None:
         return
 
     try:
         with db.begin_nested():
-            db.add(
-                CrawlSource(
-                    name=name,
-                    ats_type=ats_type,
-                    board_token=board_token,
-                    detected_domain=detected_domain,
-                    status=status,
-                )
-            )
+            db.add(CrawlSource(name=name, ats_type=ats_type, board_url=board_url, status=status))
     except IntegrityError:
-        # Lost a race with a concurrent submission of the same board/domain
-        # — the other insert already covers it.
+        # Lost a race with a concurrent submission of the same board —
+        # the other insert already covers it.
         logger.info("Crawl source for %s already registered concurrently; skipping.", name)

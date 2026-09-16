@@ -42,7 +42,7 @@ def main() -> None:
         for source in sources:
             try:
                 enqueue_crawl(source.id)
-                logger.info("Enqueued crawl for %s (%s/%s)", source.name, source.ats_type, source.board_token)
+                logger.info("Enqueued crawl for %s (%s: %s)", source.name, source.ats_type, source.board_url)
             except Exception:
                 logger.exception("Failed to enqueue crawl for %s; skipping.", source.name)
     finally:
