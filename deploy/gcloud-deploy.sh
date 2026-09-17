@@ -4,23 +4,16 @@
 # Layout:
 #   - migrate         Cloud Run Job    (one-shot: alembic upgrade head)
 #   - api             Cloud Run service (main.py, HTTP)
-#   - worker          Cloud Run worker pool (worker.py, Pub/Sub pull loop)
-#   - crawl-worker    Cloud Run worker pool (crawl_worker.py, Pub/Sub pull loop)
+#   - worker          Cloud Function 2nd gen (worker.py:handle_scan_request)
+#                     + Pub/Sub trigger on job-scan-requests
+#   - crawl-worker    Cloud Function 2nd gen (crawl_worker.py:handle_crawl_request)
+#                     + Pub/Sub trigger on crawl-source-requests
 #   - crawl-dispatcher  Cloud Function 2nd gen (crawl_dispatcher.py:dispatch)
 #                       + Cloud Scheduler cron trigger
 #   - browser-fetch   already deployed separately; see BROWSER_FETCH_SERVICE_URL below
 #
 # Prereqs this script assumes already exist (create once, not here):
 #   - `gcloud auth login` + billing enabled on $PROJECT_ID
-#   - `gcloud components update` (worker pools need a recent gcloud)
-#   - If `gcloud beta run worker-pools ...` fails with "No module named
-#     'grpc'": your gcloud's Python lacks grpcio and Homebrew's Python
-#     blocks a global `pip install` (PEP 668). Fix without touching system
-#     Python:
-#       python3 -m venv ~/.gcloud-venv
-#       ~/.gcloud-venv/bin/pip install grpcio
-#       export CLOUDSDK_PYTHON=~/.gcloud-venv/bin/python3
-#     then re-run the worker-pools commands in this shell.
 #
 # IMPORTANT: Cloud SQL lives in us-east1, NOT us-central1 (SQL_REGION below,
 # separate from REGION for Cloud Run). Two freshly-created db-f1-micro
@@ -177,39 +170,62 @@ gcloud run deploy api \
   --allow-unauthenticated
 
 # ---------------------------------------------------------------------------
-# 5. worker / crawl-worker — Cloud Run worker pools
-#    (persistent Pub/Sub pull loops, no HTTP port; see conversation notes on
-#    why these are pools instead of Cloud Functions)
+# 5. worker / crawl-worker — Cloud Functions (2nd gen), Pub/Sub-triggered
 #
-#    IMPORTANT: as of this gcloud version, worker pools only support a fixed
-#    manual instance count via --instances=N — there is no --min-instances/
-#    --max-instances autoscaling (and no scale-to-zero) for this resource
-#    type yet, unlike Cloud Run services. Cost is 1 instance running 24/7
-#    per pool at whatever --cpu/--memory you set (defaults if omitted).
+#    Used to be Cloud Run worker pools (persistent pull loops), but worker
+#    pools have no scale-to-zero — 1 instance runs 24/7 per pool regardless
+#    of load, ~$30/month each for what's a low-volume queue. A Pub/Sub
+#    trigger invokes the function once per message and scales to zero
+#    between messages instead. Same image/logic either way: worker.py's/
+#    crawl_worker.py's handle_scan_request()/handle_crawl_request() reuse
+#    the exact processing functions main()'s pull loop calls (still used
+#    for local dev against the Pub/Sub emulator — see docker-compose.yml).
 #
-#    This gcloud install needed `gcloud components update` plus a separate
-#    grpcio install to even load this command group — see the venv setup
-#    noted at the top of this file if `worker-pools` errors with
-#    "No module named 'grpc'".
+#    --trigger-topic auto-creates the topic if missing and manages its own
+#    Eventarc subscription, so no manual topic/subscription provisioning is
+#    needed here.
+#
+#    `gcloud functions deploy` has NO --set-cloudsql-instances flag (2nd gen
+#    functions are Cloud Run services under the hood, but the functions CLI
+#    doesn't expose this) — same as crawl-dispatcher below, attach Cloud SQL
+#    to the underlying Cloud Run service afterward.
 # ---------------------------------------------------------------------------
 
-gcloud beta run worker-pools deploy worker \
-  --image="$IMAGE_TAG" \
+gcloud functions deploy worker \
+  --gen2 \
   --region="$REGION" \
-  --command=python --args=worker.py \
-  --add-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION" \
+  --runtime=python313 \
+  --source=. \
+  --entry-point=handle_scan_request \
+  --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=worker.py \
+  --trigger-topic=job-scan-requests \
   --set-env-vars="$COMMON_ENV" \
   --set-secrets="$COMMON_SECRETS" \
-  --instances=1
+  --memory=512Mi \
+  --timeout=540s \
+  --max-instances=5
 
-gcloud beta run worker-pools deploy crawl-worker \
-  --image="$IMAGE_TAG" \
+gcloud run services update worker \
   --region="$REGION" \
-  --command=python --args=crawl_worker.py \
-  --add-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION" \
+  --add-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION"
+
+gcloud functions deploy crawl-worker \
+  --gen2 \
+  --region="$REGION" \
+  --runtime=python313 \
+  --source=. \
+  --entry-point=handle_crawl_request \
+  --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=crawl_worker.py \
+  --trigger-topic=crawl-source-requests \
   --set-env-vars="$COMMON_ENV" \
   --set-secrets="$COMMON_SECRETS" \
-  --instances=1
+  --memory=512Mi \
+  --timeout=540s \
+  --max-instances=3
+
+gcloud run services update crawl-worker \
+  --region="$REGION" \
+  --add-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION"
 
 # ---------------------------------------------------------------------------
 # 6. crawl-dispatcher — Cloud Function (2nd gen), triggered hourly by Scheduler
@@ -271,8 +287,10 @@ gcloud scheduler jobs create http crawl-dispatch-hourly \
 #   gcloud run jobs deploy migrate --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID"
 #   gcloud run jobs execute migrate --region="$REGION" --project="$PROJECT_ID" --wait
 #   gcloud run deploy api --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID"
-#   gcloud beta run worker-pools deploy worker --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID"
-#   gcloud beta run worker-pools deploy crawl-worker --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID"
+#   gcloud functions deploy worker --gen2 --region="$REGION" --project="$PROJECT_ID" \
+#     --source=. --entry-point=handle_scan_request --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=worker.py
+#   gcloud functions deploy crawl-worker --gen2 --region="$REGION" --project="$PROJECT_ID" \
+#     --source=. --entry-point=handle_crawl_request --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=crawl_worker.py
 #   gcloud functions deploy crawl-dispatcher --gen2 --region="$REGION" --project="$PROJECT_ID" \
 #     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=crawl_dispatcher.py
 # ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ ambient credentials if running on GCP compute) — same code either way.
 Usage: python crawl_worker.py
 """
 
+import base64
 import json
 import logging
 import uuid
@@ -126,6 +127,40 @@ def main() -> None:
         future.cancel()
         future.result()  # wait for the cancellation to complete
         logger.info("Crawl worker stopped.")
+
+
+def handle_crawl_request(cloud_event) -> None:
+    """Cloud Functions (2nd gen) Pub/Sub entry point.
+
+    Prod deploys this instead of running main()'s pull loop: GCP invokes it
+    once per message published to crawl-source-requests and scales to zero
+    between messages, instead of a worker pool instance running 24/7 to
+    poll for work. No functions_framework/cloudevents import here — same
+    reasoning as crawl_dispatcher.py's dispatch(): the buildpack wraps this
+    by signature at deploy time, so keeping it undecorated means this file
+    still imports cleanly for local dev (`python crawl_worker.py`, see
+    main() below) without functions-framework installed.
+    """
+    data = base64.b64decode(cloud_event.data["message"]["data"])
+    try:
+        payload = json.loads(data.decode("utf-8"))
+        source_id = uuid.UUID(payload["source_id"])
+    except (json.JSONDecodeError, KeyError, ValueError) as exc:
+        logger.error("Malformed crawl message, dropping: %s", exc)
+        return  # not retryable — returning normally acks the message
+
+    logger.info("Processing crawl for source_id=%s", source_id)
+    db = SessionLocal()
+    try:
+        _crawl_source(db, source_id)
+        db.commit()
+        logger.info("Finished crawl for source_id=%s", source_id)
+    except Exception:
+        db.rollback()
+        logger.exception("Crawl for source_id=%s failed unexpectedly; will retry.", source_id)
+        raise  # re-raise so the Pub/Sub trigger retries the event
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":

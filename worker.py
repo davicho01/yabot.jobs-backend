@@ -14,6 +14,7 @@ ambient credentials if running on GCP compute) — same code either way.
 Usage: python worker.py
 """
 
+import base64
 import json
 import logging
 import uuid
@@ -79,6 +80,40 @@ def main() -> None:
         future.cancel()
         future.result()  # wait for the cancellation to complete
         logger.info("Worker stopped.")
+
+
+def handle_scan_request(cloud_event) -> None:
+    """Cloud Functions (2nd gen) Pub/Sub entry point.
+
+    Prod deploys this instead of running main()'s pull loop: GCP invokes it
+    once per message published to job-scan-requests and scales to zero
+    between messages, instead of a worker pool instance running 24/7 to
+    poll for work. No functions_framework/cloudevents import here — same
+    reasoning as crawl_dispatcher.py's dispatch(): the buildpack wraps this
+    by signature at deploy time, so keeping it undecorated means this file
+    still imports cleanly for local dev (`python worker.py`, see main()
+    below) without functions-framework installed.
+    """
+    data = base64.b64decode(cloud_event.data["message"]["data"])
+    try:
+        payload = json.loads(data.decode("utf-8"))
+        url_id = uuid.UUID(payload["url_id"])
+    except (json.JSONDecodeError, KeyError, ValueError) as exc:
+        logger.error("Malformed scan message, dropping: %s", exc)
+        return  # not retryable — returning normally acks the message
+
+    logger.info("Processing scan job for url_id=%s", url_id)
+    db = SessionLocal()
+    try:
+        process_scan_job(db, url_id)
+        db.commit()
+        logger.info("Finished scan job for url_id=%s", url_id)
+    except Exception:
+        db.rollback()
+        logger.exception("Scan job for url_id=%s failed unexpectedly; will retry.", url_id)
+        raise  # re-raise so the Pub/Sub trigger retries the event
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":

@@ -1,10 +1,12 @@
 name: Deploy
 
 # Redeploys api/worker/crawl-worker/crawl-dispatcher with the new image/source
-# on every push to main. One-time setup (API enablement, Cloud SQL instance,
-# secrets, IAM bindings, Scheduler job) lives in deploy/gcloud-deploy.sh and
-# is NOT part of this workflow — see that script's comments before changing
-# infra, not just code.
+# on every push to main. worker and crawl-worker are Cloud Functions (2nd
+# gen, Pub/Sub-triggered) redeployed from source, same as crawl-dispatcher —
+# not from the built image below. One-time setup (API enablement, Cloud SQL
+# instance, secrets, IAM bindings, Scheduler job, the functions' Pub/Sub
+# triggers) lives in deploy/gcloud-deploy.sh and is NOT part of this
+# workflow — see that script's comments before changing infra, not just code.
 
 on:
   push:
@@ -35,7 +37,6 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
         with:
           version: latest
-          install_components: beta # gcloud beta run worker-pools
 
       - name: Set image tag
         run: echo "IMAGE_TAG=${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/backend:${GITHUB_SHA::7}" >> "$GITHUB_ENV"
@@ -64,19 +65,30 @@ jobs:
       - name: Deploy api
         run: gcloud run deploy api --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID"
 
-      # Worker pools are a newer gcloud surface (`gcloud beta run worker-pools`)
-      # that can fail to load with "No module named 'grpc'" depending on the
-      # SDK's bundled Python — installing grpcio here is a harmless no-op if
-      # the SDK already has it, and fixes it if not (see deploy/gcloud-deploy.sh
-      # for the same issue seen locally).
-      - name: Install grpcio for worker-pools beta command
-        run: pip install --user grpcio
+      # Cloud Functions redeploy from source, not the container image built
+      # above. GOOGLE_FUNCTION_SOURCE is required because this repo's own
+      # main.py is the FastAPI app, not the worker entry points.
+      - name: Deploy worker
+        run: |
+          gcloud functions deploy worker \
+            --gen2 \
+            --region="$REGION" \
+            --project="$PROJECT_ID" \
+            --runtime=python313 \
+            --source=. \
+            --entry-point=handle_scan_request \
+            --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=worker.py
 
-      - name: Deploy worker pool
-        run: gcloud beta run worker-pools deploy worker --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID"
-
-      - name: Deploy crawl-worker pool
-        run: gcloud beta run worker-pools deploy crawl-worker --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID"
+      - name: Deploy crawl-worker
+        run: |
+          gcloud functions deploy crawl-worker \
+            --gen2 \
+            --region="$REGION" \
+            --project="$PROJECT_ID" \
+            --runtime=python313 \
+            --source=. \
+            --entry-point=handle_crawl_request \
+            --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=crawl_worker.py
 
       # Cloud Functions redeploys from source, not the container image built
       # above. GOOGLE_FUNCTION_SOURCE is required because this repo's own
