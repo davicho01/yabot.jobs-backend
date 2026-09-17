@@ -1,13 +1,25 @@
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry, parse_month_day_year
+from app.services.adapters.base import (
+    DEFAULT_MAX_JOBS_PER_CRAWL,
+    RECENT_WINDOW_DAYS,
+    TIMEOUT,
+    AtsAdapter,
+    get_with_retry,
+    parse_month_day_year,
+)
 
 _AMAZON_JOBS_URL = "https://www.amazon.jobs/en/search.json"
 _AMAZON_JOB_BASE_URL = "https://www.amazon.jobs"
 _AMAZON_PAGE_SIZE = 100
-_AMAZON_MAX_JOBS = 200
+# Amazon's 10,000+ open roles push real RECENT_WINDOW_DAYS volume close to
+# DEFAULT_MAX_JOBS_PER_CRAWL on its own (verified live: ~1,070 postings in
+# the 7-day window) — double the shared default rather than reuse it
+# directly, so the cap keeps acting as a safety net instead of a routine
+# truncation point.
+_AMAZON_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL * 2
 _AMAZON_URL_RE = re.compile(r"amazon\.jobs", re.IGNORECASE)
 
 
@@ -18,11 +30,11 @@ def _match(url: str) -> str | None:
 def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company board, fixed key, no key needed
     # Free, public, unauthenticated API — no key required. sort=recent
     # verified newest-first (offset=0 was entirely today's date, offset=200
-    # was already yesterday's) — same "today only" early-exit as Workday,
-    # since Amazon has 10,000+ open roles.
+    # was already yesterday's) — same RECENT_WINDOW_DAYS early-exit as
+    # Workday.
     urls: list[str] = []
     offset = 0
-    today = datetime.now(timezone.utc).date()
+    cutoff = datetime.now(timezone.utc).date() - timedelta(days=RECENT_WINDOW_DAYS - 1)
     while len(urls) < _AMAZON_MAX_JOBS:
         response = get_with_retry(
             _AMAZON_JOBS_URL,
@@ -34,11 +46,14 @@ def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company b
         if not jobs:
             break
 
-        todays_jobs = [
-            job for job in jobs if parse_month_day_year(job.get("posted_date"), month_style="%B %d, %Y") == today
+        recent_jobs = [
+            job
+            for job in jobs
+            if (posted := parse_month_day_year(job.get("posted_date"), month_style="%B %d, %Y")) is not None
+            and posted >= cutoff
         ]
-        urls.extend(_AMAZON_JOB_BASE_URL + job["job_path"] for job in todays_jobs if job.get("job_path"))
-        if len(todays_jobs) < len(jobs) or len(jobs) < _AMAZON_PAGE_SIZE:
+        urls.extend(_AMAZON_JOB_BASE_URL + job["job_path"] for job in recent_jobs if job.get("job_path"))
+        if len(recent_jobs) < len(jobs) or len(jobs) < _AMAZON_PAGE_SIZE:
             break
         offset += _AMAZON_PAGE_SIZE
 

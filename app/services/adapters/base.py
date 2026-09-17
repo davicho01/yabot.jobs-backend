@@ -8,6 +8,27 @@ import httpx
 
 TIMEOUT = 30.0
 
+# How far back "recent" reaches for adapters that filter postings by date
+# (Workday, Amazon, Apple, Oracle Fusion) rather than paginating a whole
+# board every crawl. A single shared constant so every adapter's window
+# moves together instead of drifting adapter-by-adapter. Widened from a
+# same-day-only cutoff so a newly-activated board's history isn't limited
+# to whatever happens to post on its first crawl, and so one missed daily
+# crawl doesn't silently drop that day's postings — already-known URLs are
+# deduped downstream either way (see get_or_create_job_posting), so a wider
+# window only costs extra requests/redundant lookups, not duplicate data.
+RECENT_WINDOW_DAYS = 7
+
+# Default safety-net cap on how many postings a date-filtered adapter
+# (Workday, Apple, Oracle Fusion) returns per crawl once RECENT_WINDOW_DAYS
+# widened the window — a true ceiling only a very large company should ever
+# brush against, not the normal stopping point (that's the date cutoff
+# itself; see each adapter's early-exit). Amazon overrides this with its own
+# higher constant instead of using it directly — verified live at ~1,070
+# postings within the 7-day window, close enough to this default that it
+# needs real headroom above it, not just this shared value.
+DEFAULT_MAX_JOBS_PER_CRAWL = 1000
+
 logger = logging.getLogger(__name__)
 
 # job_scanner.py's own retry helper caps at 3 attempts / 18s max backoff,

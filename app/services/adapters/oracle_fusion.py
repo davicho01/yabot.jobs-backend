@@ -1,13 +1,13 @@
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, RECENT_WINDOW_DAYS, TIMEOUT, AtsAdapter, get_with_retry
 
 _ORACLE_FUSION_JOBS_URL = "https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
 _ORACLE_FUSION_JOB_URL = "https://{host}/hcmUI/CandidateExperience/en/sites/{site_number}/job/{job_id}"
 _ORACLE_FUSION_PAGE_SIZE = 25
-_ORACLE_FUSION_MAX_JOBS = 500
+_ORACLE_FUSION_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 # Oracle Fusion's two-part board_key (tenant host, site number) both live in
 # the path, so .search() rather than a full match recovers both straight out
 # of a full job-posting URL (.../sites/{site}/job/{id}) as readily as a bare
@@ -29,13 +29,13 @@ def _fetch_jobs(board_key: str) -> list[str]:
     # Free, public, unauthenticated REST API — the same one Oracle's own
     # candidate-experience UI calls client-side, no key required.
     # PostedDate is a per-job field (verified sortBy=POSTING_DATES_DESC
-    # returns newest first), so this uses the same "today only" early-exit
-    # as Workday/Amazon/Apple.
+    # returns newest first), so this uses the same RECENT_WINDOW_DAYS
+    # early-exit as Workday/Amazon/Apple.
     host, _, site_number = board_key.partition("/")
 
     urls: list[str] = []
     offset = 0
-    today = datetime.now(timezone.utc).date()
+    cutoff = datetime.now(timezone.utc).date() - timedelta(days=RECENT_WINDOW_DAYS - 1)
     while len(urls) < _ORACLE_FUSION_MAX_JOBS:
         response = get_with_retry(
             _ORACLE_FUSION_JOBS_URL.format(host=host),
@@ -55,13 +55,13 @@ def _fetch_jobs(board_key: str) -> list[str]:
         if not requisitions:
             break
 
-        todays = [r for r in requisitions if r.get("PostedDate") == today.isoformat()]
+        recent = [r for r in requisitions if (posted := r.get("PostedDate")) and posted >= cutoff.isoformat()]
         urls.extend(
             _ORACLE_FUSION_JOB_URL.format(host=host, site_number=site_number, job_id=r["Id"])
-            for r in todays
+            for r in recent
             if r.get("Id")
         )
-        if len(todays) < len(requisitions) or len(requisitions) < _ORACLE_FUSION_PAGE_SIZE:
+        if len(recent) < len(requisitions) or len(requisitions) < _ORACLE_FUSION_PAGE_SIZE:
             break
         offset += _ORACLE_FUSION_PAGE_SIZE
 
