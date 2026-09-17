@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import date
 from html import unescape
@@ -982,15 +983,44 @@ class ScanResult:
     error: str | None = None
 
 
+_RATE_LIMIT_MAX_ATTEMPTS = 3
+_RATE_LIMIT_MAX_WAIT_SECONDS = 60.0
+_RATE_LIMIT_BACKOFF_SECONDS = (2.0, 6.0, 18.0)
+
+
+def _rate_limit_wait_seconds(response: httpx.Response, attempt: int) -> float:
+    """How long to wait before retrying a 429, preferring the site's own
+    Retry-After over a guessed backoff — capped so a site advertising an
+    hours-long Retry-After can't pin a worker slot on one URL indefinitely.
+    """
+    retry_after = response.headers.get("Retry-After")
+    if retry_after is not None:
+        try:
+            wait = float(retry_after)
+        except ValueError:
+            wait = None  # HTTP-date form — not worth parsing, fall back to backoff
+        if wait is not None and wait >= 0:
+            return min(wait, _RATE_LIMIT_MAX_WAIT_SECONDS)
+    return _RATE_LIMIT_BACKOFF_SECONDS[attempt]
+
+
 def _fetch_direct(url: str) -> httpx.Response:
-    response = httpx.get(
-        url,
-        timeout=10.0,
-        follow_redirects=True,
-        headers={"User-Agent": "Mozilla/5.0 (compatible; YabotJobsBot/1.0)"},
-    )
-    response.raise_for_status()
-    return response
+    attempt = 0
+    while True:
+        response = httpx.get(
+            url,
+            timeout=10.0,
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; YabotJobsBot/1.0)"},
+        )
+        attempt += 1
+        if response.status_code == httpx.codes.TOO_MANY_REQUESTS and attempt < _RATE_LIMIT_MAX_ATTEMPTS:
+            wait = _rate_limit_wait_seconds(response, attempt - 1)
+            logger.info("Rate limited fetching %s (attempt %d); retrying in %.1fs.", url, attempt, wait)
+            time.sleep(wait)
+            continue
+        response.raise_for_status()
+        return response
 
 
 def _fetch_via_scraperapi(url: str) -> httpx.Response:
