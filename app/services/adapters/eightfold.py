@@ -40,17 +40,23 @@ def _candidate_domains(host: str) -> list[str]:
 
 
 def _domain_is_valid(host: str, domain: str) -> bool:
-    # A wrong guess fails outright (e.g. Netflix's 403 "PCSX is not enabled
-    # for this user") rather than succeeding with an empty result, so this
-    # can't mistake "no open roles right now" for "wrong domain".
+    # A wrong guess usually fails outright (e.g. Netflix's 403 "PCSX is not
+    # enabled for this user"), but some hosts that aren't Eightfold at all
+    # happen to answer this same path with a 200 anyway — verified against
+    # careers.freedommortgage.com (a Phenom site), which returns
+    # {"status":"failure","data":null,"errorMsg":"Tenant not identified"}.
+    # So success has to be judged from the body's shape, not just the HTTP
+    # status: a genuinely valid tenant, even with zero open roles, still
+    # comes back with a "data" dict rather than null.
     try:
         response = get_with_retry(
             f"https://{host}/api/pcsx/search", params={"domain": domain, "start": 0, "num": 1}, timeout=TIMEOUT
         )
         response.raise_for_status()
+        body = response.json()
     except httpx.HTTPError:
         return False
-    return True
+    return isinstance(body, dict) and isinstance(body.get("data"), dict)
 
 
 def _sitemap_job_urls(host: str) -> list[str]:

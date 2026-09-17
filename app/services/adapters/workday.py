@@ -1,5 +1,7 @@
 import re
 
+import httpx
+
 from app.models.enums import AtsType
 from app.services.adapters.base import TIMEOUT, AtsAdapter, post_with_retry
 
@@ -73,9 +75,25 @@ def _fetch_jobs(board_key: str) -> list[str]:
     return urls[:_WORKDAY_MAX_JOBS]
 
 
+def _detect_embedded(url: str) -> str | None:
+    # Some companies front their real Workday board with their own
+    # marketing/career-site domain (e.g. careers.freedommortgage.com, a
+    # Phenom People site) and only link out to the myworkdayjobs.com URL
+    # from an "apply" link buried in a JSON blob server-rendered into the
+    # page — verified live: _WORKDAY_URL_RE matches that embedded URL just
+    # as well as a real address-bar one, no extra parsing needed.
+    try:
+        response = httpx.get(url, timeout=TIMEOUT, follow_redirects=True)
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return None
+    return _match(response.text)
+
+
 ADAPTER = AtsAdapter(
     AtsType.WORKDAY,
     match=_match,
     fetch_jobs=_fetch_jobs,
     to_board_url=_board_url,
+    embedded_match=_detect_embedded,
 )
