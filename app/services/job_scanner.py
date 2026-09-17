@@ -12,6 +12,7 @@ import httpx
 
 from app.core.config import settings
 from app.models.enums import EmploymentType, WorkplaceType
+from app.services.adapters.base import candidate_slugs_from_domain
 
 _SCRAPERAPI_URL = "https://api.scraperapi.com/"
 
@@ -106,7 +107,7 @@ _SALARY_RANGE_RE = re.compile(
     rf"""
     (?:(?P<cur1>{_CURRENCY_CODES})\s*)?(?P<sym1>[\$£€])?\s*
     (?P<min>\d[\d,]*(?:\.\d+)?)
-    \s*(?:-|–|\bto\b|\band\b)\s*
+    \s*(?:-|–|—|\bto\b|\band\b)\s*
     (?:(?P<cur2>{_CURRENCY_CODES})\s*)?(?P<sym2>[\$£€])?\s*
     (?P<max>\d[\d,]*(?:\.\d+)?)
     (?:\s*(?P<cur3>{_CURRENCY_CODES}))?
@@ -1044,6 +1045,97 @@ def _fetch_html(url: str) -> httpx.Response:
     #     raise
 
 
+# Some companies white-label Greenhouse onto their own domain (e.g.
+# careers.airbnb.com) via its embeddable widget rather than linking out to
+# boards.greenhouse.io — see app.services.adapters.greenhouse, which uses
+# the same two signals (an embed-script `?for=` token, or a bare `gh_jid`
+# leaking through elsewhere on the page) to find the board for crawl-source
+# discovery. These pages ship no JSON-LD, so without this the scanner falls
+# back to whatever's in <title>/og: tags — the wrapper page's own SEO
+# copy, not the job's actual title/company/location/description. Once both
+# the board slug and job id are known, Greenhouse's public per-job API
+# (same one app.services.adapters.greenhouse.list_job_urls's board-level
+# endpoint is a sibling of) returns the real structured record directly, no
+# further guessing needed.
+_GH_EMBED_TOKEN_RE = re.compile(r"greenhouse\.io/embed/[a-zA-Z_/]*\?for=([a-zA-Z0-9_-]+)", re.IGNORECASE)
+_GH_JOB_ID_RE = re.compile(r"gh_jid=(\d+)")
+_GREENHOUSE_JOB_API_URL = "https://boards-api.greenhouse.io/v1/boards/{board_key}/jobs/{job_id}"
+
+
+def _fetch_greenhouse_embedded_job_data(url: str, html: str) -> dict[str, Any] | None:
+    job_id_match = _GH_JOB_ID_RE.search(url) or _GH_JOB_ID_RE.search(html)
+    if job_id_match is None:
+        return None
+    job_id = job_id_match.group(1)
+
+    token_match = _GH_EMBED_TOKEN_RE.search(html)
+    # Authoritative when present; otherwise guess-and-verify a board slug
+    # from the domain the same way the crawl-source adapter does, except
+    # here "verify" and "fetch" are the same request — a 200 on the job
+    # endpoint itself confirms the slug.
+    candidates = [token_match.group(1)] if token_match else candidate_slugs_from_domain(urlsplit(url).netloc)
+    for slug in candidates:
+        try:
+            response = httpx.get(
+                _GREENHOUSE_JOB_API_URL.format(board_key=slug, job_id=job_id),
+                params={"content": "true"},
+                timeout=10.0,
+            )
+        except httpx.HTTPError:
+            continue
+        if response.status_code == 200:
+            return response.json()
+    return None
+
+
+# WorkplaceType isn't a top-level field on Greenhouse's job record — when
+# set at all, it's tucked into the free-form `metadata` list as a
+# single_select custom field most companies label exactly "Workplace Type"
+# (verified against Airbnb's live posting), value one of Greenhouse's own
+# fixed options.
+_GREENHOUSE_WORKPLACE_TYPE_MAP = {
+    "remote": WorkplaceType.REMOTE,
+    "hybrid": WorkplaceType.HYBRID,
+    "on-site": WorkplaceType.ONSITE,
+    "onsite": WorkplaceType.ONSITE,
+}
+
+
+def _greenhouse_embedded_location_of(job_data: dict[str, Any]) -> str | None:
+    location = job_data.get("location")
+    return location.get("name") if isinstance(location, dict) else None
+
+
+def _greenhouse_embedded_workplace_type_of(job_data: dict[str, Any]) -> str:
+    for entry in job_data.get("metadata") or []:
+        if not isinstance(entry, dict) or str(entry.get("name", "")).strip().lower() != "workplace type":
+            continue
+        mapped = _GREENHOUSE_WORKPLACE_TYPE_MAP.get(str(entry.get("value", "")).strip().lower())
+        if mapped is not None:
+            return mapped
+    return WorkplaceType.UNKNOWN
+
+
+def _greenhouse_embedded_posted_at_of(job_data: dict[str, Any]) -> date | None:
+    raw = job_data.get("first_published") or job_data.get("updated_at")
+    if not isinstance(raw, str):
+        return None
+    try:
+        return date.fromisoformat(raw[:10])
+    except ValueError:
+        return None
+
+
+def _greenhouse_embedded_description_of(job_data: dict[str, Any]) -> str | None:
+    content = job_data.get("content")
+    # The API JSON-encodes the description as HTML-entity-escaped markup
+    # ("&lt;div&gt;...") rather than raw HTML, same double-escaping
+    # _clean_text's docstring notes for Mastercard's JSON-LD — unescape
+    # before handing it to the HTML-to-Markdown converter, or every tag
+    # survives as literal text instead of structure.
+    return _html_to_formatted_text(unescape(content)) if isinstance(content, str) else None
+
+
 def _is_greenhouse_board_error_redirect(final_url: str) -> bool:
     """Greenhouse redirects an invalid/expired/removed job posting to its
     board's generic landing page with `?error=true` appended, rather than a
@@ -1110,15 +1202,19 @@ def scan_job_url(url: str) -> ScanResult:
         apple_job_data = _extract_apple_job_data(html)
         eightfold_job_data = _fetch_eightfold_job_data(str(response.url), html)
         oracle_job_data = _fetch_oracle_fusion_job_data(str(response.url))
+        gh_embedded_job_data = _fetch_greenhouse_embedded_job_data(str(response.url), html)
         amazon_location = _amazon_location_of(html)
         location = (
-            gh_location
+            (_greenhouse_embedded_location_of(gh_embedded_job_data) if gh_embedded_job_data else None)
+            or gh_location
             or (_apple_location_of(apple_job_data) if apple_job_data else None)
             or (eightfold_job_data.get("location") if eightfold_job_data else None)
             or (_oracle_fusion_location_of(oracle_job_data) if oracle_job_data else None)
             or amazon_location
             or location
         )
+        if workplace_type == WorkplaceType.UNKNOWN and gh_embedded_job_data:
+            workplace_type = _greenhouse_embedded_workplace_type_of(gh_embedded_job_data)
         if workplace_type == WorkplaceType.UNKNOWN and oracle_job_data:
             workplace_type = _oracle_fusion_workplace_type_of(oracle_job_data)
         if workplace_type == WorkplaceType.UNKNOWN and amazon_location:
@@ -1126,8 +1222,15 @@ def scan_job_url(url: str) -> ScanResult:
         employment_type = (
             _oracle_fusion_employment_type_of(oracle_job_data) if oracle_job_data else EmploymentType.UNKNOWN
         )
-        company_name = gh_company_name or _single_company_name_for_url(str(response.url)) or og_site_name
-        posted_at = _apple_posted_at_of(apple_job_data) if apple_job_data else None
+        company_name = (
+            (gh_embedded_job_data.get("company_name") if gh_embedded_job_data else None)
+            or gh_company_name
+            or _single_company_name_for_url(str(response.url))
+            or og_site_name
+        )
+        posted_at = _greenhouse_embedded_posted_at_of(gh_embedded_job_data) if gh_embedded_job_data else None
+        if posted_at is None:
+            posted_at = _apple_posted_at_of(apple_job_data) if apple_job_data else None
         if posted_at is None and eightfold_job_data:
             posted_at = _eightfold_posted_at_of(eightfold_job_data)
         if posted_at is None and oracle_job_data:
@@ -1138,7 +1241,8 @@ def scan_job_url(url: str) -> ScanResult:
             except ValueError:
                 posted_at = None
         description = (
-            _extract_greenhouse_job_description(html)
+            (_greenhouse_embedded_description_of(gh_embedded_job_data) if gh_embedded_job_data else None)
+            or _extract_greenhouse_job_description(html)
             or _extract_google_job_body(html)
             or (_html_to_formatted_text(eightfold_job_data.get("jobDescription")) if eightfold_job_data else None)
             or (_oracle_fusion_description_of(oracle_job_data) if oracle_job_data else None)
@@ -1150,7 +1254,8 @@ def scan_job_url(url: str) -> ScanResult:
         salary_min, salary_max, salary_currency = _salary_from_text(description)
         return ScanResult(
             success=True,
-            title=(eightfold_job_data.get("name") if eightfold_job_data else None)
+            title=(gh_embedded_job_data.get("title") if gh_embedded_job_data else None)
+            or (eightfold_job_data.get("name") if eightfold_job_data else None)
             or (oracle_job_data.get("Title") if oracle_job_data else None)
             or (_apple_title_of(apple_job_data) if apple_job_data else None)
             or og_title

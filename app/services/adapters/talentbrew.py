@@ -97,3 +97,4 @@ ADAPTER = AtsAdapter(
     board_key=_board_key,
     embedded_match=_detect_embedded,
 )
+

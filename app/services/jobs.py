@@ -66,7 +66,14 @@ def get_or_create_job_posting(
             # existing-board_url check and register as its own brand-new
             # "active" CrawlSource, which the dispatcher would then also
             # crawl.
-            register_discovered_board(db, raw_url)
+            #
+            # Attribute the URL back to whatever board register_discovered_board
+            # resolved (new or already-known, active or pending) so the
+            # admin per-source listing/stats include user-submitted jobs,
+            # not just ones the crawler found itself.
+            source = register_discovered_board(db, raw_url)
+            if source is not None:
+                url_row.crawl_source_id = source.id
         posting = _create_pending_posting(db, url_row)
         # Committed before publishing, not just flushed: the worker reads
         # this row on a separate DB connection, and a flush is only visible

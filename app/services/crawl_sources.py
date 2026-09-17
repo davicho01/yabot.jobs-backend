@@ -18,10 +18,13 @@ _NO_COMPANY_SLUG_ATS_TYPES = {AtsType.ADP}
 logger = logging.getLogger("app.crawl_sources")
 
 
-def register_discovered_board(db: Session, url: str) -> None:
+def register_discovered_board(db: Session, url: str) -> CrawlSource | None:
     """Best-effort: note the board a submitted job URL belongs to, so the
-    daily crawler picks up that company's future postings too. Never
-    raises — a job submission must never fail because of this bookkeeping.
+    daily crawler picks up that company's future postings too, and so the
+    submitted URL itself can be attributed back to that board (see caller:
+    get_or_create_job_posting sets JobPostingUrl.crawl_source_id from the
+    row returned here). Never raises — a job submission must never fail
+    because of this bookkeeping.
 
     A URL on a platform we already support becomes an "active" board,
     crawled starting with the next scheduled dispatch. A URL on a platform
@@ -35,7 +38,7 @@ def register_discovered_board(db: Session, url: str) -> None:
         embedded = detect_embedded_ats_source(url)
         if embedded is None:
             domain = domain_of(normalize_url(url))
-            _upsert(
+            return _upsert(
                 db,
                 name=domain,
                 ats_type=None,
@@ -43,11 +46,10 @@ def register_discovered_board(db: Session, url: str) -> None:
                 board_url=f"https://{domain}",
                 status=CrawlSourceStatus.PENDING,
             )
-            return
         ats_type, board_key = embedded
 
     board_url = board_url_for_key(ats_type, board_key, url)
-    _upsert(
+    return _upsert(
         db,
         name=_company_name(ats_type, board_key, url),
         ats_type=ats_type,
@@ -76,17 +78,21 @@ def _company_name(ats_type: str, board_key: str, url: str) -> str:
 
 def _upsert(
     db: Session, *, name: str, ats_type: str | None, board_key: str | None, board_url: str, status: str
-) -> None:
-    if _find_existing_board(db, ats_type, board_key, board_url) is not None:
-        return
+) -> CrawlSource | None:
+    existing = _find_existing_board(db, ats_type, board_key, board_url)
+    if existing is not None:
+        return existing
 
+    source = CrawlSource(name=name, ats_type=ats_type, board_url=board_url, status=status)
     try:
         with db.begin_nested():
-            db.add(CrawlSource(name=name, ats_type=ats_type, board_url=board_url, status=status))
+            db.add(source)
     except IntegrityError:
-        # Lost a race with a concurrent submission of the same board —
-        # the other insert already covers it.
+        # Lost a race with a concurrent submission of the same board — the
+        # other insert already covers it, so hand that row back instead.
         logger.info("Crawl source for %s already registered concurrently; skipping.", name)
+        return _find_existing_board(db, ats_type, board_key, board_url)
+    return source
 
 
 def _find_existing_board(
