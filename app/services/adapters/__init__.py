@@ -17,6 +17,7 @@ from app.services.adapters import (
     greenhouse,
     jazzhr,
     lever,
+    nlx,
     oracle_fusion,
     personio,
     recruitee,
@@ -45,4 +46,5 @@ ADAPTERS: list[AtsAdapter] = [
     clinch.ADAPTER,
     talentbrew.ADAPTER,
     eightfold.ADAPTER,
+    nlx.ADAPTER,
 ]

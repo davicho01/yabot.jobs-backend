@@ -109,14 +109,19 @@ _CURRENCY_CODES = "USD|CAD|AUD|NZD|GBP|EUR|CHF|JPY|INR"
 # whose per-level bands ("...356,500 USD for Level 5, and 272,000 USD...")
 # otherwise let the loose pattern swallow the trailing digit of "Level 5"
 # and the "and" before the next band as a bogus "5 - 272,000" range.
+# The optional trailing k/K (min_k/max_k) handles compact shorthand like
+# "$145k-$163k" (verified live on a DispatchHealth/NLX posting) — a plain
+# "145" would otherwise still satisfy \d{1,3} on its own and just fail to
+# find a dash immediately after, silently dropping the whole range instead
+# of erroring.
 _SALARY_RANGE_RE = re.compile(
     rf"""
     (?:(?P<cur1>{_CURRENCY_CODES})\s*)?(?P<sym1>[\$£€])?\s*
-    (?P<min>\d{{1,3}}(?:,\d{{3}})*(?:\.\d+)?)
+    (?P<min>\d{{1,3}}(?:,\d{{3}})*(?:\.\d+)?)(?P<min_k>[kK])?
     \s*(?:(?P<cur1b>{_CURRENCY_CODES})\s*)?
     \s*(?:-|–|—|\bto\b|\band\b)\s*
     (?:(?P<cur2>{_CURRENCY_CODES})\s*)?(?P<sym2>[\$£€])?\s*
-    (?P<max>\d{{1,3}}(?:,\d{{3}})*(?:\.\d+)?)
+    (?P<max>\d{{1,3}}(?:,\d{{3}})*(?:\.\d+)?)(?P<max_k>[kK])?
     (?:\s*(?P<cur3>{_CURRENCY_CODES}))?
     """,
     re.IGNORECASE | re.VERBOSE,
@@ -129,7 +134,7 @@ _SALARY_RANGE_RE = re.compile(
 _SALARY_SINGLE_RE = re.compile(
     rf"""
     (?:(?P<cur1>{_CURRENCY_CODES})\s*)?(?P<sym1>[\$£€])?\s*
-    (?P<amount>\d[\d,]*(?:\.\d+)?)
+    (?P<amount>\d[\d,]*(?:\.\d+)?)(?P<amount_k>[kK])?
     \s*(?:(?P<cur2>{_CURRENCY_CODES}))?
     \s*(?:annually|per\s+year|/\s*yr\b|per\s+annum|hourly|per\s+hour|/\s*hr\b)
     """,
@@ -411,6 +416,10 @@ def _salary_from_text(text: str | None) -> tuple[int | None, int | None, str | N
             salary_max = round(float(match.group("max").replace(",", "")))
         except ValueError:
             continue
+        if match.group("min_k"):
+            salary_min *= 1000
+        if match.group("max_k"):
+            salary_max *= 1000
         if salary_min > salary_max:
             salary_min, salary_max = salary_max, salary_min
 
@@ -433,6 +442,8 @@ def _salary_from_text(text: str | None) -> tuple[int | None, int | None, str | N
         amount = round(float(match.group("amount").replace(",", "")))
     except ValueError:
         return None, None, None
+    if match.group("amount_k"):
+        amount *= 1000
 
     currency = cur1 or cur2 or _CURRENCY_SYMBOLS.get(sym1 or "")
     return amount, amount, currency.upper() if currency else None
@@ -784,6 +795,76 @@ def _oracle_fusion_description_of(job_data: dict[str, Any]) -> str | None:
         sections.append("<h3>About Us</h3>" + job_data["CorporateDescriptionStr"])
     html = "".join(s for s in sections if isinstance(s, str) and s.strip())
     return _html_to_formatted_text(html) if html else None
+
+
+# NLX (National Labor Exchange, seo.nlx.org/jobsyn.org — see
+# app.services.adapters.nlx) job pages are a Nuxt SPA with no JSON-LD and no
+# useful og: tags — every route shares the same static "Dispatch Careers Home
+# Page"-style meta description regardless of which job it is. But the page
+# itself fetches its content client-side from a static, unauthenticated
+# per-job JSON file keyed by the exact guid already sitting in the URL —
+# verified live via the browser network tab — that carries the full
+# structured record (title, company, location, schedule, and complete HTML
+# description) no plain-fetch/og: scraping could ever recover.
+_NLX_JOB_URL_RE = re.compile(r"https?://([^/]+)/[^/]+/[^/]+/([0-9A-Fa-f]{32})/job/?", re.IGNORECASE)
+_NLX_DETAIL_URL = "https://microsites.dejobs.org/{job_folder}/data/{guid}.json"
+# job_type has also been observed as "Per Diem" (healthcare as-needed work,
+# verified live) which doesn't cleanly map to any EmploymentType value —
+# left unmapped -> UNKNOWN like every other adapter's unrecognized case.
+_NLX_JOB_TYPE_MAP = {
+    "full time": EmploymentType.FULL_TIME,
+    "part time": EmploymentType.PART_TIME,
+}
+_NLX_JOB_SHIFT_MAP = {
+    "remote": WorkplaceType.REMOTE,
+    "on-site": WorkplaceType.ONSITE,
+    "hybrid": WorkplaceType.HYBRID,
+}
+
+
+def _fetch_nlx_job_data(url: str) -> dict[str, Any] | None:
+    match = _NLX_JOB_URL_RE.search(url)
+    if match is None:
+        return None
+    host, guid = match.groups()
+    try:
+        response = httpx.get(
+            _NLX_DETAIL_URL.format(job_folder=host.replace(".", "-"), guid=guid), timeout=10.0
+        )
+        response.raise_for_status()
+        data = response.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _nlx_employment_type_of(job_data: dict[str, Any]) -> str:
+    job_type = job_data.get("job_type")
+    if isinstance(job_type, str):
+        return _NLX_JOB_TYPE_MAP.get(job_type.strip().lower(), EmploymentType.UNKNOWN)
+    return EmploymentType.UNKNOWN
+
+
+def _nlx_workplace_type_of(job_data: dict[str, Any]) -> str:
+    job_shift = job_data.get("job_shift")
+    if isinstance(job_shift, str):
+        return _NLX_JOB_SHIFT_MAP.get(job_shift.strip().lower(), WorkplaceType.UNKNOWN)
+    return WorkplaceType.UNKNOWN
+
+
+def _nlx_posted_at_of(job_data: dict[str, Any]) -> date | None:
+    added = job_data.get("date_added")
+    if not isinstance(added, str):
+        return None
+    try:
+        return date.fromisoformat(added[:10])
+    except ValueError:
+        return None
+
+
+def _nlx_description_of(job_data: dict[str, Any]) -> str | None:
+    html = job_data.get("html_description")
+    return _html_to_formatted_text(html) if isinstance(html, str) and html.strip() else None
 
 
 # amazon.jobs ships no JobPosting JSON-LD and no embedded JSON blob (unlike
@@ -1244,6 +1325,7 @@ def scan_job_url(url: str) -> ScanResult:
         eightfold_job_data = _fetch_eightfold_job_data(str(response.url), html)
         oracle_job_data = _fetch_oracle_fusion_job_data(str(response.url))
         gh_embedded_job_data = _fetch_greenhouse_embedded_job_data(str(response.url), html)
+        nlx_job_data = _fetch_nlx_job_data(str(response.url))
         amazon_location = _amazon_location_of(html)
         location = (
             (_greenhouse_embedded_location_of(gh_embedded_job_data) if gh_embedded_job_data else None)
@@ -1251,6 +1333,7 @@ def scan_job_url(url: str) -> ScanResult:
             or (_apple_location_of(apple_job_data) if apple_job_data else None)
             or (eightfold_job_data.get("location") if eightfold_job_data else None)
             or (_oracle_fusion_location_of(oracle_job_data) if oracle_job_data else None)
+            or (nlx_job_data.get("location") if nlx_job_data else None)
             or amazon_location
             or location
         )
@@ -1258,14 +1341,19 @@ def scan_job_url(url: str) -> ScanResult:
             workplace_type = _greenhouse_embedded_workplace_type_of(gh_embedded_job_data)
         if workplace_type == WorkplaceType.UNKNOWN and oracle_job_data:
             workplace_type = _oracle_fusion_workplace_type_of(oracle_job_data)
+        if workplace_type == WorkplaceType.UNKNOWN and nlx_job_data:
+            workplace_type = _nlx_workplace_type_of(nlx_job_data)
         if workplace_type == WorkplaceType.UNKNOWN and amazon_location:
             workplace_type = _amazon_workplace_type_of(amazon_location)
         employment_type = (
-            _oracle_fusion_employment_type_of(oracle_job_data) if oracle_job_data else EmploymentType.UNKNOWN
+            _oracle_fusion_employment_type_of(oracle_job_data)
+            if oracle_job_data
+            else (_nlx_employment_type_of(nlx_job_data) if nlx_job_data else EmploymentType.UNKNOWN)
         )
         company_name = (
             (gh_embedded_job_data.get("company_name") if gh_embedded_job_data else None)
             or gh_company_name
+            or (nlx_job_data.get("company") if nlx_job_data else None)
             or _single_company_name_for_url(str(response.url))
             or og_site_name
         )
@@ -1276,6 +1364,8 @@ def scan_job_url(url: str) -> ScanResult:
             posted_at = _eightfold_posted_at_of(eightfold_job_data)
         if posted_at is None and oracle_job_data:
             posted_at = _oracle_fusion_posted_at_of(oracle_job_data)
+        if posted_at is None and nlx_job_data:
+            posted_at = _nlx_posted_at_of(nlx_job_data)
         if posted_at is None and gh_published_at_match is not None:
             try:
                 posted_at = date.fromisoformat(gh_published_at_match.group(1))
@@ -1287,6 +1377,7 @@ def scan_job_url(url: str) -> ScanResult:
             or _extract_google_job_body(html)
             or (_html_to_formatted_text(eightfold_job_data.get("jobDescription")) if eightfold_job_data else None)
             or (_oracle_fusion_description_of(oracle_job_data) if oracle_job_data else None)
+            or (_nlx_description_of(nlx_job_data) if nlx_job_data else None)
             or (_apple_description_of(apple_job_data) if apple_job_data else None)
             or _amazon_description_of(html)
             or fallback_description
@@ -1298,6 +1389,7 @@ def scan_job_url(url: str) -> ScanResult:
             title=(gh_embedded_job_data.get("title") if gh_embedded_job_data else None)
             or (eightfold_job_data.get("name") if eightfold_job_data else None)
             or (oracle_job_data.get("Title") if oracle_job_data else None)
+            or (nlx_job_data.get("title") if nlx_job_data else None)
             or (_apple_title_of(apple_job_data) if apple_job_data else None)
             or og_title
             or fallback_title,

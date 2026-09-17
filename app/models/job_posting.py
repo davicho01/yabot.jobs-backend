@@ -64,7 +64,16 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
     )
 
     url: Mapped["JobPostingUrl"] = relationship(back_populates="postings")
-    applications: Mapped[list["UserJobApplication"]] = relationship(back_populates="job_posting")
+    # passive_deletes: job_posting_id is NOT NULL, so without this the ORM's
+    # default "null out the child FK" behavior on parent delete violates
+    # that constraint — verified live via DELETE /admin/listings/{id} on a
+    # posting with a saved/applied UserJobApplication. The FK already
+    # declares ondelete="CASCADE" (see UserJobApplication.job_posting_id),
+    # so this just defers to the DB to remove the application row instead
+    # of having the ORM fight the constraint.
+    applications: Mapped[list["UserJobApplication"]] = relationship(
+        back_populates="job_posting", passive_deletes=True
+    )
 
     @property
     def apply_url(self) -> str:
