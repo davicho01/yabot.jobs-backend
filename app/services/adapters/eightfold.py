@@ -1,5 +1,6 @@
 import re
 from urllib.parse import urlsplit
+from xml.etree import ElementTree
 
 import httpx
 
@@ -8,6 +9,8 @@ from app.services.adapters.base import TIMEOUT, AtsAdapter
 
 _EIGHTFOLD_SEARCH_PAGE_SIZE = 20
 _EIGHTFOLD_MAX_JOBS = 500
+_SITEMAP_NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+_ROBOTS_SITEMAP_RE = re.compile(r"^Sitemap:\s*(\S+)", re.MULTILINE | re.IGNORECASE)
 # Eightfold's white-label career sites (e.g. jobs.twilio.com,
 # explore.jobs.netflix.net) all serve from a `/careers/job/{numeric_id}`
 # path and share a distinctive, stable string in their page HTML even
@@ -50,17 +53,55 @@ def _domain_is_valid(host: str, domain: str) -> bool:
     return True
 
 
+def _sitemap_job_urls(host: str) -> list[str]:
+    # Fallback for tenants that have disabled /api/pcsx/search entirely
+    # (Netflix: 403 "PCSX is not enabled for this user" on every domain
+    # guess). Some Eightfold instances still publish a sitemap — Netflix's
+    # robots.txt carries a "Sitemap:" line pointing at a sitemap_index.xml
+    # that's already domain-qualified (no need to guess the tenant "domain"
+    # value at all), listing a jobs sitemap.xml (job postings, path
+    # /careers/job/...) alongside a sitemap_cat.xml (facet/category pages,
+    # no job content) — verified against a live instance. Not every
+    # Eightfold tenant has this (Twilio's robots.txt has no Sitemap: line),
+    # but that's fine since this is only reached once pcsx has already
+    # failed outright.
+    robots = httpx.get(f"https://{host}/robots.txt", timeout=TIMEOUT)
+    robots.raise_for_status()
+    match = _ROBOTS_SITEMAP_RE.search(robots.text)
+    if not match:
+        return []
+    index = httpx.get(match.group(1), timeout=TIMEOUT)
+    index.raise_for_status()
+    index_root = ElementTree.fromstring(index.content)
+
+    urls: list[str] = []
+    for loc in index_root.findall(".//sm:sitemap/sm:loc", _SITEMAP_NS):
+        if not loc.text or "_cat" in loc.text:
+            continue
+        sitemap = httpx.get(loc.text, timeout=TIMEOUT)
+        sitemap.raise_for_status()
+        sitemap_root = ElementTree.fromstring(sitemap.content)
+        urls.extend(
+            u.text
+            for u in sitemap_root.findall(".//sm:url/sm:loc", _SITEMAP_NS)
+            if u.text and urlsplit(u.text).path.startswith("/careers/job/")
+        )
+    return urls
+
+
 def _fetch_jobs(host: str) -> list[str]:
     # Free, public API — no key required, but only when the company hasn't
     # disabled it on their instance (Netflix returns 403 "PCSX is not
     # enabled for this user" on the very same endpoint that works fine for
-    # Twilio; nothing on our end to do about that). The "domain" value the
-    # API expects to identify the tenant isn't derivable from the URL alone
-    # (see _candidate_domains), so it's cheaply re-resolved on every crawl
-    # via the same candidate-guessing embedded detection uses, rather than
-    # cached anywhere.
+    # Twilio). The "domain" value the API expects to identify the tenant
+    # isn't derivable from the URL alone (see _candidate_domains), so it's
+    # cheaply re-resolved on every crawl via the same candidate-guessing
+    # embedded detection uses, rather than cached anywhere.
     domain = next((d for d in _candidate_domains(host) if _domain_is_valid(host, d)), None)
     if domain is None:
+        sitemap_urls = _sitemap_job_urls(host)
+        if sitemap_urls:
+            return sitemap_urls[:_EIGHTFOLD_MAX_JOBS]
         raise ValueError(f"Couldn't resolve an Eightfold tenant domain for host={host!r}")
 
     urls: list[str] = []
