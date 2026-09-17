@@ -98,18 +98,25 @@ _OG_WORKPLACE_TYPE_WORDS = {
 _CURRENCY_SYMBOLS = {"$": "USD", "£": "GBP", "€": "EUR"}
 _CURRENCY_CODES = "USD|CAD|AUD|NZD|GBP|EUR|CHF|JPY|INR"
 # Matches things like "USD $124,000.00 - USD $329,200.00", "$120,000-$160,000",
-# "50,000 - 65,000 GBP", or "between $216,200 and $394,000" — two amounts
-# joined by a dash/"to"/"and", with a currency code/symbol before either
-# amount and/or trailing the range.
+# "50,000 - 65,000 GBP", "between $216,200 and $394,000", or "224,000 USD -
+# 356,500 USD" — two amounts joined by a dash/"to"/"and", with a currency
+# code/symbol before either amount, trailing the min amount, and/or trailing
+# the range.
 # Many pay-transparency-law job descriptions state a salary range in prose
 # even when the page's structured data (if any) omits or zeroes it out.
+# The amount groups require proper thousands-grouping (\d{1,3}(,\d{3})*)
+# rather than a loose \d[\d,]* — verified live on an NVIDIA/Workday posting
+# whose per-level bands ("...356,500 USD for Level 5, and 272,000 USD...")
+# otherwise let the loose pattern swallow the trailing digit of "Level 5"
+# and the "and" before the next band as a bogus "5 - 272,000" range.
 _SALARY_RANGE_RE = re.compile(
     rf"""
     (?:(?P<cur1>{_CURRENCY_CODES})\s*)?(?P<sym1>[\$£€])?\s*
-    (?P<min>\d[\d,]*(?:\.\d+)?)
+    (?P<min>\d{{1,3}}(?:,\d{{3}})*(?:\.\d+)?)
+    \s*(?:(?P<cur1b>{_CURRENCY_CODES})\s*)?
     \s*(?:-|–|—|\bto\b|\band\b)\s*
     (?:(?P<cur2>{_CURRENCY_CODES})\s*)?(?P<sym2>[\$£€])?\s*
-    (?P<max>\d[\d,]*(?:\.\d+)?)
+    (?P<max>\d{{1,3}}(?:,\d{{3}})*(?:\.\d+)?)
     (?:\s*(?P<cur3>{_CURRENCY_CODES}))?
     """,
     re.IGNORECASE | re.VERBOSE,
@@ -373,11 +380,22 @@ def _salary_from_text(text: str | None) -> tuple[int | None, int | None, str | N
     # in the text and bail — verified live on an amazon.jobs posting whose
     # description opens with an unrelated "8-10" (years of experience) that
     # has no currency marker, well before the real "26.25 - 29.75 USD
-    # hourly" pay range further down. Walk every candidate instead and take
-    # the first one that actually carries a currency signal.
+    # hourly" pay range further down. Walk every candidate instead and skip
+    # any that doesn't actually carry a currency signal.
+    #
+    # Some listings (e.g. big-tech postings open to multiple levels) state a
+    # separate band per level rather than one overall range — take the
+    # lowest min and highest max across every currency-bearing band found,
+    # so a posting like "224,000 - 356,500 USD for Level 5, and 272,000 -
+    # 431,250 USD for Level 6" reports the full 224,000-431,250 span.
+    overall_min: int | None = None
+    overall_max: int | None = None
+    overall_currency: str | None = None
     for match in _SALARY_RANGE_RE.finditer(text):
-        cur1, sym1, cur2, sym2, cur3 = match.group("cur1", "sym1", "cur2", "sym2", "cur3")
-        if not (cur1 or sym1 or cur2 or sym2 or cur3):
+        cur1, sym1, cur1b, cur2, sym2, cur3 = match.group(
+            "cur1", "sym1", "cur1b", "cur2", "sym2", "cur3"
+        )
+        if not (cur1 or sym1 or cur1b or cur2 or sym2 or cur3):
             continue
 
         try:
@@ -388,8 +406,13 @@ def _salary_from_text(text: str | None) -> tuple[int | None, int | None, str | N
         if salary_min > salary_max:
             salary_min, salary_max = salary_max, salary_min
 
-        currency = cur1 or cur2 or cur3 or _CURRENCY_SYMBOLS.get(sym1 or sym2 or "")
-        return salary_min, salary_max, currency.upper() if currency else None
+        currency = cur1 or cur1b or cur2 or cur3 or _CURRENCY_SYMBOLS.get(sym1 or sym2 or "")
+        overall_min = salary_min if overall_min is None else min(overall_min, salary_min)
+        overall_max = salary_max if overall_max is None else max(overall_max, salary_max)
+        overall_currency = overall_currency or (currency.upper() if currency else None)
+
+    if overall_min is not None:
+        return overall_min, overall_max, overall_currency
 
     # No range found — some listings (see _SALARY_SINGLE_RE) state a single
     # flat figure instead of a range.
