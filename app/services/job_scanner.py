@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from html import unescape
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import httpx
 
@@ -989,6 +989,46 @@ def _extract_balanced_div(html: str, div_start: int) -> str | None:
 _GREENHOUSE_DESCRIPTION_MARKER = 'class="job__description'
 
 
+def _stripe_job_details(url: str, html: str) -> tuple[str | None, str | None]:
+    if urlsplit(url).hostname not in {"stripe.com", "www.stripe.com"}:
+        return None, None
+
+    def description_link(link: re.Match[str]) -> str:
+        target = urljoin(url, link.group(1))
+        parts = urlsplit(target)
+        if parts.hostname in {"stripe.com", "www.stripe.com"} and parts.path.startswith("/careers/apply/"):
+            return ""
+        return f'<a href="{target}">{link.group(2)}</a>'
+
+    # Stripe renders policy, benefits, and applicant notices outside the
+    # JSON-LD description. Keep the job sections without navigation/footer.
+    sections = []
+    for match in re.finditer(
+        r'<div\b[^>]*class=["\'](?:careers-listing-details__body|careers-listing-closing|'
+        r'careers-listing-disclaimer|careers-listing-details__sidebar-content)["\'][^>]*>', html
+    ):
+        content = _extract_balanced_div(html, match.start())
+        if content:
+            content = _LINK_RE.sub(description_link, content)
+            sections.append(content)
+    description = _html_to_formatted_text("\n".join(sections))
+
+    # The Next.js payload includes remote countries as well as every office;
+    # JSON-LD's first jobLocation only identifies one of those offices.
+    match = re.search(r'<script\b[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', html, re.DOTALL)
+    location = None
+    if match:
+        try:
+            listing = json.loads(match.group(1))["props"]["pageProps"]["listing"]
+            names = [loc["name"] for loc in listing["locations"] if isinstance(loc.get("name"), str)]
+            location = "; ".join(dict.fromkeys(names)) or None
+            if location and len(location) > _MAX_LOCATION_LENGTH:
+                location = location[: _MAX_LOCATION_LENGTH - 3] + "..."
+        except (ValueError, KeyError, TypeError, AttributeError):
+            pass
+    return description, location
+
+
 def _extract_greenhouse_job_description(html: str) -> str | None:
     marker = html.find(_GREENHOUSE_DESCRIPTION_MARKER)
     if marker == -1:
@@ -1427,8 +1467,10 @@ def scan_job_url(url: str) -> ScanResult:
     # Eightfold posting with JSON-LD lost all its formatting even though
     # the no-JSON-LD branch above already knows how to fetch and format it.
     eightfold_job_data = _fetch_eightfold_job_data(str(response.url), html)
+    stripe_description, stripe_location = _stripe_job_details(str(response.url), html)
     description = (
-        (_workday_description_of(workday_job_data) if workday_job_data else None)
+        stripe_description
+        or (_workday_description_of(workday_job_data) if workday_job_data else None)
         or (_html_to_formatted_text(eightfold_job_data.get("jobDescription")) if eightfold_job_data else None)
         or _html_to_formatted_text(job_ld.get("description"))
         or fallback_description
@@ -1462,7 +1504,7 @@ def scan_job_url(url: str) -> ScanResult:
         title=_clean_text(job_ld.get("title")) or fallback_title,
         description=description,
         company_name=_clean_text(company_name),
-        location=_location_of(job_ld),
+        location=stripe_location or _location_of(job_ld),
         workplace_type=_workplace_type_of(job_ld),
         employment_type=_employment_type_of(job_ld),
         salary_min=salary_min,

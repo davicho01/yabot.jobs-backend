@@ -157,3 +157,53 @@ def test_salary_from_text_still_parses_full_digit_range():
 
 def test_salary_from_text_none_without_currency_signal():
     assert _salary_from_text("We need 8-10 years of experience") == (None, None, None)
+
+
+def test_stripe_scan_preserves_sections_and_all_locations(monkeypatch):
+    import json
+
+    url = "https://stripe.com/careers/listing/engineer/123"
+    ld = {"@type": "JobPosting", "title": "Engineer", "description": "Core duties",
+          "jobLocation": {"address": {"addressLocality": "Toronto"}},
+          "baseSalary": {"currency": "USD", "value": {"minValue": 224000, "maxValue": 336000}}}
+    data = {"props": {"pageProps": {"listing": {"locations": [
+        {"name": "Toronto"}, {"name": "Remote in Canada"}, {"name": "Seattle"},
+        {"name": "Remote in United States"}, {"name": "Toronto"},
+    ]}}}}
+    html = f'''<script type="application/ld+json">{json.dumps(ld)}</script>
+    <script id="__NEXT_DATA__" type="application/json">{json.dumps(data)}</script>
+    <nav>Product navigation</nav>
+    <div class="careers-listing-details__body"><div><h2>Responsibilities</h2><p>Core duties</p></div></div>
+    <div class="careers-listing-details__body"><h2>Hybrid work at Stripe</h2><p>35 miles from an office</p></div>
+    <div class="careers-listing-details__body"><h2>Pay and benefits</h2><p>Equity and medical benefits</p></div>
+    <div class="careers-listing-closing"><p>We encourage you to apply.</p><a href="/careers/apply/engineer/123"><span>Apply now</span></a></div>
+    <div class="careers-listing-disclaimer"><div><a href="/legal/notice">Applicant notice</a></div><p>100 days</p></div>
+    <div class="careers-listing-details__sidebar-content"><h3>Team</h3><p>Data Platform</p><a href="https://stripe.com/careers/apply/engineer/123">Apply for this role</a></div>
+    <footer>Marketing footer</footer>'''
+    monkeypatch.setattr(job_scanner, "_fetch_html", lambda _: FakeResponse(text=html, url=url))
+    result = job_scanner.scan_job_url(url)
+    assert result.success
+    assert result.location == "Toronto; Remote in Canada; Seattle; Remote in United States"
+    for text in ["Core duties", "35 miles", "Equity and medical", "100 days", "Data Platform",
+                 "[Applicant notice](https://stripe.com/legal/notice)"]:
+        assert text in result.description
+    assert result.description.count("Core duties") == 1
+    assert "Product navigation" not in result.description
+    assert "Marketing footer" not in result.description
+    assert "Apply now" not in result.description
+    assert "Apply for this role" not in result.description
+    assert "/careers/apply/" not in result.description
+    assert "We encourage you to apply." in result.description
+    assert (result.salary_min, result.salary_max, result.salary_currency) == (224000, 336000, "USD")
+    assert job_scanner._stripe_job_details("https://example.com/job", html) == (None, None)
+
+
+def test_stripe_scan_falls_back_when_page_sections_or_payload_are_missing(monkeypatch):
+    html = '''<script type="application/ld+json">{"@type":"JobPosting","title":"Engineer",
+    "description":"Original description","jobLocation":{"address":{"addressLocality":"Toronto"}}}</script>
+    <script id="__NEXT_DATA__">invalid json</script>'''
+    monkeypatch.setattr(job_scanner, "_fetch_html", lambda _: FakeResponse(
+        text=html, url="https://stripe.com/careers/listing/engineer/123"))
+    result = job_scanner.scan_job_url("https://stripe.com/careers/listing/engineer/123")
+    assert result.description == "Original description"
+    assert result.location == "Toronto"
