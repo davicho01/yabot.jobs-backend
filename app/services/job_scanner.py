@@ -14,8 +14,7 @@ import httpx
 from app.core.config import settings
 from app.models.enums import EmploymentType, WorkplaceType
 from app.services.adapters.base import candidate_slugs_from_domain
-
-_SCRAPERAPI_URL = "https://api.scraperapi.com/"
+from app.services.browser_fetch import fetch_rendered_page
 
 logger = logging.getLogger("app.job_scanner")
 
@@ -1023,56 +1022,29 @@ def _fetch_direct(url: str) -> httpx.Response:
         return response
 
 
-def _fetch_via_scraperapi(url: str) -> httpx.Response:
-    # httpx's exception messages embed the full request URL — which here
-    # includes "?api_key=...". Never let one of those propagate as-is: it
-    # would land in scan_error, which GET /jobs returns with no auth.
-    try:
-        response = httpx.get(
-            _SCRAPERAPI_URL,
-            # render=true runs a real headless browser so JS-rendered sites
-            # (React/Next.js job boards that fetch content client-side, e.g.
-            # ZipRecruiter) actually return their content instead of a
-            # near-empty shell of <script> tags. Costs more ScraperAPI
-            # credits per request, but this is already the last-resort
-            # fallback path, not the common case.
-            params={"api_key": settings.scraperapi_key, "url": url, "render": "true"},
-            timeout=90.0,
-        )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        # `from None` deliberately drops the original exception as __cause__:
-        # it embeds the request URL (including "?api_key=..."), and Python
-        # prints the full chain on any uncaught traceback or
-        # logger.exception() call — chaining it would undo the sanitization.
-        raise httpx.HTTPError(f"ScraperAPI request failed with status {exc.response.status_code}") from None
-    except httpx.HTTPError as exc:
-        raise httpx.HTTPError(f"ScraperAPI request failed: {type(exc).__name__}") from None
-    return response
+@dataclass
+class _FetchedPage:
+    text: str
+    url: str
 
 
-def _fetch_html(url: str) -> httpx.Response:
-    """Fetch a page, falling back to ScraperAPI (when configured) for sites
-    that block a plain HTTP client — bot-detection challenges, 403s, etc.
-    Returns the full response (not just .text) so the caller can also
-    inspect the final, post-redirect URL.
+def _fetch_html(url: str) -> _FetchedPage:
+    """Fetch a page, falling back to a real headless-browser render (via
+    browser_fetch_service, already deployed as yabot-jobs-browser on Cloud
+    Run) for sites that block a plain HTTP client — bot-detection
+    challenges, 403s, etc. Returns both the HTML and the final, post-redirect
+    URL either way, since callers need to inspect the latter too.
     """
-    # ScraperAPI fallback disabled for now — direct fetch only.
-    return _fetch_direct(url)
+    try:
+        response = _fetch_direct(url)
+        return _FetchedPage(text=response.text, url=str(response.url))
+    except httpx.HTTPError as exc:
+        logger.info("Direct fetch of %s failed (%s); retrying via browser_fetch_service.", url, exc)
 
-    # try:
-    #     return _fetch_direct(url)
-    # except httpx.HTTPError as exc:
-    #     if not settings.scraperapi_key:
-    #         logger.warning("Failed to fetch %s: %s", url, exc)
-    #         raise
-    #     logger.info("Direct fetch of %s failed (%s); retrying via ScraperAPI.", url, exc)
-    #
-    # try:
-    #     return _fetch_via_scraperapi(url)
-    # except httpx.HTTPError as exc:
-    #     logger.warning("ScraperAPI fetch of %s also failed: %s", url, exc)
-    #     raise
+    rendered = fetch_rendered_page(url)
+    if rendered is None:
+        raise httpx.HTTPError(f"Failed to fetch {url}: direct fetch blocked and browser-render fallback failed")
+    return _FetchedPage(text=rendered.html, url=rendered.url)
 
 
 # Some companies white-label Greenhouse onto their own domain (e.g.

@@ -51,16 +51,6 @@ services:
       timeout: 5s
       retries: 20
 
-  # Headless-Chromium rendering, split into its own image so the
-  # api/worker/crawl-worker images don't carry Playwright's browser binary.
-  # Only the rare JS-rendered-site fallback (app/services/browser_fetch.py)
-  # calls this. See browser_fetch_service/README.md.
-  browser-fetch:
-    build: browser_fetch_service
-    ports:
-      - "8090:8080"
-    restart: unless-stopped
-
   # One-shot: applies migrations, then exits. api/worker/crawl-worker all
   # wait for this to finish successfully before starting.
   migrate:
@@ -81,7 +71,7 @@ services:
 #      PUBSUB_EMULATOR_HOST: pubsub-emulator:8085
 #      GCP_PROJECT_ID: local-dev
 #      RESUME_STORAGE_ENDPOINT_URL: http://minio:9000
-#      BROWSER_FETCH_SERVICE_URL: http://browser-fetch:8080
+#      BROWSER_FETCH_SERVICE_URL: https://yabot-jobs-browser-487584214286.us-central1.run.app
 #    command: uvicorn main:app --host 0.0.0.0 --port 8000
 #    ports:
 #      - "8000:8000"
@@ -103,7 +93,9 @@ services:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/yabot_jobs
       PUBSUB_EMULATOR_HOST: pubsub-emulator:8085
       GCP_PROJECT_ID: local-dev
-      BROWSER_FETCH_SERVICE_URL: http://browser-fetch:8080
+      # Points at the real yabot-jobs-browser Cloud Run service (see
+      # deploy/gcloud-deploy.sh) — no local browser-fetch container.
+      BROWSER_FETCH_SERVICE_URL: https://yabot-jobs-browser-487584214286.us-central1.run.app
     command: python worker.py
     depends_on:
       migrate:
@@ -121,7 +113,9 @@ services:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/yabot_jobs
       PUBSUB_EMULATOR_HOST: pubsub-emulator:8085
       GCP_PROJECT_ID: local-dev
-      BROWSER_FETCH_SERVICE_URL: http://browser-fetch:8080
+      # Points at the real yabot-jobs-browser Cloud Run service (see
+      # deploy/gcloud-deploy.sh) — no local browser-fetch container.
+      BROWSER_FETCH_SERVICE_URL: https://yabot-jobs-browser-487584214286.us-central1.run.app
     command: python crawl_worker.py
     depends_on:
       migrate:

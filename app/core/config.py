@@ -19,12 +19,6 @@ class Settings(BaseSettings):
     # Generate one with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     api_key_encryption_key: str
 
-    # App-wide ScraperAPI key (https://www.scraperapi.com/) used as a fallback
-    # fetcher when a direct request to a job posting URL is blocked (403,
-    # bot-detection challenge, etc). Optional — scanning still works without
-    # it, just fails on sites that block plain HTTP clients.
-    scraperapi_key: str | None = None
-
     # App-wide LLM key used for job-posting extraction (every scan, whether
     # user-submitted or crawler-discovered). The per-user UserApiKey /
     # is_default mechanism (see app/models/api_key.py, /api-keys routes)

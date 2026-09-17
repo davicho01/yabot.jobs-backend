@@ -34,7 +34,7 @@ Set these in `.env` (loaded automatically by `app/core/config.py`).
 |---|---|---|---|
 | `DATABASE_URL` | No | `postgresql+psycopg://postgres:postgres@localhost:5432/yabot_jobs` | Points at the `postgres` service in `docker-compose.yml`, which maps host port `5433` → container `5432`, e.g. `postgresql+psycopg://postgres:postgres@localhost:5433/yabot_jobs`. |
 | `API_KEY_ENCRYPTION_KEY` | **Yes** | — | Fernet key used to encrypt stored per-user LLM API keys at rest. Generate with: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
-| `SCRAPERAPI_KEY` | No | unset | App-wide [ScraperAPI](https://www.scraperapi.com/) key. Used only as a fallback when a direct fetch of a job posting URL is blocked (403, bot-detection challenge, etc). Scanning still works without it — it just fails on sites that block plain HTTP clients. |
+| `BROWSER_FETCH_SERVICE_URL` | No | unset | URL of the headless-Chromium `yabot.jobs-browser` service (deployed separately, see `deploy/gcloud-deploy.sh`). Used as a fallback when a direct fetch of a job posting URL is blocked (403, bot-detection challenge, etc) or needs JS rendering. Scanning still works without it — it just fails on sites that block plain HTTP clients. |
 | `SYSTEM_LLM_PROVIDER` | No | unset | LLM provider used for job-posting extraction on every scan (user-submitted or crawler-discovered) — e.g. `anthropic`, `openai`, `deepseek`, `google`, `mistral`, `other`. Extraction is skipped (heuristic-only) when unset. |
 | `SYSTEM_LLM_MODEL` | No | unset | Model id, e.g. `claude-opus-5`. Optional only for `anthropic` (defaults to `claude-opus-5`); required for every other provider. |
 | `SYSTEM_LLM_API_KEY` | No | unset | API key for `SYSTEM_LLM_PROVIDER`. |

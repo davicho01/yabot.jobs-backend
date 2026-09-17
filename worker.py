@@ -4,7 +4,7 @@ Runs alongside the API (`uvicorn main:app`) as a separate process: the API
 publishes a scan request to Pub/Sub when a new URL is submitted and returns
 immediately (see app.api.routes.jobs); this process consumes those requests
 and does the actual fetch/extract/store work, which can take well over a
-minute per URL (page fetch + optional ScraperAPI fallback + LLM extraction).
+minute per URL (page fetch + optional browser-render fallback + LLM extraction).
 
 Local dev: point at the Pub/Sub emulator (see docker-compose.yml) by setting
 PUBSUB_EMULATOR_HOST=localhost:8085 before running this. Production: point at
@@ -27,9 +27,8 @@ from app.services.job_queue import ensure_topic_and_subscription, subscriber_cli
 from app.services.jobs import process_scan_job
 
 logging.basicConfig(level=logging.INFO)
-# httpx logs the full request URL (including query params) at INFO level.
-# ScraperAPI's key travels in the URL's query string, not a header, so
-# leaving this at INFO would print it in the clear on every fallback fetch.
+# httpx logs the full request URL at INFO level on every call — noisy given
+# how many fetches one scan makes (job page, ATS APIs, browser_fetch_service).
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger("app.worker")
 

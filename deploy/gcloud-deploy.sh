@@ -115,7 +115,6 @@ create_secret_from_env() {
 
 create_secret_from_env database-url               DATABASE_URL                      deploy/.env.production
 create_secret_from_env api-key-encryption-key      API_KEY_ENCRYPTION_KEY
-create_secret_from_env scraperapi-key              SCRAPERAPI_KEY
 create_secret_from_env system-llm-api-key          SYSTEM_LLM_API_KEY               deploy/.env.production
 # Real AWS creds for the yabot-jobs-backend IAM user (scoped to just the
 # yabot.jobs-files bucket) — kept out of the local dev .env, which stays
@@ -129,7 +128,7 @@ COMMON_ENV="GCP_PROJECT_ID=${PROJECT_ID},BROWSER_FETCH_SERVICE_URL=${BROWSER_FET
 # EMAIL_SENDER_* map to the same underlying secrets as RESUME_STORAGE_* —
 # both are the yabot-jobs-backend IAM user's credentials (S3 + SES policies
 # attached to one user), not separate secrets.
-COMMON_SECRETS="DATABASE_URL=database-url:latest,API_KEY_ENCRYPTION_KEY=api-key-encryption-key:latest,SCRAPERAPI_KEY=scraperapi-key:latest,SYSTEM_LLM_API_KEY=system-llm-api-key:latest,RESUME_STORAGE_ACCESS_KEY_ID=resume-storage-access-key:latest,RESUME_STORAGE_SECRET_ACCESS_KEY=resume-storage-secret-key:latest,EMAIL_SENDER_ACCESS_KEY_ID=resume-storage-access-key:latest,EMAIL_SENDER_SECRET_ACCESS_KEY=resume-storage-secret-key:latest"
+COMMON_SECRETS="DATABASE_URL=database-url:latest,API_KEY_ENCRYPTION_KEY=api-key-encryption-key:latest,SYSTEM_LLM_API_KEY=system-llm-api-key:latest,RESUME_STORAGE_ACCESS_KEY_ID=resume-storage-access-key:latest,RESUME_STORAGE_SECRET_ACCESS_KEY=resume-storage-secret-key:latest,EMAIL_SENDER_ACCESS_KEY_ID=resume-storage-access-key:latest,EMAIL_SENDER_SECRET_ACCESS_KEY=resume-storage-secret-key:latest"
 
 # ---------------------------------------------------------------------------
 # 2. Build & push the shared image (api/worker/crawl-worker/migrate all use it)

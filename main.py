@@ -9,9 +9,8 @@ from app.core.config import settings
 from app.services.resume_storage import ensure_bucket_exists
 
 logging.basicConfig(level=logging.INFO)
-# httpx logs the full request URL (including query params) at INFO level.
-# ScraperAPI's key travels in the URL's query string, not a header, so
-# leaving this at INFO would print it in the clear on every fallback fetch.
+# httpx logs the full request URL at INFO level on every call — noisy given
+# how many fetches one scan makes (job page, ATS APIs, browser_fetch_service).
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 

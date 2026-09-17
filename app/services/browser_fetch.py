@@ -15,6 +15,7 @@ the same None return.
 """
 
 import logging
+from dataclasses import dataclass
 
 import httpx
 
@@ -25,14 +26,23 @@ logger = logging.getLogger("app.browser_fetch")
 _TIMEOUT_SECONDS = 20.0
 
 
-def fetch_rendered_html(url: str, *, wait_for_selector: str | None = None) -> str | None:
+@dataclass
+class RenderedPage:
+    html: str
+    # The post-redirect URL Chromium actually landed on — callers that need
+    # to resolve relative links or detect ATS error-page redirects (see
+    # job_scanner._fetch_html) can't rely on the URL they requested.
+    url: str
+
+
+def fetch_rendered_page(url: str, *, wait_for_selector: str | None = None) -> RenderedPage | None:
     """Render `url` in headless Chromium (via browser_fetch_service) and
-    return the fully hydrated HTML, or None on any failure whatsoever
-    (service not configured, unreachable, browser launch failure, navigation
-    timeout, target crash, ...). Never raises — every caller treats this
-    exactly like the other best-effort fallbacks in this codebase (e.g.
-    detect_embedded_ats_source): a None just means "this enhancement isn't
-    available right now," not an error to surface.
+    return the fully hydrated HTML plus the final post-redirect URL, or None
+    on any failure whatsoever (service not configured, unreachable, browser
+    launch failure, navigation timeout, target crash, ...). Never raises —
+    every caller treats this exactly like the other best-effort fallbacks in
+    this codebase (e.g. detect_embedded_ats_source): a None just means "this
+    enhancement isn't available right now," not an error to surface.
     """
     if not settings.browser_fetch_service_url:
         logger.info("Browser fetch service not configured; skipping rendered fetch of %s", url)
@@ -45,7 +55,16 @@ def fetch_rendered_html(url: str, *, wait_for_selector: str | None = None) -> st
             timeout=_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
-        return response.json()["html"]
+        data = response.json()
+        if data["html"] is None:
+            return None
+        return RenderedPage(html=data["html"], url=data.get("final_url") or url)
     except Exception:
         logger.warning("Rendered fetch of %s failed; falling back to no enhancement.", url, exc_info=True)
         return None
+
+
+def fetch_rendered_html(url: str, *, wait_for_selector: str | None = None) -> str | None:
+    """Same as fetch_rendered_page, but for callers that only need the HTML."""
+    rendered = fetch_rendered_page(url, wait_for_selector=wait_for_selector)
+    return rendered.html if rendered else None
