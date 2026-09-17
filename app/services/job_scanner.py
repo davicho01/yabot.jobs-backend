@@ -218,7 +218,15 @@ def _html_to_formatted_text(value: Any) -> str | None:
     """
     if not isinstance(value, str):
         return None
-    text = _SCRIPT_STYLE_RE.sub(" ", value)
+    # Unescape BEFORE any tag-based substitution below — see _clean_text's
+    # comment: some sites (Mastercard, Freedom Mortgage's Phenom-hosted
+    # JSON-LD) double-encode their description as HTML-entity-escaped
+    # markup ("&lt;p&gt;..." inside the JSON string, not raw "<p>"), which
+    # every regex below can't see as a tag at all until unescaped first —
+    # left until the end, they'd only turn into real tags *after* stripping,
+    # leaking raw HTML straight into the "Markdown" the frontend renders.
+    text = unescape(value)
+    text = _SCRIPT_STYLE_RE.sub(" ", text)
     text = _LINK_RE.sub(r"[\2](\1)", text)
     text = _BOLD_OPEN_RE.sub("**", text)
     text = _BOLD_CLOSE_RE.sub("**", text)
@@ -230,7 +238,7 @@ def _html_to_formatted_text(value: Any) -> str | None:
     text = _BR_RE.sub("\n", text)
     text = _HEADER_OPEN_RE.sub(lambda m: "\n\n" + "#" * int(m.group(1)) + " ", text)
     text = _BLOCK_CLOSE_RE.sub("\n", text)
-    text = unescape(_TAG_RE.sub("", text))
+    text = _TAG_RE.sub("", text)
     text = _tighten_bold_markers(text)
 
     lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.split("\n")]
