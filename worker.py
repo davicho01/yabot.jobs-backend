@@ -82,7 +82,7 @@ def main() -> None:
         logger.info("Worker stopped.")
 
 
-def handle_scan_request(cloud_event) -> None:
+def handle_scan_request(event, context) -> None:
     """Cloud Functions (2nd gen) Pub/Sub entry point.
 
     Prod deploys this instead of running main()'s pull loop: GCP invokes it
@@ -90,11 +90,15 @@ def handle_scan_request(cloud_event) -> None:
     between messages, instead of a worker pool instance running 24/7 to
     poll for work. No functions_framework/cloudevents import here — same
     reasoning as crawl_dispatcher.py's dispatch(): the buildpack wraps this
-    by signature at deploy time, so keeping it undecorated means this file
-    still imports cleanly for local dev (`python worker.py`, see main()
-    below) without functions-framework installed.
+    by signature at deploy time. Undecorated + this two-arg (event, context)
+    signature is what the buildpack actually invokes for a --trigger-topic
+    deploy (confirmed against a real deploy — a single-arg CloudEvent-typed
+    signature gets called as function(data, context) and blows up with
+    "takes 1 positional argument but 2 were given"), and it keeps this file
+    importable for local dev (`python worker.py`, see main() below) without
+    functions-framework installed.
     """
-    data = base64.b64decode(cloud_event.data["message"]["data"])
+    data = base64.b64decode(event["data"])
     try:
         payload = json.loads(data.decode("utf-8"))
         url_id = uuid.UUID(payload["url_id"])
