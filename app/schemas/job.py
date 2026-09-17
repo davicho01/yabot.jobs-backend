@@ -38,6 +38,7 @@ class JobPostingUrlRead(BaseModel):
     domain: str
     scan_status: str
     scan_error: str | None
+    crawl_source_id: uuid.UUID | None
     last_scanned_at: datetime | None
     created_at: datetime
 

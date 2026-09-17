@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -9,6 +9,13 @@ class ScanDayCount(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     date: date
+    count: int
+
+
+class ScanHourCount(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    hour: datetime
     count: int
 
 

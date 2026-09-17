@@ -73,6 +73,32 @@ def get_scans_by_day(db: Session, days: int, crawl_source_id: uuid.UUID | None =
     ]
 
 
+def get_scans_by_hour(db: Session, hours: int, crawl_source_id: uuid.UUID | None = None) -> list[dict]:
+    """Hourly scan counts for the last `hours` hours (current hour inclusive),
+    with zero-filled gaps so the chart has one point per hour regardless of
+    scan activity."""
+    now = datetime.now(timezone.utc)
+    start = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=hours - 1)
+
+    stmt = (
+        select(
+            func.date_trunc("hour", JobPostingUrl.last_scanned_at).label("hour"),
+            func.count().label("count"),
+        )
+        .where(JobPostingUrl.last_scanned_at >= start)
+        .group_by("hour")
+    )
+    if crawl_source_id is not None:
+        stmt = stmt.where(JobPostingUrl.crawl_source_id == crawl_source_id)
+
+    counts_by_hour = {row.hour.replace(tzinfo=timezone.utc): row.count for row in db.execute(stmt).all()}
+
+    return [
+        {"hour": hour, "count": counts_by_hour.get(hour, 0)}
+        for hour in (start + timedelta(hours=i) for i in range(hours))
+    ]
+
+
 def get_crawl_source_stats(db: Session, source: CrawlSource) -> dict:
     scoped = JobPostingUrl.crawl_source_id == source.id
     return {

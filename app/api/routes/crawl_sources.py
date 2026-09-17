@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -9,15 +9,13 @@ from app.api.deps import get_current_admin_user, get_db
 from app.models.crawl_source import CrawlSource
 from app.models.enums import CrawlSourceStatus, ScanStatus
 from app.models.job_url import JobPostingUrl
-from app.schemas.admin import CrawlSourceStatsRead, ScanDayCount
+from app.schemas.admin import CrawlSourceStatsRead, ScanDayCount, ScanHourCount
 from app.schemas.crawl_source import CrawlSourceCreate, CrawlSourceRead, CrawlSourceUpdate
-from app.schemas.job import JobListRead
 from app.services import admin as admin_service
 from app.services.ats_adapters import detect_ats_source, detect_embedded_ats_source
 from app.services.crawl_queue import enqueue_crawl, ensure_topic_and_subscription
 from app.services.job_queue import enqueue_scan
 from app.services.job_queue import ensure_topic_and_subscription as ensure_scan_topic_and_subscription
-from app.services.jobs import to_job_detail
 
 router = APIRouter(prefix="/admin/crawl-sources", tags=["admin"], dependencies=[Depends(get_current_admin_user)])
 
@@ -160,24 +158,6 @@ def get_crawl_source_stats(source_id: uuid.UUID, db: Session = Depends(get_db)) 
     return admin_service.get_crawl_source_stats(db, source)
 
 
-@router.get("/{source_id}/jobs", response_model=JobListRead)
-def get_crawl_source_jobs(
-    source_id: uuid.UUID,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db),
-) -> JobListRead:
-    source = db.get(CrawlSource, source_id)
-    if source is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Crawl source not found.")
-
-    stmt = select(JobPostingUrl).where(JobPostingUrl.crawl_source_id == source_id)
-    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
-    stmt = stmt.order_by(JobPostingUrl.created_at.desc()).limit(page_size).offset((page - 1) * page_size)
-    url_rows = db.scalars(stmt).all()
-    return JobListRead(items=[to_job_detail(row) for row in url_rows], total=total, page=page, page_size=page_size)
-
-
 @router.get("/{source_id}/scans-by-day", response_model=list[ScanDayCount])
 def get_crawl_source_scans_by_day(
     source_id: uuid.UUID, days: int = Query(90, ge=1, le=365), db: Session = Depends(get_db)
@@ -186,3 +166,13 @@ def get_crawl_source_scans_by_day(
     if source is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Crawl source not found.")
     return admin_service.get_scans_by_day(db, days=days, crawl_source_id=source_id)
+
+
+@router.get("/{source_id}/scans-by-hour", response_model=list[ScanHourCount])
+def get_crawl_source_scans_by_hour(
+    source_id: uuid.UUID, hours: int = Query(24, ge=1, le=168), db: Session = Depends(get_db)
+) -> list[dict]:
+    source = db.get(CrawlSource, source_id)
+    if source is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Crawl source not found.")
+    return admin_service.get_scans_by_hour(db, hours=hours, crawl_source_id=source_id)
