@@ -4,7 +4,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry
 
 _TALENTBREW_SIGNATURE = "tbcdn.talentbrew.com"
 _TALENTBREW_RECORDS_PER_PAGE = 15
@@ -58,7 +58,7 @@ def _fetch_jobs(host: str) -> list[str]:
     urls: list[str] = []
     page = 1
     while len(urls) < _TALENTBREW_MAX_JOBS:
-        response = httpx.get(
+        response = get_with_retry(
             f"https://{host}/search-jobs/results",
             params={**_TALENTBREW_RESULTS_PARAMS, "CurrentPage": str(page)},
             timeout=TIMEOUT,

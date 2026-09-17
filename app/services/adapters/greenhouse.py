@@ -4,7 +4,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter, candidate_slugs_from_domain
+from app.services.adapters.base import TIMEOUT, AtsAdapter, candidate_slugs_from_domain, get_with_retry
 
 _GREENHOUSE_JOBS_URL = "https://boards-api.greenhouse.io/v1/boards/{board_key}/jobs"
 _GREENHOUSE_URL_RE = re.compile(r"(?:job-boards|boards)\.greenhouse\.io/([^/?]+)", re.IGNORECASE)
@@ -34,7 +34,7 @@ def _match(url: str) -> str | None:
 
 def _fetch_jobs(board_key: str) -> list[str]:
     # Free, public, unauthenticated API — no key required.
-    response = httpx.get(_GREENHOUSE_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
+    response = get_with_retry(_GREENHOUSE_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
     response.raise_for_status()
     jobs = response.json().get("jobs", [])
     return [job["absolute_url"] for job in jobs if job.get("absolute_url")]
@@ -42,7 +42,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
 
 def _board_has_job(slug: str, job_id: str) -> bool:
     try:
-        response = httpx.get(f"{_GREENHOUSE_JOBS_URL.format(board_key=slug)}/{job_id}", timeout=TIMEOUT)
+        response = get_with_retry(f"{_GREENHOUSE_JOBS_URL.format(board_key=slug)}/{job_id}", timeout=TIMEOUT)
     except httpx.HTTPError:
         return False
     return response.status_code == 200

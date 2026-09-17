@@ -1,10 +1,8 @@
 import re
 from urllib.parse import parse_qs, urlsplit
 
-import httpx
-
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry
 
 _ADP_JOBS_URL = "https://workforcenow.adp.com/mascsr/default/careercenter/public/events/staffing/v1/job-requisitions"
 _ADP_JOB_URL = (
@@ -55,7 +53,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
     urls: list[str] = []
     skip = 0
     while len(urls) < _ADP_MAX_JOBS:
-        response = httpx.get(
+        response = get_with_retry(
             _ADP_JOBS_URL,
             params={
                 "cid": cid,

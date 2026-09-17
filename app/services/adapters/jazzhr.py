@@ -1,9 +1,7 @@
 import re
 
-import httpx
-
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry
 
 _JAZZHR_JOBS_URL = "https://{board_key}.applytojob.com/apply/jobs"
 # The listing page links to /apply/jobs/details/{id}, but that route serves
@@ -29,7 +27,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
     # the server-rendered /apply/jobs HTML page, which links to each posting
     # as /apply/jobs/details/{id} — more fragile than a real API contract
     # since it depends on markup that could change, but deterministic today.
-    response = httpx.get(_JAZZHR_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
+    response = get_with_retry(_JAZZHR_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
     response.raise_for_status()
     job_ids = dict.fromkeys(_JAZZHR_JOB_ID_RE.findall(response.text))  # dedupe, keep order
     return [_JAZZHR_JOB_URL.format(board_key=board_key, job_id=job_id) for job_id in job_ids]

@@ -1,8 +1,69 @@
+import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 
+import httpx
+
 TIMEOUT = 30.0
+
+logger = logging.getLogger(__name__)
+
+# job_scanner.py's own retry helper caps at 3 attempts / 18s max backoff,
+# tuned for a single interactive job-page fetch. That budget isn't enough
+# here: verified live against Microsoft's Eightfold tenant, whose rate
+# limiter keeps tripping every few pages during a ~25-request pagination
+# run and needed 6 attempts / a 30s ceiling to ride out (crawl_worker.py has
+# no tight time budget, so the extra wall-clock cost here is fine).
+_RATE_LIMIT_MAX_ATTEMPTS = 6
+_RATE_LIMIT_MAX_WAIT_SECONDS = 60.0
+_RATE_LIMIT_BACKOFF_SECONDS = (2.0, 5.0, 10.0, 20.0, 30.0)
+
+
+def _rate_limit_wait_seconds(response: httpx.Response, attempt: int) -> float:
+    """How long to wait before retrying a 429, preferring the site's own
+    Retry-After over a guessed backoff — capped so a site advertising an
+    hours-long Retry-After can't pin a worker slot on one URL indefinitely.
+    Mirrors job_scanner.py's helper of the same name/shape.
+    """
+    retry_after = response.headers.get("Retry-After")
+    if retry_after is not None:
+        try:
+            wait = float(retry_after)
+        except ValueError:
+            wait = None  # HTTP-date form — not worth parsing, fall back to backoff
+        if wait is not None and wait >= 0:
+            return min(wait, _RATE_LIMIT_MAX_WAIT_SECONDS)
+    return _RATE_LIMIT_BACKOFF_SECONDS[attempt]
+
+
+def _request_with_retry(request_fn: Callable[[], httpx.Response], url: str) -> httpx.Response:
+    """Shared retry loop behind get_with_retry/post_with_retry: retries a
+    few times on 429, for tenant APIs hit repeatedly in a tight pagination
+    loop (e.g. Eightfold's /api/pcsx/search) — a burst of back-to-back
+    requests to the same host can trip the tenant's own rate limiter partway
+    through. Does not call raise_for_status(); callers do that themselves,
+    same as a plain httpx.get()/httpx.post() call.
+    """
+    attempt = 0
+    while True:
+        response = request_fn()
+        attempt += 1
+        if response.status_code == httpx.codes.TOO_MANY_REQUESTS and attempt < _RATE_LIMIT_MAX_ATTEMPTS:
+            wait = _rate_limit_wait_seconds(response, attempt - 1)
+            logger.info("Rate limited fetching %s (attempt %d); retrying in %.1fs.", url, attempt, wait)
+            time.sleep(wait)
+            continue
+        return response
+
+
+def get_with_retry(url: str, *, timeout: float = TIMEOUT, **kwargs) -> httpx.Response:
+    return _request_with_retry(lambda: httpx.get(url, timeout=timeout, **kwargs), url)
+
+
+def post_with_retry(url: str, *, timeout: float = TIMEOUT, **kwargs) -> httpx.Response:
+    return _request_with_retry(lambda: httpx.post(url, timeout=timeout, **kwargs), url)
 
 
 @dataclass(frozen=True)

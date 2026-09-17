@@ -1,9 +1,7 @@
 import re
 
-import httpx
-
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter
+from app.services.adapters.base import TIMEOUT, AtsAdapter, post_with_retry
 
 _WORKDAY_JOBS_URL = "https://{company}.{instance}.myworkdayjobs.com/wday/cxs/{company}/{site}/jobs"
 _WORKDAY_JOB_BASE_URL = "https://{company}.{instance}.myworkdayjobs.com/{site}"
@@ -45,7 +43,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
     urls: list[str] = []
     offset = 0
     while len(urls) < _WORKDAY_MAX_JOBS:
-        response = httpx.post(
+        response = post_with_retry(
             jobs_url,
             json={"appliedFacets": {}, "limit": _WORKDAY_PAGE_SIZE, "offset": offset, "searchText": ""},
             headers={"Content-Type": "application/json"},

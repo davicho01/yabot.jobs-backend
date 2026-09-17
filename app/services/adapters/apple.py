@@ -2,10 +2,8 @@ import json
 import re
 from datetime import datetime, timezone
 
-import httpx
-
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter, parse_month_day_year
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry, parse_month_day_year
 
 _APPLE_JOBS_URL = "https://jobs.apple.com/en-us/search"
 _APPLE_JOB_URL = "https://jobs.apple.com/en-us/details/{position_id}/{slug}"
@@ -34,7 +32,7 @@ def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company b
     today = datetime.now(timezone.utc).date()
     page = 1
     while len(urls) < _APPLE_MAX_JOBS:
-        response = httpx.get(_APPLE_JOBS_URL, params={"sort": "newest", "page": page}, timeout=TIMEOUT)
+        response = get_with_retry(_APPLE_JOBS_URL, params={"sort": "newest", "page": page}, timeout=TIMEOUT)
         response.raise_for_status()
         match = _APPLE_HYDRATION_RE.search(response.text)
         if not match:

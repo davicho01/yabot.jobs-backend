@@ -5,7 +5,7 @@ from xml.etree import ElementTree
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry
 
 _EIGHTFOLD_SEARCH_PAGE_SIZE = 20
 _EIGHTFOLD_MAX_JOBS = 500
@@ -44,7 +44,7 @@ def _domain_is_valid(host: str, domain: str) -> bool:
     # for this user") rather than succeeding with an empty result, so this
     # can't mistake "no open roles right now" for "wrong domain".
     try:
-        response = httpx.get(
+        response = get_with_retry(
             f"https://{host}/api/pcsx/search", params={"domain": domain, "start": 0, "num": 1}, timeout=TIMEOUT
         )
         response.raise_for_status()
@@ -113,7 +113,7 @@ def _fetch_jobs(host: str) -> list[str]:
     # back each time, and stops using the response's own "count" rather
     # than assuming a fixed page size.
     while len(urls) < _EIGHTFOLD_MAX_JOBS and (total is None or start < total):
-        response = httpx.get(
+        response = get_with_retry(
             f"https://{host}/api/pcsx/search",
             params={"domain": domain, "start": start, "num": _EIGHTFOLD_SEARCH_PAGE_SIZE},
             timeout=TIMEOUT,
@@ -169,7 +169,7 @@ def _detect_embedded(url: str) -> str | None:
 
     for domain in _candidate_domains(host):
         try:
-            detail = httpx.get(
+            detail = get_with_retry(
                 f"https://{host}/api/pcsx/position_details",
                 params={"position_id": job_id, "domain": domain},
                 timeout=TIMEOUT,

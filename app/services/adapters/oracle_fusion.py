@@ -1,10 +1,8 @@
 import re
 from datetime import datetime, timezone
 
-import httpx
-
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry
 
 _ORACLE_FUSION_JOBS_URL = "https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
 _ORACLE_FUSION_JOB_URL = "https://{host}/hcmUI/CandidateExperience/en/sites/{site_number}/job/{job_id}"
@@ -39,7 +37,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
     offset = 0
     today = datetime.now(timezone.utc).date()
     while len(urls) < _ORACLE_FUSION_MAX_JOBS:
-        response = httpx.get(
+        response = get_with_retry(
             _ORACLE_FUSION_JOBS_URL.format(host=host),
             params={
                 "onlyData": "true",

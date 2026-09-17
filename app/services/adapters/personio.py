@@ -1,10 +1,8 @@
 import re
 from xml.etree import ElementTree
 
-import httpx
-
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry
 
 _PERSONIO_JOBS_URL = "https://{board_key}.jobs.personio.de/xml"
 _PERSONIO_JOB_URL = "https://{board_key}.jobs.personio.de/job/{job_id}"
@@ -20,7 +18,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
     # Free, public, unauthenticated XML feed — no key required. Like
     # BambooHR, the feed has no direct URL; each posting's page is a
     # predictable /job/{id} path off the same subdomain.
-    response = httpx.get(_PERSONIO_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
+    response = get_with_retry(_PERSONIO_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
     response.raise_for_status()
     root = ElementTree.fromstring(response.content)
     return [

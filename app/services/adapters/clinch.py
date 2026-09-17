@@ -4,7 +4,7 @@ from xml.etree import ElementTree
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry
 
 _CLINCH_MAX_JOBS = 500
 _CLINCH_SIGNATURE = "clinchtalent.com"
@@ -18,7 +18,7 @@ def _fetch_jobs(host: str) -> list[str]:
     # live instance). Small volume in practice (~100 jobs), so no "today
     # only" filtering — just a safety cap like every other adapter's
     # _MAX_JOBS.
-    response = httpx.get(f"https://{host}/sitemap.xml", timeout=TIMEOUT)
+    response = get_with_retry(f"https://{host}/sitemap.xml", timeout=TIMEOUT)
     response.raise_for_status()
     root = ElementTree.fromstring(response.content)
     ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}

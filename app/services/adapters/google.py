@@ -1,9 +1,7 @@
 import re
 
-import httpx
-
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry
 
 _GOOGLE_JOBS_URL = "https://www.google.com/about/careers/applications/jobs/results"
 _GOOGLE_JOB_RE = re.compile(r'href="jobs/results/([^"?]+)')
@@ -31,7 +29,7 @@ def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company b
     # pages rather than doing a Workday-style exact "today only" stop.
     urls: list[str] = []
     for page in range(1, _GOOGLE_MAX_PAGES + 1):
-        response = httpx.get(_GOOGLE_JOBS_URL, params={"page": page, "sort_by": "date"}, timeout=TIMEOUT)
+        response = get_with_retry(_GOOGLE_JOBS_URL, params={"page": page, "sort_by": "date"}, timeout=TIMEOUT)
         response.raise_for_status()
         job_paths = dict.fromkeys(_GOOGLE_JOB_RE.findall(response.text))  # dedupe, keep order
         if not job_paths:

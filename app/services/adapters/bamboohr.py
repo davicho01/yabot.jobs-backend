@@ -1,9 +1,7 @@
 import re
 
-import httpx
-
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry
 
 _BAMBOOHR_JOBS_URL = "https://{board_key}.bamboohr.com/careers/list"
 _BAMBOOHR_JOB_URL = "https://{board_key}.bamboohr.com/careers/{job_id}"
@@ -19,7 +17,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
     # Free, public, unauthenticated API — no key required. The list response
     # doesn't include a direct URL, but each posting's page is a predictable
     # /careers/{id} path off the same subdomain.
-    response = httpx.get(_BAMBOOHR_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
+    response = get_with_retry(_BAMBOOHR_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
     response.raise_for_status()
     postings = response.json().get("result", [])
     return [

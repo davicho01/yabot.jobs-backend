@@ -3,7 +3,7 @@ import re
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry
 
 _WORKABLE_JOBS_URL = "https://apply.workable.com/api/v1/widget/accounts/{board_key}"
 # Requires the account-prefixed URL shape (apply.workable.com/{account}/j/...,
@@ -31,7 +31,7 @@ def _match(url: str) -> str | None:
 def _fetch_jobs(board_key: str) -> list[str]:
     # Free, public, unauthenticated API — no key required (the same feed
     # that powers Workable's embeddable "jobs widget").
-    response = httpx.get(_WORKABLE_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
+    response = get_with_retry(_WORKABLE_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
     response.raise_for_status()
     jobs = response.json().get("jobs", [])
     return [job["url"] for job in jobs if job.get("url")]

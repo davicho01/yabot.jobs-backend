@@ -4,7 +4,7 @@ from urllib.parse import quote, unquote, urlsplit
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter, candidate_slugs_from_domain
+from app.services.adapters.base import TIMEOUT, AtsAdapter, candidate_slugs_from_domain, get_with_retry
 from app.services.browser_fetch import fetch_rendered_html
 
 _ASHBY_JOBS_URL = "https://api.ashbyhq.com/posting-api/job-board/{board_key}"
@@ -34,7 +34,7 @@ def _match(url: str) -> str | None:
 
 def _fetch_jobs(board_key: str) -> list[str]:
     # Free, public, unauthenticated API — no key required.
-    response = httpx.get(_ASHBY_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
+    response = get_with_retry(_ASHBY_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
     response.raise_for_status()
     jobs = response.json().get("jobs", [])
     return [job["jobUrl"] for job in jobs if job.get("jobUrl")]
@@ -42,7 +42,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
 
 def _board_has_job(slug: str, job_id: str) -> bool:
     try:
-        response = httpx.get(_ASHBY_JOBS_URL.format(board_key=quote(slug, safe="")), timeout=TIMEOUT)
+        response = get_with_retry(_ASHBY_JOBS_URL.format(board_key=quote(slug, safe="")), timeout=TIMEOUT)
     except httpx.HTTPError:
         return False
     if response.status_code != 200:

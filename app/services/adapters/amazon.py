@@ -1,10 +1,8 @@
 import re
 from datetime import datetime, timezone
 
-import httpx
-
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter, parse_month_day_year
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry, parse_month_day_year
 
 _AMAZON_JOBS_URL = "https://www.amazon.jobs/en/search.json"
 _AMAZON_JOB_BASE_URL = "https://www.amazon.jobs"
@@ -26,7 +24,7 @@ def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company b
     offset = 0
     today = datetime.now(timezone.utc).date()
     while len(urls) < _AMAZON_MAX_JOBS:
-        response = httpx.get(
+        response = get_with_retry(
             _AMAZON_JOBS_URL,
             params={"result_limit": _AMAZON_PAGE_SIZE, "offset": offset, "sort": "recent"},
             timeout=TIMEOUT,
