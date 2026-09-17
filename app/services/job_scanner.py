@@ -1278,8 +1278,18 @@ def scan_job_url(url: str) -> ScanResult:
     hiring_org = job_ld.get("hiringOrganization")
     company_name = hiring_org.get("name") if isinstance(hiring_org, dict) else None
     workday_job_data = _fetch_workday_job_data(str(response.url))
+    # Eightfold-powered career sites (e.g. Microsoft's) publish schema.org
+    # JobPosting JSON-LD alongside the pcsx API — but that JSON-LD
+    # `description` is a flat, unstyled copy of the page's plain-text meta
+    # description, not the rich HTML the API's own jobDescription field
+    # carries (headings, bullet lists, bold). Left unchecked here, this
+    # branch (job_ld present) never looks at the API at all, so every
+    # Eightfold posting with JSON-LD lost all its formatting even though
+    # the no-JSON-LD branch above already knows how to fetch and format it.
+    eightfold_job_data = _fetch_eightfold_job_data(str(response.url), html)
     description = (
         (_workday_description_of(workday_job_data) if workday_job_data else None)
+        or (_html_to_formatted_text(eightfold_job_data.get("jobDescription")) if eightfold_job_data else None)
         or _html_to_formatted_text(job_ld.get("description"))
         or fallback_description
     )
