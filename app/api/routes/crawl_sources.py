@@ -58,7 +58,7 @@ def update_crawl_source(
     data = payload.model_dump(exclude_unset=True)
     new_status = data.get("status", source.status)
     new_ats_type = source.ats_type
-    if "board_url" in data and data["board_url"] != source.board_url:
+    if "board_url" in data and (data["board_url"] != source.board_url or new_ats_type is None):
         try:
             new_ats_type, _ = detect_ats_source(data["board_url"])
         except ValueError as exc:

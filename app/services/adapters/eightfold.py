@@ -132,10 +132,33 @@ def _fetch_jobs(host: str) -> list[str]:
 
 def _detect_embedded(url: str) -> str | None:
     job_match = _EIGHTFOLD_JOB_URL_RE.search(url)
-    if not job_match:
-        return None
-    job_id = job_match.group(1)
     host = urlsplit(url).netloc
+    if not job_match:
+        # No job id in the URL — e.g. re-confirming a CrawlSource's bare
+        # board_url (the admin PATCH flow) rather than detecting from a
+        # freshly submitted job link. Same two-tier fallback as
+        # clinch.py's _detect_embedded: check the page for the signature
+        # string, then confirm fetch_jobs actually works for the host.
+        # The signature alone isn't enough for tenants like Netflix, whose
+        # white-labeled careers page doesn't link to eightfold.ai's own
+        # privacy policy at all (custom-branded instead) — so a missing
+        # signature must fall through to the fetch_jobs check rather than
+        # bail out, same as clinch.py does.
+        if not host:
+            return None
+        try:
+            response = httpx.get(url, timeout=TIMEOUT, follow_redirects=True)
+            response.raise_for_status()
+        except httpx.HTTPError:
+            return None
+        if _EIGHTFOLD_SIGNATURE in response.text:
+            return host
+        try:
+            return host if _fetch_jobs(host) else None
+        except (httpx.HTTPError, ValueError):
+            return None
+
+    job_id = job_match.group(1)
     try:
         response = httpx.get(url, timeout=TIMEOUT, follow_redirects=True)
         response.raise_for_status()
