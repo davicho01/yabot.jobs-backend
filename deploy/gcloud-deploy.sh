@@ -76,6 +76,16 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member="serviceAccount:${DEFAULT_COMPUTE_SA}" \
   --role="roles/secretmanager.secretAccessor" --condition=None
 
+# yabot-jobs-browser (see BROWSER_FETCH_SERVICE_URL above) is a private
+# Cloud Run service deployed separately — api/worker/crawl-worker call it
+# with a Google-signed ID token (app/services/browser_fetch.py), which needs
+# run.invoker on that specific service, not just a valid token. Without this
+# every call 403s at the Cloud Run layer regardless of authentication.
+gcloud run services add-iam-policy-binding yabot-jobs-browser \
+  --region="$REGION" \
+  --member="serviceAccount:${DEFAULT_COMPUTE_SA}" \
+  --role="roles/run.invoker"
+
 # ---------------------------------------------------------------------------
 # 0b. Cloud SQL for Postgres — db-f1-micro, single zone (no HA). Generates a
 #     fresh app-user password and writes DATABASE_URL straight into

@@ -18,6 +18,9 @@ import logging
 from dataclasses import dataclass
 
 import httpx
+from google.auth.exceptions import DefaultCredentialsError
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.oauth2.id_token import fetch_id_token
 
 from app.core.config import settings
 
@@ -33,6 +36,21 @@ class RenderedPage:
     # to resolve relative links or detect ATS error-page redirects (see
     # job_scanner._fetch_html) can't rely on the URL they requested.
     url: str
+
+
+def _identity_token_headers(audience: str) -> dict[str, str]:
+    # yabot-jobs-browser is a private Cloud Run service (no --allow-
+    # unauthenticated, no IAM invoker binding for anyone) — every caller
+    # needs a Google-signed ID token for this exact audience. On Cloud
+    # Run/Functions this comes from the ambient metadata server for free;
+    # locally (no ADC configured) it just fails and we call unauthenticated,
+    # which only works if BROWSER_FETCH_SERVICE_URL happens to point at an
+    # unauthenticated service.
+    try:
+        token = fetch_id_token(GoogleAuthRequest(), audience)
+    except DefaultCredentialsError:
+        return {}
+    return {"Authorization": f"Bearer {token}"}
 
 
 def fetch_rendered_page(url: str, *, wait_for_selector: str | None = None) -> RenderedPage | None:
@@ -52,6 +70,7 @@ def fetch_rendered_page(url: str, *, wait_for_selector: str | None = None) -> Re
         response = httpx.post(
             f"{settings.browser_fetch_service_url}/fetch",
             json={"url": url, "wait_for_selector": wait_for_selector},
+            headers=_identity_token_headers(settings.browser_fetch_service_url),
             timeout=_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
