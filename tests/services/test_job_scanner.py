@@ -1,4 +1,4 @@
-from app.services.job_scanner import _html_to_formatted_text
+from app.services.job_scanner import _WORKDAY_JOB_URL_RE, _html_to_formatted_text
 
 
 def test_html_to_formatted_text_strips_normal_html():
@@ -31,3 +31,37 @@ def test_html_to_formatted_text_none_for_non_string():
 
 def test_html_to_formatted_text_none_for_blank_result():
     assert _html_to_formatted_text("   ") is None
+
+
+def test_workday_job_url_re_matches_bare_url():
+    match = _WORKDAY_JOB_URL_RE.search(
+        "https://stryker.wd1.myworkdayjobs.com/StrykerCareers/job/Kalamazoo-Michigan/Senior-Engineer_R570975-1"
+    )
+    assert match is not None
+    assert match.groups() == (
+        "stryker",
+        "wd1",
+        "StrykerCareers",
+        "/job/Kalamazoo-Michigan/Senior-Engineer_R570975-1",
+    )
+
+
+def test_workday_job_url_re_stops_at_href_quote_when_embedded_in_html():
+    # The careers.stryker.com bug: branded career sites embed the real
+    # myworkdayjobs.com URL inside an href attribute rather than exposing it
+    # as the address-bar URL. Before the job_path group excluded quotes, it
+    # ran straight through the closing '"' into the rest of the page,
+    # producing a multi-line "job_path" that crashed httpx.get with
+    # InvalidURL instead of a clean per-job API path.
+    html = (
+        '<a href="https://stryker.wd1.myworkdayjobs.com/StrykerCareers/job/Kalamazoo-Michigan/'
+        'Senior-Engineer_R570975-1" target="_blank" class="font-bold">Apply</a>\n'
+        '<a href="https://stryker.wd1.myworkdayjobs.com/StrykerCareers/login">Login</a>'
+    )
+    match = _WORKDAY_JOB_URL_RE.search(html)
+    assert match is not None
+    company, instance, site, job_path = match.groups()
+    assert (company, instance, site) == ("stryker", "wd1", "StrykerCareers")
+    assert job_path == "/job/Kalamazoo-Michigan/Senior-Engineer_R570975-1"
+    assert "\n" not in job_path
+    assert '"' not in job_path

@@ -956,8 +956,16 @@ def _extract_greenhouse_remix_field(html: str, pattern: re.Pattern[str]) -> str 
 # `wday/cxs` JSON API — the same one Workday's own SPA calls client-side,
 # keyed by the visible job path — returns the original
 # `jobPostingInfo.jobDescription` HTML with its structure intact.
+#
+# Also used to sniff for a Workday URL embedded in a branded career site's
+# raw HTML (a marketing domain that fronts a real Workday board, linking
+# out to it from an "apply"/"login" href — verified live against
+# careers.stryker.com). The job_path group excludes quotes/whitespace/angle
+# brackets, not just "?" and "#", so it stops at the href's closing quote
+# instead of running on into the surrounding markup when matched against a
+# full HTML document rather than a bare URL.
 _WORKDAY_JOB_URL_RE = re.compile(
-    r"([a-zA-Z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[A-Z]{2}/)?([^/?]+)(/job/[^?#]+)",
+    r"([a-zA-Z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[A-Z]{2}/)?([^/?\s\"'<>]+)(/job/[^?#\s\"'<>]+)",
     re.IGNORECASE,
 )
 _WORKDAY_JOB_DETAIL_URL = "https://{company}.{instance}.myworkdayjobs.com/wday/cxs/{company}/{site}{job_path}"
@@ -1308,7 +1316,16 @@ def scan_job_url(url: str) -> ScanResult:
 
     hiring_org = job_ld.get("hiringOrganization")
     company_name = hiring_org.get("name") if isinstance(hiring_org, dict) else None
-    workday_job_data = _fetch_workday_job_data(str(response.url))
+    # Some companies front their real Workday board with a branded
+    # marketing/career-site domain (e.g. careers.stryker.com) whose own
+    # JSON-LD `description` is missing content the page renders outside the
+    # schema.org block (intro blurb, benefits summary) — verified live
+    # against a Stryker posting, which cut off right after the pay-range
+    # disclosure. That branded domain doesn't match _WORKDAY_JOB_URL_RE, but
+    # it links out to the real myworkdayjobs.com URL from an "apply"/"login"
+    # link server-rendered into the page, so search the html too — same
+    # embedded-URL trick as adapters/workday.py's _detect_embedded.
+    workday_job_data = _fetch_workday_job_data(str(response.url)) or _fetch_workday_job_data(html)
     # Eightfold-powered career sites (e.g. Microsoft's) publish schema.org
     # JobPosting JSON-LD alongside the pcsx API — but that JSON-LD
     # `description` is a flat, unstyled copy of the page's plain-text meta
