@@ -65,6 +65,7 @@ class AtsType(StrEnum):
     ECHO_JOBS = "echo_jobs"
     TALENTBREW = "talentbrew"
     NLX = "nlx"
+    CLEARCOMPANY = "clearcompany"
     # Single-company, in-house career sites (not a platform other companies
     # use) — board_key is a fixed constant, not a variable company slug.
     AMAZON = "amazon"

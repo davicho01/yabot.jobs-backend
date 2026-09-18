@@ -144,7 +144,14 @@ def html_to_formatted_text(value: Any) -> str | None:
     text = _LI_CLOSE_RE.sub("", text)
     text = _BR_RE.sub("\n", text)
     text = _HEADER_OPEN_RE.sub(lambda m: "\n\n" + "#" * int(m.group(1)) + " ", text)
-    text = _BLOCK_CLOSE_RE.sub("\n", text)
+    # Two newlines, not one: source HTML is often minified with zero
+    # whitespace between adjacent block tags (e.g. "<p>A</p><p>B</p>"), and
+    # a single "\n" there is just a CommonMark soft break — the frontend's
+    # ReactMarkdown renders it as a space, not a paragraph break, so every
+    # paragraph/list/heading collapses into one unreadable blob. The
+    # cleanup pass below collapses any resulting run of blank lines back
+    # down to exactly one, so this can't over-produce blank lines either.
+    text = _BLOCK_CLOSE_RE.sub("\n\n", text)
     text = _TAG_RE.sub("", text)
     text = _tighten_bold_markers(text)
 
