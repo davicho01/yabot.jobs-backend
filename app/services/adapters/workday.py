@@ -1,9 +1,20 @@
 import re
+from typing import Any
 
 import httpx
 
-from app.models.enums import AtsType
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, RECENT_WINDOW_DAYS, TIMEOUT, AtsAdapter, post_with_retry
+from app.models.enums import AtsType, EmploymentType, WorkplaceType
+from app.services.adapters import base
+from app.services.adapters.base import (
+    DEFAULT_MAX_JOBS_PER_CRAWL,
+    RECENT_WINDOW_DAYS,
+    TIMEOUT,
+    AtsAdapter,
+    ExtractedJobFields,
+    ScanResult,
+    post_with_retry,
+)
+from app.services.adapters.text import clean_text, html_to_formatted_text
 
 _WORKDAY_JOBS_URL = "https://{company}.{instance}.myworkdayjobs.com/wday/cxs/{company}/{site}/jobs"
 _WORKDAY_JOB_BASE_URL = "https://{company}.{instance}.myworkdayjobs.com/{site}"
@@ -114,10 +125,118 @@ def _detect_embedded(url: str) -> str | None:
     return _match(response.text)
 
 
+# Workday job pages do embed schema.org JobPosting JSON-LD, so they never
+# reach job_scanner.py's no-JSON-LD fallback branch — but Workday generates
+# that JSON-LD's `description` field as plain text with every tag
+# stripped, not HTML, so it has no paragraph breaks, headings, or bullet
+# points left to convert into Markdown (verified against a live posting:
+# the JSON-LD description was one unbroken run of sentences). The same
+# job's public `wday/cxs` JSON API — the same one Workday's own SPA calls
+# client-side, keyed by the visible job path — returns the original
+# `jobPostingInfo.jobDescription` HTML with its structure intact.
+#
+# Also used to sniff for a Workday URL embedded in a branded career site's
+# raw HTML (a marketing domain that fronts a real Workday board, linking
+# out to it from an "apply"/"login" href — verified live against
+# careers.stryker.com, hence extract() trying both the URL and the raw
+# html below). The job_path group excludes quotes/whitespace/angle
+# brackets, not just "?" and "#", so it stops at the href's closing quote
+# instead of running on into the surrounding markup when matched against a
+# full HTML document rather than a bare URL.
+_JOB_URL_RE = re.compile(
+    r"([a-zA-Z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[A-Z]{2}/)?([^/?\s\"'<>]+)(/job/[^?#\s\"'<>]+)",
+    re.IGNORECASE,
+)
+_JOB_DETAIL_URL = "https://{company}.{instance}.myworkdayjobs.com/wday/cxs/{company}/{site}{job_path}"
+
+
+def _fetch_job_data(url: str) -> dict[str, Any] | None:
+    match = _JOB_URL_RE.search(url)
+    if match is None:
+        return None
+    company, instance, site, job_path = match.groups()
+    try:
+        response = httpx.get(
+            _JOB_DETAIL_URL.format(company=company, instance=instance, site=site, job_path=job_path),
+            timeout=10.0,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return None
+    data = response.json()
+    return data if isinstance(data, dict) else None
+
+
+def _description_of(job_data: dict[str, Any]) -> str | None:
+    posting_info = job_data.get("jobPostingInfo")
+    description = posting_info.get("jobDescription") if isinstance(posting_info, dict) else None
+    return html_to_formatted_text(description) if isinstance(description, str) else None
+
+
+def extract(url: str, html: str) -> ExtractedJobFields | None:
+    job_data = _fetch_job_data(url) or _fetch_job_data(html)
+    if job_data is None:
+        return None
+    return ExtractedJobFields(description=_description_of(job_data))
+
+
+def scan_job_url(url: str) -> ScanResult | None:
+    # Cheap, URL-only gate: a real myworkdayjobs.com link. A branded
+    # marketing domain fronting a real Workday board (see extract()'s own
+    # docstring, e.g. careers.stryker.com) has no such signal in the URL
+    # itself — recovering it needs a speculative fetch job_scanner.py's
+    # dispatch loop doesn't pay for every unmatched URL, so that case falls
+    # through to the generic default scanner instead, which still reads the
+    # branded page's own real (if plainer) JSON-LD correctly; it only misses
+    # this adapter's richer wday/cxs description.
+    if _match(url) is None:
+        return None
+    try:
+        page = base.fetch_html(url)
+    except httpx.HTTPError as exc:
+        return ScanResult(success=False, error=str(exc))
+
+    html = page.text
+    job_postings = base.extract_json_ld_postings(html)
+    job_ld = job_postings[0] if job_postings else None
+    fields = extract(url, html)
+
+    hiring_org = job_ld.get("hiringOrganization") if job_ld else None
+    company_name = hiring_org.get("name") if isinstance(hiring_org, dict) else None
+    description = (
+        (fields.description if fields else None)
+        or (html_to_formatted_text(job_ld.get("description")) if job_ld else None)
+        or base.fallback_description(html)
+    )
+    salary_min, salary_max, salary_currency = base.job_ld_salary(job_ld) if job_ld else (None, None, None)
+    if salary_min is None and salary_max is None:
+        text_min, text_max, text_currency = base.salary_from_text(description)
+        if text_min is not None:
+            salary_min, salary_max = text_min, text_max
+            salary_currency = text_currency or salary_currency
+
+    return ScanResult(
+        success=True,
+        title=(clean_text(job_ld.get("title")) if job_ld else None) or base.fallback_title(html),
+        description=description,
+        company_name=clean_text(company_name),
+        location=base.job_ld_location(job_ld) if job_ld else None,
+        workplace_type=base.job_ld_workplace_type(job_ld) if job_ld else WorkplaceType.UNKNOWN,
+        employment_type=base.job_ld_employment_type(job_ld) if job_ld else EmploymentType.UNKNOWN,
+        salary_min=salary_min,
+        salary_max=salary_max,
+        salary_currency=salary_currency,
+        posted_at=base.job_ld_posted_at(job_ld) if job_ld else None,
+        raw_html_excerpt=html[:20_000],
+        full_html=html,
+    )
+
+
 ADAPTER = AtsAdapter(
     AtsType.WORKDAY,
     match=_match,
     fetch_jobs=_fetch_jobs,
     to_board_url=_board_url,
     embedded_match=_detect_embedded,
+    scan_job_url=scan_job_url,
 )

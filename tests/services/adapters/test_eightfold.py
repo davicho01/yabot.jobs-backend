@@ -1,3 +1,5 @@
+from datetime import date
+
 from app.services.adapters import eightfold
 from tests.conftest import FakeResponse
 
@@ -52,3 +54,48 @@ def test_detect_embedded_no_job_id_does_not_crash_on_false_positive_domain(monke
     )
     result = eightfold._detect_embedded("https://careers.freedommortgage.com/us/en/job/JR107216/Some-Title")
     assert result is None
+
+
+_SIGNATURE_HTML = '<a href="https://eightfold.ai/privacy-policy">Privacy</a>'
+
+
+def test_extract_fetches_position_details_and_maps_fields(monkeypatch):
+    calls = []
+
+    def fake_get(url, params, timeout):
+        calls.append((url, params))
+        return FakeResponse(json_data={"data": {
+            "id": "555", "name": "Voice Engineer", "location": "Remote - US",
+            "jobDescription": "<p>Build <b>voice agents</b>.</p>", "creationTs": 1767225600,
+        }})
+
+    monkeypatch.setattr(eightfold.httpx, "get", fake_get)
+    result = eightfold.extract("https://jobs.twilio.com/careers/job/555", _SIGNATURE_HTML)
+    assert result.title == "Voice Engineer"
+    assert result.location == "Remote - US"
+    assert result.description == "Build **voice agents**."
+    # date.fromtimestamp is local-timezone-dependent (that's the adapter's
+    # own behavior, not something to paper over here) — recompute the
+    # same way rather than hardcoding a timezone-fragile literal date.
+    assert result.posted_at == date.fromtimestamp(1767225600)
+    assert calls[0][0] == "https://jobs.twilio.com/api/pcsx/position_details"
+    assert calls[0][1] == {"position_id": "555", "domain": "jobs.twilio.com"}
+
+
+def test_extract_none_without_signature_in_html(monkeypatch):
+    def unexpected(*a, **k):
+        raise AssertionError("Unexpected API request")
+    monkeypatch.setattr(eightfold.httpx, "get", unexpected)
+    assert eightfold.extract("https://jobs.twilio.com/careers/job/555", "<html>no signature</html>") is None
+
+
+def test_extract_none_when_url_has_no_job_id(monkeypatch):
+    def unexpected(*a, **k):
+        raise AssertionError("Unexpected API request")
+    monkeypatch.setattr(eightfold.httpx, "get", unexpected)
+    assert eightfold.extract("https://jobs.twilio.com/careers", _SIGNATURE_HTML) is None
+
+
+def test_extract_none_when_every_candidate_domain_fails(monkeypatch):
+    monkeypatch.setattr(eightfold.httpx, "get", lambda *a, **k: FakeResponse(status_code=403))
+    assert eightfold.extract("https://jobs.twilio.com/careers/job/555", _SIGNATURE_HTML) is None

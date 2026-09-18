@@ -1,11 +1,22 @@
 import re
+from datetime import date
+from typing import Any
 from urllib.parse import urlsplit
 from xml.etree import ElementTree
 
 import httpx
 
-from app.models.enums import AtsType
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry
+from app.models.enums import AtsType, EmploymentType, WorkplaceType
+from app.services.adapters import base
+from app.services.adapters.base import (
+    DEFAULT_MAX_JOBS_PER_CRAWL,
+    TIMEOUT,
+    AtsAdapter,
+    ExtractedJobFields,
+    ScanResult,
+    get_with_retry,
+)
+from app.services.adapters.text import html_to_formatted_text
 
 _EIGHTFOLD_SEARCH_PAGE_SIZE = 20
 _EIGHTFOLD_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
@@ -201,6 +212,99 @@ def _board_url(board_key: str) -> str:
     return f"https://{host}"
 
 
+# The same free public API _fetch_jobs uses for listing also serves one
+# job's full record directly — no board token to already know, just the
+# requesting host's own "domain" tenant identifier (see _candidate_domains
+# above), keyed off the job id already sitting in the URL.
+def _fetch_job_data(url: str, html: str) -> dict[str, Any] | None:
+    job_match = _EIGHTFOLD_JOB_URL_RE.search(url)
+    if job_match is None or _EIGHTFOLD_SIGNATURE not in html:
+        return None
+    job_id = job_match.group(1)
+    host = urlsplit(url).netloc
+    for domain in _candidate_domains(host):
+        try:
+            response = httpx.get(
+                f"https://{host}/api/pcsx/position_details",
+                params={"position_id": job_id, "domain": domain},
+                timeout=10.0,
+            )
+        except httpx.HTTPError:
+            continue
+        if response.status_code != 200:
+            continue
+        data = response.json().get("data")
+        if isinstance(data, dict) and str(data.get("id")) == job_id:
+            return data
+    return None
+
+
+def _posted_at_of(job_data: dict[str, Any]) -> date | None:
+    creation_ts = job_data.get("creationTs")
+    if not isinstance(creation_ts, (int, float)) or not creation_ts:
+        return None
+    try:
+        return date.fromtimestamp(creation_ts)
+    except (ValueError, OSError):
+        return None
+
+
+def extract(url: str, html: str) -> ExtractedJobFields | None:
+    job_data = _fetch_job_data(url, html)
+    if job_data is None:
+        return None
+    location = job_data.get("location")
+    return ExtractedJobFields(
+        title=job_data.get("name") if isinstance(job_data.get("name"), str) else None,
+        description=html_to_formatted_text(job_data.get("jobDescription")),
+        location=location if isinstance(location, str) else None,
+        posted_at=_posted_at_of(job_data),
+    )
+
+
+def scan_job_url(url: str) -> ScanResult | None:
+    # Cheap, URL-only gate: Eightfold has no static host shape (any
+    # white-labeled domain can host one), so this only checks the job-id
+    # path shape — confirmed for real below via _EIGHTFOLD_SIGNATURE once
+    # the page is actually fetched, same two-tier check _fetch_job_data
+    # itself does.
+    if not _EIGHTFOLD_JOB_URL_RE.search(url):
+        return None
+    try:
+        page = base.fetch_html(url)
+    except httpx.HTTPError as exc:
+        return ScanResult(success=False, error=str(exc))
+
+    html = page.text
+    if _EIGHTFOLD_SIGNATURE not in html:
+        return None  # URL path shape was a coincidence; not actually Eightfold.
+
+    fields = extract(url, html)
+    description = (
+        (fields.description if fields else None) or base.fallback_description(html) or base.og_description(html)
+    )
+    og_description_raw = base.og_description_raw(html)
+    _, workplace_type = (
+        base.parse_og_description(og_description_raw) if og_description_raw else (None, WorkplaceType.UNKNOWN)
+    )
+    salary_min, salary_max, salary_currency = base.salary_from_text(description)
+    return ScanResult(
+        success=True,
+        title=(fields.title if fields else None) or base.og_title(html) or base.fallback_title(html),
+        description=description,
+        company_name=base.og_site_name(html),
+        location=fields.location if fields else None,
+        workplace_type=workplace_type,
+        employment_type=EmploymentType.UNKNOWN,
+        salary_min=salary_min,
+        salary_max=salary_max,
+        salary_currency=salary_currency,
+        posted_at=fields.posted_at if fields else None,
+        raw_html_excerpt=html[:20_000],
+        full_html=html,
+    )
+
+
 # Eightfold has no static URL shape either (match=None) — same as Clinch,
 # only reachable via embedded_match. Its embedded_match key carries both
 # host and domain (needed to name the CrawlSource row), but board_key for
@@ -216,4 +320,5 @@ ADAPTER = AtsAdapter(
     board_key=_board_key,
     to_board_url=_board_url,
     embedded_match=_detect_embedded,
+    scan_job_url=scan_job_url,
 )

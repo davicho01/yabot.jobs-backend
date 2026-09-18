@@ -34,7 +34,8 @@ class RenderedPage:
     html: str
     # The post-redirect URL Chromium actually landed on — callers that need
     # to resolve relative links or detect ATS error-page redirects (see
-    # job_scanner._fetch_html) can't rely on the URL they requested.
+    # app.services.adapters.base.fetch_html) can't rely on the URL they
+    # requested.
     url: str
 
 

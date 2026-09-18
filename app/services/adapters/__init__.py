@@ -22,6 +22,7 @@ from app.services.adapters import (
     oracle_fusion,
     personio,
     recruitee,
+    stripe,
     talentbrew,
     workable,
     workday,
@@ -49,4 +50,5 @@ ADAPTERS: list[AtsAdapter] = [
     talentbrew.ADAPTER,
     eightfold.ADAPTER,
     nlx.ADAPTER,
+    stripe.ADAPTER,
 ]
