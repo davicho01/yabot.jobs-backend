@@ -71,6 +71,7 @@ class AtsType(StrEnum):
     GOOGLE = "google"
     APPLE = "apple"
     FULLSTACK = "fullstack"
+    MOTION_RECRUITMENT = "motion_recruitment"
     # Scan-only: job URLs are only ever submitted directly, never discovered
     # by crawling a board (no ADAPTER.fetch_jobs) — see
     # app.services.adapters.stripe.
