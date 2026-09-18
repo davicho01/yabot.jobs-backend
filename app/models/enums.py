@@ -50,6 +50,7 @@ class AtsType(StrEnum):
     GREENHOUSE = "greenhouse"
     LEVER = "lever"
     ASHBY = "ashby"
+    GEM = "gem"
     BAMBOOHR = "bamboohr"
     PERSONIO = "personio"
     WORKDAY = "workday"

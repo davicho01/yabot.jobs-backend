@@ -100,6 +100,7 @@ def test_fetch_jobs_paginates_while_fully_within_window(monkeypatch):
 
 
 def test_fetch_jobs_uses_four_day_window(monkeypatch):
+    monkeypatch.setattr(workday, "RECENT_WINDOW_DAYS", 4)
     page = [_posting(f"/job/{day}", f"Posted {day} Days Ago") for day in range(1, 8)]
     monkeypatch.setattr(workday, "post_with_retry", lambda *a, **k: FakeResponse(json_data={"jobPostings": page}))
     urls = workday._fetch_jobs("acme/wd1/Careers")
