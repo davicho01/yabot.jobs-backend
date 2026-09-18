@@ -69,6 +69,7 @@ class AtsType(StrEnum):
     AMAZON = "amazon"
     GOOGLE = "google"
     APPLE = "apple"
+    FULLSTACK = "fullstack"
     # Scan-only: job URLs are only ever submitted directly, never discovered
     # by crawling a board (no ADAPTER.fetch_jobs) — see
     # app.services.adapters.stripe.
