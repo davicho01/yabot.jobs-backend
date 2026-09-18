@@ -1310,6 +1310,44 @@ def _is_greenhouse_board_error_redirect(final_url: str) -> bool:
     return "greenhouse.io" in parts.netloc and "error=true" in parts.query
 
 
+def _fetch_gem_description(url: str) -> str | None:
+    parts = urlsplit(url)
+    path = parts.path.strip("/").split("/")
+    if parts.hostname != "jobs.gem.com" or len(path) < 2:
+        return None
+    query = """query($boardId: String!, $extId: String!) {
+      oatsExternalJobPosting(boardId: $boardId, extId: $extId) {
+        descriptionHtml compensationHtml jobPostSectionHtml { introHtml outroHtml }
+      }
+    }"""
+    try:
+        response = httpx.post(
+            "https://jobs.gem.com/api/public/graphql",
+            json={"query": query, "variables": {"boardId": path[0], "extId": path[1]}},
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        body = response.json()
+        if body.get("errors"):
+            return None
+        job = (body.get("data") or {}).get("oatsExternalJobPosting")
+        if not isinstance(job, dict) or not job.get("descriptionHtml"):
+            return None
+        sections = job.get("jobPostSectionHtml") or {}
+        html = "\n".join(
+            section for section in (
+                sections.get("introHtml"), job.get("descriptionHtml"),
+                job.get("compensationHtml"), sections.get("outroHtml"),
+            ) if isinstance(section, str)
+        )
+        # Gem's editor uses empty headings for spacing; avoid rendering
+        # these as literal Markdown heading markers in the description.
+        html = re.sub(r"<h[1-6]\b[^>]*>\s*(?:<br\s*/?>\s*)*</h[1-6]>", "", html, flags=re.IGNORECASE)
+        return _html_to_formatted_text(html)
+    except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+        return None
+
+
 def scan_job_url(url: str) -> ScanResult:
     """Fetch a job posting page and pull structured job info out of it.
 
@@ -1331,6 +1369,7 @@ def scan_job_url(url: str) -> ScanResult:
         )
 
     html = response.text
+    gem_description = _fetch_gem_description(str(response.url))
     job_postings = _extract_json_ld_postings(html)
     job_ld = job_postings[0] if job_postings else None
 
@@ -1412,7 +1451,8 @@ def scan_job_url(url: str) -> ScanResult:
             except ValueError:
                 posted_at = None
         description = (
-            (_greenhouse_embedded_description_of(gh_embedded_job_data) if gh_embedded_job_data else None)
+            gem_description
+            or (_greenhouse_embedded_description_of(gh_embedded_job_data) if gh_embedded_job_data else None)
             or _extract_greenhouse_job_description(html)
             or _extract_google_job_body(html)
             or (_html_to_formatted_text(eightfold_job_data.get("jobDescription")) if eightfold_job_data else None)
@@ -1469,7 +1509,8 @@ def scan_job_url(url: str) -> ScanResult:
     eightfold_job_data = _fetch_eightfold_job_data(str(response.url), html)
     stripe_description, stripe_location = _stripe_job_details(str(response.url), html)
     description = (
-        stripe_description
+        gem_description
+        or stripe_description
         or (_workday_description_of(workday_job_data) if workday_job_data else None)
         or (_html_to_formatted_text(eightfold_job_data.get("jobDescription")) if eightfold_job_data else None)
         or _html_to_formatted_text(job_ld.get("description"))
