@@ -93,6 +93,16 @@ class TailoredResumeRead(BaseModel):
     created_at: datetime
 
 
+class TailoredResumeScoreUpload(BaseModel):
+    # Same shape as ResumeScoreUpload — for callers (e.g. an MCP client's
+    # own LLM) who've already scored a tailored resume's fit themselves and
+    # just want it stored, skipping this app's own LLM call.
+    overall_score: int
+    matched_keywords: list[str]
+    missing_keywords: list[str]
+    summary: str
+
+
 class TailoredResumeScoreRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

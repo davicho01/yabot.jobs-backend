@@ -21,6 +21,7 @@ from app.schemas.resume import (
     ResumeUpdate,
     TailoredResumeRead,
     TailoredResumeScoreRead,
+    TailoredResumeScoreUpload,
     TailoredResumeUpload,
 )
 from app.services.llm_client import LlmError
@@ -482,6 +483,39 @@ def score_tailored_resume(
         missing_keywords=result.missing_keywords,
         summary=result.summary,
         raw_response=result.raw_response,
+    )
+    db.add(score)
+    db.flush()
+    _stamp_application_pointer(db, current_user.id, posting.id, latest_tailored_resume_score_id=score.id)
+    return score
+
+
+@router.post(
+    "/tailored/{tailored_id}/score/upload", response_model=TailoredResumeScoreRead, status_code=status.HTTP_201_CREATED
+)
+def upload_tailored_resume_score(
+    tailored_id: uuid.UUID,
+    payload: TailoredResumeScoreUpload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> TailoredResumeScore:
+    """Store a fit evaluation of a tailored resume computed elsewhere (e.g.
+    by an MCP client's own LLM — see mcp_server/) as the current score for
+    that tailored resume, skipping this app's own LLM call. Same storage as
+    the generate endpoint above.
+    """
+    tailored = _get_owned_tailored_resume(db, current_user.id, tailored_id)
+    posting = _get_job_posting(db, tailored.job_posting_id)
+
+    score = TailoredResumeScore(
+        tailored_resume_id=tailored.id,
+        user_id=current_user.id,
+        job_posting_id=posting.id,
+        overall_score=payload.overall_score,
+        matched_keywords=payload.matched_keywords,
+        missing_keywords=payload.missing_keywords,
+        summary=payload.summary,
+        raw_response=None,
     )
     db.add(score)
     db.flush()
