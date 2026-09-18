@@ -14,7 +14,7 @@ from app.models.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from app.models.job_posting import JobPosting
-    from app.models.resume import CoverLetter, ResumeScore, TailoredResume
+    from app.models.resume import CoverLetter, ResumeScore, TailoredResume, TailoredResumeScore
     from app.models.user import User
 
 
@@ -57,12 +57,29 @@ class UserJobApplication(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     latest_cover_letter_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("cover_letters.id", ondelete="SET NULL")
     )
+    latest_tailored_resume_score_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tailored_resume_scores.id", ondelete="SET NULL")
+    )
 
     user: Mapped["User"] = relationship(back_populates="job_applications")
     job_posting: Mapped["JobPosting"] = relationship(back_populates="applications")
     latest_score: Mapped["ResumeScore | None"] = relationship(foreign_keys=[latest_score_id])
     latest_tailored_resume: Mapped["TailoredResume | None"] = relationship(foreign_keys=[latest_tailored_resume_id])
     latest_cover_letter: Mapped["CoverLetter | None"] = relationship(foreign_keys=[latest_cover_letter_id])
+    latest_tailored_resume_score: Mapped["TailoredResumeScore | None"] = relationship(
+        foreign_keys=[latest_tailored_resume_score_id]
+    )
+
+    @property
+    def best_score(self) -> int | None:
+        """The higher of the original fitness score and the tailored-resume
+        score, whichever is set — the applications list shows one combined
+        badge rather than two separate scores.
+        """
+        scores = [
+            s.overall_score for s in (self.latest_score, self.latest_tailored_resume_score) if s is not None
+        ]
+        return max(scores) if scores else None
 
     def __repr__(self) -> str:
         return f"<UserJobApplication user_id={self.user_id} status={self.status!r}>"

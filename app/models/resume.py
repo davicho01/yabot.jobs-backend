@@ -100,6 +100,39 @@ class ResumeScore(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         return f"<ResumeScore resume_id={self.resume_id} job_posting_id={self.job_posting_id} score={self.overall_score}>"
 
 
+class TailoredResumeScore(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """How well a TailoredResume matches the JobPosting it was generated
+    for, per the LLM — the tailored-resume analogue of ResumeScore. A
+    tailored resume may be scored more than once (history kept); callers
+    fetch the latest.
+    """
+
+    __tablename__ = "tailored_resume_scores"
+
+    tailored_resume_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tailored_resumes.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    job_posting_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("job_postings.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    overall_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    matched_keywords: Mapped[list] = mapped_column(JSONB, nullable=False)
+    missing_keywords: Mapped[list] = mapped_column(JSONB, nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_response: Mapped[dict | None] = mapped_column(JSONB)
+
+    job_posting: Mapped["JobPosting"] = relationship()
+
+    def __repr__(self) -> str:
+        return (
+            f"<TailoredResumeScore tailored_resume_id={self.tailored_resume_id} "
+            f"job_posting_id={self.job_posting_id} score={self.overall_score}>"
+        )
+
+
 class TailoredResume(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A resume tailored to one specific JobPosting, generated from a
     source Resume — structured content plus a rendered, downloadable

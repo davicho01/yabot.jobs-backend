@@ -93,6 +93,19 @@ class TailoredResumeRead(BaseModel):
     created_at: datetime
 
 
+class TailoredResumeScoreRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    tailored_resume_id: uuid.UUID
+    job_posting_id: uuid.UUID
+    overall_score: int
+    matched_keywords: list[str]
+    missing_keywords: list[str]
+    summary: str
+    created_at: datetime
+
+
 class CoverLetterRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

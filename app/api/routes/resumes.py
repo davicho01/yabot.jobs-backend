@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user, get_db
 from app.models.job_application import UserJobApplication
 from app.models.job_posting import JobPosting
-from app.models.resume import CoverLetter, Resume, ResumeReview, ResumeScore, TailoredResume
+from app.models.resume import CoverLetter, Resume, ResumeReview, ResumeScore, TailoredResume, TailoredResumeScore
 from app.models.user import User
 from app.schemas.resume import (
     CoverLetterRead,
@@ -20,6 +20,7 @@ from app.schemas.resume import (
     ResumeSectionContent,
     ResumeUpdate,
     TailoredResumeRead,
+    TailoredResumeScoreRead,
     TailoredResumeUpload,
 )
 from app.services.llm_client import LlmError
@@ -62,6 +63,23 @@ def _get_job_posting(db: Session, job_posting_id: uuid.UUID) -> JobPosting:
     if posting is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job posting not found.")
     return posting
+
+
+def _get_owned_tailored_resume(db: Session, user_id: uuid.UUID, tailored_id: uuid.UUID) -> TailoredResume:
+    tailored = db.scalar(
+        select(TailoredResume).where(TailoredResume.id == tailored_id, TailoredResume.user_id == user_id)
+    )
+    if tailored is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tailored resume not found.")
+    return tailored
+
+
+def _tailored_resume_text(content: dict) -> str:
+    lines = [content.get("summary", "")]
+    for section in content.get("sections", []):
+        lines.append(section.get("heading", ""))
+        lines.extend(f"- {b}" for b in section.get("bullets", []))
+    return "\n".join(lines)
 
 
 def _stamp_application_pointer(
@@ -433,15 +451,69 @@ def get_main_tailored_resume(
     return tailored
 
 
+@router.post("/tailored/{tailored_id}/score", response_model=TailoredResumeScoreRead)
+def score_tailored_resume(
+    tailored_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> TailoredResumeScore:
+    tailored = _get_owned_tailored_resume(db, current_user.id, tailored_id)
+    posting = _get_job_posting(db, tailored.job_posting_id)
+    key = get_users_default_llm_key(db, current_user.id)
+
+    try:
+        result = score_resume_with_llm(
+            _tailored_resume_text(tailored.content),
+            posting.description or "",
+            provider=key.provider,
+            model=key.model,
+            api_key=key.get_plaintext_key(),
+            base_url=key.base_url,
+        )
+    except LlmError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM request failed: {exc}") from exc
+
+    score = TailoredResumeScore(
+        tailored_resume_id=tailored.id,
+        user_id=current_user.id,
+        job_posting_id=posting.id,
+        overall_score=result.overall_score,
+        matched_keywords=result.matched_keywords,
+        missing_keywords=result.missing_keywords,
+        summary=result.summary,
+        raw_response=result.raw_response,
+    )
+    db.add(score)
+    db.flush()
+    _stamp_application_pointer(db, current_user.id, posting.id, latest_tailored_resume_score_id=score.id)
+    return score
+
+
+@router.get("/tailored/{tailored_id}/score", response_model=TailoredResumeScoreRead)
+def get_tailored_resume_score(
+    tailored_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> TailoredResumeScore:
+    tailored = _get_owned_tailored_resume(db, current_user.id, tailored_id)
+    score = db.scalar(
+        select(TailoredResumeScore)
+        .where(TailoredResumeScore.tailored_resume_id == tailored.id)
+        .order_by(TailoredResumeScore.created_at.desc())
+    )
+    if score is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No score yet for this tailored resume — POST /resumes/tailored/{id}/score first.",
+        )
+    return score
+
+
 @router.get("/tailored/{tailored_id}/download")
 def download_tailored_resume(
     tailored_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> Response:
-    tailored = db.scalar(
-        select(TailoredResume).where(TailoredResume.id == tailored_id, TailoredResume.user_id == current_user.id)
-    )
-    if tailored is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tailored resume not found.")
+    tailored = _get_owned_tailored_resume(db, current_user.id, tailored_id)
 
     data = download_file(tailored.storage_key)
     return Response(
