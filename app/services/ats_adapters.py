@@ -1,5 +1,5 @@
 from app.services.adapters import ADAPTERS
-from app.services.adapters.base import AtsAdapter
+from app.services.adapters.base import AtsAdapter, limit_job_urls
 
 _ADAPTERS_BY_TYPE: dict[str, AtsAdapter] = {adapter.ats_type: adapter for adapter in ADAPTERS}
 _EMBEDDED_MATCH_ADAPTERS = [adapter for adapter in ADAPTERS if adapter.embedded_match is not None]
@@ -50,7 +50,7 @@ def list_job_urls(ats_type: str, board_url: str) -> list[str]:
     key = board_key_for(ats_type, board_url)
     if key is None:
         raise ValueError(f"board_url={board_url!r} doesn't look like a {ats_type} board")
-    return adapter.fetch_jobs(key)
+    return limit_job_urls(adapter.fetch_jobs(key))
 
 
 def board_url_for_key(ats_type: str, board_key: str, submitted_url: str) -> str:

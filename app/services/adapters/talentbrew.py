@@ -4,11 +4,11 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry
 
 _TALENTBREW_SIGNATURE = "tbcdn.talentbrew.com"
 _TALENTBREW_RECORDS_PER_PAGE = 15
-_TALENTBREW_MAX_JOBS = 1000
+_TALENTBREW_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _TALENTBREW_JOB_HREF_RE = re.compile(r'href="(/job/[^"]+)"')
 
 # The pagination AJAX endpoint (data-ajax-url on the #search-results

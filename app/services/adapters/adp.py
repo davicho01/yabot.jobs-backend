@@ -2,7 +2,7 @@ import re
 from urllib.parse import parse_qs, urlsplit
 
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry
 
 _ADP_JOBS_URL = "https://workforcenow.adp.com/mascsr/default/careercenter/public/events/staffing/v1/job-requisitions"
 _ADP_JOB_URL = (
@@ -12,7 +12,7 @@ _ADP_JOB_URL = (
 _ADP_PAGE_SIZE = 50
 # ADP client career sites (one company's own postings) run nowhere near
 # Amazon/Google scale — no "today only" early-exit needed, just a safety cap.
-_ADP_MAX_JOBS = 500
+_ADP_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _ADP_URL_RE = re.compile(r"workforcenow\.adp\.com", re.IGNORECASE)
 
 

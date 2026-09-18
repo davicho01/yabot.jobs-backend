@@ -2,7 +2,7 @@ import re
 from xml.etree import ElementTree
 
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import TIMEOUT, limit_job_urls, AtsAdapter, get_with_retry
 
 _PERSONIO_JOBS_URL = "https://{board_key}.jobs.personio.de/xml"
 _PERSONIO_JOB_URL = "https://{board_key}.jobs.personio.de/job/{job_id}"
@@ -21,11 +21,11 @@ def _fetch_jobs(board_key: str) -> list[str]:
     response = get_with_retry(_PERSONIO_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
     response.raise_for_status()
     root = ElementTree.fromstring(response.content)
-    return [
+    return limit_job_urls(
         _PERSONIO_JOB_URL.format(board_key=board_key, job_id=job_id)
         for position in root.findall("position")
         if (job_id := position.findtext("id"))
-    ]
+    )
 
 
 ADAPTER = AtsAdapter(

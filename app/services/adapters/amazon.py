@@ -1,5 +1,4 @@
 import re
-from datetime import datetime, timedelta, timezone
 
 from app.models.enums import AtsType
 from app.services.adapters.base import (
@@ -8,18 +7,14 @@ from app.services.adapters.base import (
     TIMEOUT,
     AtsAdapter,
     get_with_retry,
+    is_recent_posting,
     parse_month_day_year,
 )
 
 _AMAZON_JOBS_URL = "https://www.amazon.jobs/en/search.json"
 _AMAZON_JOB_BASE_URL = "https://www.amazon.jobs"
 _AMAZON_PAGE_SIZE = 100
-# Amazon's 10,000+ open roles push real RECENT_WINDOW_DAYS volume close to
-# DEFAULT_MAX_JOBS_PER_CRAWL on its own (verified live: ~1,070 postings in
-# the 7-day window) — double the shared default rather than reuse it
-# directly, so the cap keeps acting as a safety net instead of a routine
-# truncation point.
-_AMAZON_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL * 2
+_AMAZON_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _AMAZON_URL_RE = re.compile(r"amazon\.jobs", re.IGNORECASE)
 
 
@@ -34,7 +29,6 @@ def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company b
     # Workday.
     urls: list[str] = []
     offset = 0
-    cutoff = datetime.now(timezone.utc).date() - timedelta(days=RECENT_WINDOW_DAYS - 1)
     while len(urls) < _AMAZON_MAX_JOBS:
         response = get_with_retry(
             _AMAZON_JOBS_URL,
@@ -50,7 +44,7 @@ def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company b
             job
             for job in jobs
             if (posted := parse_month_day_year(job.get("posted_date"), month_style="%B %d, %Y")) is not None
-            and posted >= cutoff
+            and is_recent_posting(posted)
         ]
         urls.extend(_AMAZON_JOB_BASE_URL + job["job_path"] for job in recent_jobs if job.get("job_path"))
         if len(recent_jobs) < len(jobs) or len(jobs) < _AMAZON_PAGE_SIZE:

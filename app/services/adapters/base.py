@@ -1,8 +1,8 @@
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 
 import httpx
 
@@ -11,23 +11,48 @@ TIMEOUT = 30.0
 # How far back "recent" reaches for adapters that filter postings by date
 # (Workday, Amazon, Apple, Oracle Fusion) rather than paginating a whole
 # board every crawl. A single shared constant so every adapter's window
-# moves together instead of drifting adapter-by-adapter. Widened from a
-# same-day-only cutoff so a newly-activated board's history isn't limited
-# to whatever happens to post on its first crawl, and so one missed daily
-# crawl doesn't silently drop that day's postings — already-known URLs are
-# deduped downstream either way (see get_or_create_job_posting), so a wider
-# window only costs extra requests/redundant lookups, not duplicate data.
+# moves together instead of drifting adapter-by-adapter. Includes today
+# and the previous three days, allowing overlap between daily crawls
+# while reducing work within the event-driven worker's timeout.
 RECENT_WINDOW_DAYS = 7
 
-# Default safety-net cap on how many postings a date-filtered adapter
-# (Workday, Apple, Oracle Fusion) returns per crawl once RECENT_WINDOW_DAYS
-# widened the window — a true ceiling only a very large company should ever
-# brush against, not the normal stopping point (that's the date cutoff
-# itself; see each adapter's early-exit). Amazon overrides this with its own
-# higher constant instead of using it directly — verified live at ~1,070
-# postings within the 7-day window, close enough to this default that it
-# needs real headroom above it, not just this shared value.
-DEFAULT_MAX_JOBS_PER_CRAWL = 1000
+# Shared result cap for every adapter.
+# High-volume boards can hit this before exhausting their recent postings.
+DEFAULT_MAX_JOBS_PER_CRAWL = 500
+
+
+def posting_date(value: object) -> date | None:
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).date() if value.tzinfo else value.date()
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed.astimezone(timezone.utc).date() if parsed.tzinfo else parsed.date()
+    except ValueError:
+        return None
+
+
+def is_recent_posting(value: object) -> bool:
+    posted = posting_date(value)
+    if posted is None:
+        return False
+    today = datetime.now(timezone.utc).date()
+    return today - timedelta(days=RECENT_WINDOW_DAYS - 1) <= posted <= today
+
+
+def limit_job_urls(urls: Iterable[str]) -> list[str]:
+    result = []
+    seen = set()
+    for url in urls:
+        if url and url not in seen:
+            seen.add(url)
+            result.append(url)
+            if len(result) >= DEFAULT_MAX_JOBS_PER_CRAWL:
+                break
+    return result
 
 logger = logging.getLogger(__name__)
 

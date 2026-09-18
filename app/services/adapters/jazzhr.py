@@ -1,7 +1,7 @@
 import re
 
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import TIMEOUT, limit_job_urls, AtsAdapter, get_with_retry
 
 _JAZZHR_JOBS_URL = "https://{board_key}.applytojob.com/apply/jobs"
 # The listing page links to /apply/jobs/details/{id}, but that route serves
@@ -30,7 +30,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
     response = get_with_retry(_JAZZHR_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
     response.raise_for_status()
     job_ids = dict.fromkeys(_JAZZHR_JOB_ID_RE.findall(response.text))  # dedupe, keep order
-    return [_JAZZHR_JOB_URL.format(board_key=board_key, job_id=job_id) for job_id in job_ids]
+    return limit_job_urls(_JAZZHR_JOB_URL.format(board_key=board_key, job_id=job_id) for job_id in job_ids)
 
 
 ADAPTER = AtsAdapter(

@@ -189,13 +189,17 @@ adapter (`app/services/adapters/jazzhr.py`).
 information, not one — company slug, Workday instance number (e.g. `wd12`,
 not visible in the careers URL; find it by opening the company's careers
 page and checking the URL/network requests), and the career site name, all
-three recovered straight out of the URL. And rather than returning every
-open role, it only returns postings whose `postedOn` is literally `"Posted
-Today"` (Workday's own field), since some companies have 1000+ open roles
-and re-discovering all of them every day would mean dozens of paginated
-requests for no benefit — already-known URLs are deduped either way, so
-daily runs only need what's new. A 200-posting safety cap still applies in
-case one company posts an unusually large batch in a single day.
+three recovered straight out of the URL. Rather than returning every open
+role, it returns postings from today and the previous three days, capped at
+500 jobs per crawl. Every adapter now shares the job cap defined in
+`app/services/adapters/base.py`, with a final enforcement check in
+`list_job_urls`. Apple, Amazon, Oracle Fusion, Greenhouse, and Ashby also
+use the shared four-day window. Greenhouse uses `first_published`, not its
+modification timestamp. Date filtering for the other platforms still
+depends on whether reliable publication dates are available; the job cap
+alone does not establish recency. High-volume boards may have more recent
+jobs than the cap allows, and jobs older than the window will not be
+backfilled by date-filtered adapters.
 
 **ADP, Oracle Fusion, Clinch, and Eightfold each have their own quirk.** ADP
 needs two identifiers, not one — `cid` and `ccId`, both only visible in the

@@ -5,10 +5,10 @@ from xml.etree import ElementTree
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry
 
 _EIGHTFOLD_SEARCH_PAGE_SIZE = 20
-_EIGHTFOLD_MAX_JOBS = 500
+_EIGHTFOLD_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _SITEMAP_NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 _ROBOTS_SITEMAP_RE = re.compile(r"^Sitemap:\s*(\S+)", re.MULTILINE | re.IGNORECASE)
 # Eightfold's white-label career sites (e.g. jobs.twilio.com,
@@ -92,7 +92,9 @@ def _sitemap_job_urls(host: str) -> list[str]:
             for u in sitemap_root.findall(".//sm:url/sm:loc", _SITEMAP_NS)
             if u.text and urlsplit(u.text).path.startswith("/careers/job/")
         )
-    return urls
+        if len(urls) >= DEFAULT_MAX_JOBS_PER_CRAWL:
+            break
+    return urls[:DEFAULT_MAX_JOBS_PER_CRAWL]
 
 
 def _fetch_jobs(host: str) -> list[str]:

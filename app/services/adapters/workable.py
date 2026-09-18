@@ -3,7 +3,7 @@ import re
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import TIMEOUT, limit_job_urls, AtsAdapter, get_with_retry
 
 _WORKABLE_JOBS_URL = "https://apply.workable.com/api/v1/widget/accounts/{board_key}"
 # Requires the account-prefixed URL shape (apply.workable.com/{account}/j/...,
@@ -34,7 +34,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
     response = get_with_retry(_WORKABLE_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
     response.raise_for_status()
     jobs = response.json().get("jobs", [])
-    return [job["url"] for job in jobs if job.get("url")]
+    return limit_job_urls(job["url"] for job in jobs if job.get("url"))
 
 
 def _detect_embedded(url: str) -> str | None:

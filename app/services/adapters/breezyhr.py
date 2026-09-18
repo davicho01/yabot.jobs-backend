@@ -1,7 +1,7 @@
 import re
 
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import TIMEOUT, limit_job_urls, AtsAdapter, get_with_retry
 
 _BREEZYHR_JOBS_URL = "https://{board_key}.breezy.hr/json"
 _BREEZYHR_URL_RE = re.compile(r"([a-zA-Z0-9-]+)\.breezy\.hr", re.IGNORECASE)
@@ -17,7 +17,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
     response = get_with_retry(_BREEZYHR_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
     response.raise_for_status()
     postings = response.json()
-    return [posting["url"] for posting in postings if posting.get("url")]
+    return limit_job_urls(posting["url"] for posting in postings if posting.get("url"))
 
 
 ADAPTER = AtsAdapter(

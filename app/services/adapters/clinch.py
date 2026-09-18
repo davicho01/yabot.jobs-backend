@@ -4,9 +4,9 @@ from xml.etree import ElementTree
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry
 
-_CLINCH_MAX_JOBS = 500
+_CLINCH_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _CLINCH_SIGNATURE = "clinchtalent.com"
 
 

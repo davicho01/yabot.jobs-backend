@@ -97,3 +97,27 @@ def test_fetch_jobs_paginates_while_fully_within_window(monkeypatch):
     monkeypatch.setattr(workday, "post_with_retry", fake_post)
     urls = workday._fetch_jobs("acme/wd1/Careers")
     assert len(urls) == workday._WORKDAY_PAGE_SIZE + 1
+
+
+def test_fetch_jobs_uses_four_day_window(monkeypatch):
+    page = [_posting(f"/job/{day}", f"Posted {day} Days Ago") for day in range(1, 8)]
+    monkeypatch.setattr(workday, "post_with_retry", lambda *a, **k: FakeResponse(json_data={"jobPostings": page}))
+    urls = workday._fetch_jobs("acme/wd1/Careers")
+    assert urls == [f"https://acme.wd1.myworkdayjobs.com/Careers/job/{day}" for day in (1, 2, 3)]
+
+
+def test_fetch_jobs_stops_after_500_recent_jobs(monkeypatch):
+    calls = []
+
+    def fake_post(url, json, **kwargs):
+        offset = json["offset"]
+        calls.append(offset)
+        return FakeResponse(json_data={"jobPostings": [
+            _posting(f"/job/{i}", "Posted Today") for i in range(offset, offset + json["limit"])
+        ]})
+
+    monkeypatch.setattr(workday, "post_with_retry", fake_post)
+    urls = workday._fetch_jobs("acme/wd1/Careers")
+    assert len(urls) == 500
+    assert len(set(urls)) == 500
+    assert calls == list(range(0, 500, 20))

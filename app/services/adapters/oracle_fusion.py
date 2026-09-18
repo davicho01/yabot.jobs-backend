@@ -1,8 +1,7 @@
 import re
-from datetime import datetime, timedelta, timezone
 
 from app.models.enums import AtsType
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, RECENT_WINDOW_DAYS, TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, RECENT_WINDOW_DAYS, TIMEOUT, AtsAdapter, get_with_retry, is_recent_posting
 
 _ORACLE_FUSION_JOBS_URL = "https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
 _ORACLE_FUSION_JOB_URL = "https://{host}/hcmUI/CandidateExperience/en/sites/{site_number}/job/{job_id}"
@@ -35,7 +34,6 @@ def _fetch_jobs(board_key: str) -> list[str]:
 
     urls: list[str] = []
     offset = 0
-    cutoff = datetime.now(timezone.utc).date() - timedelta(days=RECENT_WINDOW_DAYS - 1)
     while len(urls) < _ORACLE_FUSION_MAX_JOBS:
         response = get_with_retry(
             _ORACLE_FUSION_JOBS_URL.format(host=host),
@@ -55,7 +53,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
         if not requisitions:
             break
 
-        recent = [r for r in requisitions if (posted := r.get("PostedDate")) and posted >= cutoff.isoformat()]
+        recent = [r for r in requisitions if is_recent_posting(r.get("PostedDate"))]
         urls.extend(
             _ORACLE_FUSION_JOB_URL.format(host=host, site_number=site_number, job_id=r["Id"])
             for r in recent

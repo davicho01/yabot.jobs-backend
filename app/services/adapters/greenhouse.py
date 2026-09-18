@@ -4,7 +4,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter, candidate_slugs_from_domain, get_with_retry
+from app.services.adapters.base import TIMEOUT, is_recent_posting, limit_job_urls, AtsAdapter, candidate_slugs_from_domain, get_with_retry
 
 _GREENHOUSE_JOBS_URL = "https://boards-api.greenhouse.io/v1/boards/{board_key}/jobs"
 _GREENHOUSE_URL_RE = re.compile(r"(?:job-boards|boards)\.greenhouse\.io/([^/?]+)", re.IGNORECASE)
@@ -37,7 +37,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
     response = get_with_retry(_GREENHOUSE_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
     response.raise_for_status()
     jobs = response.json().get("jobs", [])
-    return [job["absolute_url"] for job in jobs if job.get("absolute_url")]
+    return limit_job_urls(job["absolute_url"] for job in jobs if job.get("absolute_url") and is_recent_posting(job.get("first_published")))
 
 
 def _board_has_job(slug: str, job_id: str) -> bool:

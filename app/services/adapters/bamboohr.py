@@ -1,7 +1,7 @@
 import re
 
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import TIMEOUT, limit_job_urls, AtsAdapter, get_with_retry
 
 _BAMBOOHR_JOBS_URL = "https://{board_key}.bamboohr.com/careers/list"
 _BAMBOOHR_JOB_URL = "https://{board_key}.bamboohr.com/careers/{job_id}"
@@ -20,11 +20,11 @@ def _fetch_jobs(board_key: str) -> list[str]:
     response = get_with_retry(_BAMBOOHR_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
     response.raise_for_status()
     postings = response.json().get("result", [])
-    return [
+    return limit_job_urls(
         _BAMBOOHR_JOB_URL.format(board_key=board_key, job_id=posting["id"])
         for posting in postings
         if posting.get("id")
-    ]
+    )
 
 
 ADAPTER = AtsAdapter(

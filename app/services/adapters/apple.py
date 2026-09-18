@@ -1,6 +1,5 @@
 import json
 import re
-from datetime import datetime, timedelta, timezone
 
 from app.models.enums import AtsType
 from app.services.adapters.base import (
@@ -9,6 +8,7 @@ from app.services.adapters.base import (
     TIMEOUT,
     AtsAdapter,
     get_with_retry,
+    is_recent_posting,
     parse_month_day_year,
 )
 
@@ -36,7 +36,6 @@ def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company b
     # NOT postDateInGMT, which turned out to change on every request for
     # the same job (a live response timestamp, not a stored value).
     urls: list[str] = []
-    cutoff = datetime.now(timezone.utc).date() - timedelta(days=RECENT_WINDOW_DAYS - 1)
     page = 1
     while len(urls) < _APPLE_MAX_JOBS:
         response = get_with_retry(_APPLE_JOBS_URL, params={"sort": "newest", "page": page}, timeout=TIMEOUT)
@@ -57,7 +56,7 @@ def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company b
             posting
             for posting in postings
             if (posted := parse_month_day_year(posting.get("postingDate"), month_style="%b %d, %Y")) is not None
-            and posted >= cutoff
+            and is_recent_posting(posted)
         ]
         urls.extend(
             _APPLE_JOB_URL.format(position_id=posting["positionId"], slug=posting["transformedPostingTitle"])
