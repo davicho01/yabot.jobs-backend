@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import admin, api_keys, applications, auth, auth_tokens, crawl_sources, jobs, resumes
+from app.api.routes import admin, api_keys, applications, auth, auth_tokens, crawl_sources, jobs, oauth, resumes
 from app.core.config import settings
 from app.services.resume_storage import ensure_bucket_exists
 
@@ -32,6 +32,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(auth_tokens.router)
+app.include_router(oauth.router)
 app.include_router(api_keys.router)
 app.include_router(jobs.router)
 app.include_router(applications.router)

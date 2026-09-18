@@ -117,9 +117,9 @@ class TailoredResume(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     job_posting_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("job_postings.id", ondelete="CASCADE"), index=True, nullable=False
     )
-    # {"html": str} — an ATS-friendly HTML fragment (see
-    # app.services.resume_renderer.render_html_docx), either LLM-generated
-    # or uploaded directly via POST /resumes/main/tailored/upload.
+    # app.schemas.resume.TailoredResumeUpload's shape — {"summary": str,
+    # "sections": [{"heading": str, "bullets": [str, ...]}, ...]} — either
+    # LLM-generated or uploaded directly via POST /resumes/main/tailored/upload.
     content: Mapped[dict] = mapped_column(JSONB, nullable=False)
     storage_key: Mapped[str] = mapped_column(String(500), nullable=False)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -148,8 +148,8 @@ class CoverLetter(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     job_posting_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("job_postings.id", ondelete="CASCADE"), index=True, nullable=False
     )
-    # {"html": str} — an ATS-friendly HTML fragment (see
-    # app.services.resume_renderer.render_html_docx), either LLM-generated
+    # app.schemas.resume.CoverLetterUpload's shape — {"greeting": str,
+    # "body_paragraphs": [str, ...], "closing": str} — either LLM-generated
     # or uploaded directly via POST /resumes/main/cover-letter/upload.
     content: Mapped[dict] = mapped_column(JSONB, nullable=False)
     storage_key: Mapped[str] = mapped_column(String(500), nullable=False)

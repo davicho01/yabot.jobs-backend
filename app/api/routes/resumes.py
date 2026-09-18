@@ -11,12 +11,16 @@ from app.models.resume import CoverLetter, Resume, ResumeReview, ResumeScore, Ta
 from app.models.user import User
 from app.schemas.resume import (
     CoverLetterRead,
-    HtmlContentUpload,
+    CoverLetterUpload,
+    ResumeDetailRead,
     ResumeRead,
     ResumeReviewRead,
     ResumeScoreRead,
+    ResumeScoreUpload,
+    ResumeSectionContent,
     ResumeUpdate,
     TailoredResumeRead,
+    TailoredResumeUpload,
 )
 from app.services.llm_client import LlmError
 from app.services.resume_llm import (
@@ -27,7 +31,7 @@ from app.services.resume_llm import (
     score_resume_with_llm,
 )
 from app.services.resume_parser import SUPPORTED_CONTENT_TYPES, extract_text
-from app.services.resume_renderer import render_html_docx
+from app.services.resume_renderer import render_cover_letter_docx, render_tailored_resume_docx
 from app.services.resume_storage import delete_file, download_file, upload_file
 
 router = APIRouter(prefix="/resumes", tags=["resumes"])
@@ -137,6 +141,16 @@ def list_resumes(current_user: User = Depends(get_current_user), db: Session = D
     return db.scalars(
         select(Resume).where(Resume.user_id == current_user.id).order_by(Resume.created_at.desc())
     ).all()
+
+
+# Registered before /{resume_id} so "main" (a single path segment, like a
+# resume_id) isn't swallowed by that route — see the analogous fix on
+# GET /jobs/locations in app.api.routes.jobs.
+@router.get("/main", response_model=ResumeDetailRead)
+def get_main_resume_detail(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> Resume:
+    return _get_main_resume(db, current_user.id)
 
 
 @router.patch("/{resume_id}", response_model=ResumeRead)
@@ -273,6 +287,36 @@ def score_main_resume(
     return score
 
 
+@router.post("/main/score/upload", response_model=ResumeScoreRead, status_code=status.HTTP_201_CREATED)
+def upload_main_resume_score(
+    job_posting_id: uuid.UUID,
+    payload: ResumeScoreUpload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResumeScore:
+    """Store a fit evaluation computed elsewhere (e.g. by an MCP client's own
+    LLM — see mcp_server/) as the current score for a job, skipping this
+    app's own LLM call. Same storage as the generate endpoint above.
+    """
+    resume = _get_main_resume(db, current_user.id)
+    posting = _get_job_posting(db, job_posting_id)
+
+    score = ResumeScore(
+        resume_id=resume.id,
+        user_id=current_user.id,
+        job_posting_id=posting.id,
+        overall_score=payload.overall_score,
+        matched_keywords=payload.matched_keywords,
+        missing_keywords=payload.missing_keywords,
+        summary=payload.summary,
+        raw_response=None,
+    )
+    db.add(score)
+    db.flush()
+    _stamp_application_pointer(db, current_user.id, posting.id, latest_score_id=score.id)
+    return score
+
+
 @router.get("/main/score", response_model=ResumeScoreRead)
 def get_main_resume_score(
     job_posting_id: uuid.UUID,
@@ -298,11 +342,12 @@ def _store_tailored_resume(
     current_user: User,
     resume: Resume,
     posting: JobPosting,
-    html: str,
+    content: TailoredResumeUpload,
     raw_response: dict | None,
 ) -> TailoredResume:
-    content = {"html": html}
-    docx_bytes = render_html_docx(html)
+    docx_bytes = render_tailored_resume_docx(
+        content.summary, [(section.heading, section.bullets) for section in content.sections]
+    )
     filename = f"tailored-{(posting.title or 'resume').replace('/', '_')}.docx"
     storage_key = f"tailored/{current_user.id}/{uuid.uuid4()}-{filename}"
     upload_file(storage_key, docx_bytes, _TAILORED_CONTENT_TYPE)
@@ -311,7 +356,7 @@ def _store_tailored_resume(
         resume_id=resume.id,
         user_id=current_user.id,
         job_posting_id=posting.id,
-        content=content,
+        content=content.model_dump(),
         storage_key=storage_key,
         filename=filename,
         raw_response=raw_response,
@@ -344,24 +389,28 @@ def generate_main_tailored_resume(
     except LlmError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM request failed: {exc}") from exc
 
-    return _store_tailored_resume(db, current_user, resume, posting, generated.html, generated.raw_response)
+    content = TailoredResumeUpload(
+        summary=generated.summary,
+        sections=[ResumeSectionContent(**section) for section in generated.sections],
+    )
+    return _store_tailored_resume(db, current_user, resume, posting, content, generated.raw_response)
 
 
 @router.post("/main/tailored/upload", response_model=TailoredResumeRead, status_code=status.HTTP_201_CREATED)
 def upload_main_tailored_resume(
     job_posting_id: uuid.UUID,
-    payload: HtmlContentUpload,
+    payload: TailoredResumeUpload,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> TailoredResume:
     """Store a tailored resume written elsewhere (e.g. by an MCP client's
     own LLM — see mcp_server/) as the current tailored resume for a job,
-    skipping this app's own LLM call. Same HTML -> .docx pipeline as the
-    generate endpoint above.
+    skipping this app's own LLM call. Same content -> .docx pipeline as
+    the generate endpoint above.
     """
     resume = _get_main_resume(db, current_user.id)
     posting = _get_job_posting(db, job_posting_id)
-    return _store_tailored_resume(db, current_user, resume, posting, payload.html, None)
+    return _store_tailored_resume(db, current_user, resume, posting, payload, None)
 
 
 @router.get("/main/tailored", response_model=TailoredResumeRead)
@@ -407,11 +456,10 @@ def _store_cover_letter(
     current_user: User,
     resume: Resume,
     posting: JobPosting,
-    html: str,
+    content: CoverLetterUpload,
     raw_response: dict | None,
 ) -> CoverLetter:
-    content = {"html": html}
-    docx_bytes = render_html_docx(html)
+    docx_bytes = render_cover_letter_docx(content.greeting, content.body_paragraphs, content.closing)
     filename = f"cover-letter-{(posting.title or 'letter').replace('/', '_')}.docx"
     storage_key = f"cover-letters/{current_user.id}/{uuid.uuid4()}-{filename}"
     upload_file(storage_key, docx_bytes, _TAILORED_CONTENT_TYPE)
@@ -420,7 +468,7 @@ def _store_cover_letter(
         resume_id=resume.id,
         user_id=current_user.id,
         job_posting_id=posting.id,
-        content=content,
+        content=content.model_dump(),
         storage_key=storage_key,
         filename=filename,
         raw_response=raw_response,
@@ -453,24 +501,27 @@ def generate_main_cover_letter(
     except LlmError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM request failed: {exc}") from exc
 
-    return _store_cover_letter(db, current_user, resume, posting, generated.html, generated.raw_response)
+    content = CoverLetterUpload(
+        greeting=generated.greeting, body_paragraphs=generated.body_paragraphs, closing=generated.closing
+    )
+    return _store_cover_letter(db, current_user, resume, posting, content, generated.raw_response)
 
 
 @router.post("/main/cover-letter/upload", response_model=CoverLetterRead, status_code=status.HTTP_201_CREATED)
 def upload_main_cover_letter(
     job_posting_id: uuid.UUID,
-    payload: HtmlContentUpload,
+    payload: CoverLetterUpload,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> CoverLetter:
     """Store a cover letter written elsewhere (e.g. by an MCP client's own
     LLM — see mcp_server/) as the current cover letter for a job, skipping
-    this app's own LLM call. Same HTML -> .docx pipeline as the generate
+    this app's own LLM call. Same content -> .docx pipeline as the generate
     endpoint above.
     """
     resume = _get_main_resume(db, current_user.id)
     posting = _get_job_posting(db, job_posting_id)
-    return _store_cover_letter(db, current_user, resume, posting, payload.html, None)
+    return _store_cover_letter(db, current_user, resume, posting, payload, None)
 
 
 @router.get("/main/cover-letter", response_model=CoverLetterRead)

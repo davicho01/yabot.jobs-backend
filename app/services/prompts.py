@@ -120,18 +120,22 @@ supported by the candidate's real experience (never invent experience they \
 don't have).
 
 Respond with ONLY a single JSON object (no markdown fences, no commentary) \
-with exactly this key:
+    with exactly these keys:
 
 {{
-  "html": string
+  "summary": string,
+  "sections": [
+    {{"heading": string, "bullets": [string, ...]}},
+    ...
+  ]
 }}
 
-"html" is the full resume body as an HTML fragment (no <html>/<head>/<body> \
-wrapper, no <style> blocks or inline CSS, no tables/columns/images) built \
-only from these tags: h1 (candidate name, once), h2 (section headings — \
-typically "Summary", "Experience", "Skills", "Education"), p, ul/li, \
-strong, em. Keep it single-column and ATS-scannable — this gets converted \
-straight to a plain .docx.
+"summary" is a 2-3 sentence professional summary tailored to this role. \
+"sections" is the rest of the resume broken into named sections (typically \
+"Experience", "Skills", "Education") — each a plain heading plus a flat \
+list of bullet points (e.g. one bullet per role/responsibility/skill). \
+Keep bullets as plain text, no markup. This gets rendered straight into a \
+plain, single-column, ATS-scannable .docx.
 
 Resume text:
 \"\"\"
@@ -152,20 +156,20 @@ matches what the job asks for (never invent experience they don't have), and \
 avoid generic filler phrases.
 
 Respond with ONLY a single JSON object (no markdown fences, no commentary) \
-with exactly this key:
+with exactly these keys:
 
 {{
-  "html": string
+  "greeting": string,
+  "body_paragraphs": [string, ...],
+  "closing": string
 }}
 
-"html" is the full cover letter body as an HTML fragment (no \
-<html>/<head>/<body> wrapper, no <style> blocks or inline CSS, no \
-tables/columns/images) built only from these tags: p, strong, em. Include \
-a short salutation paragraph (e.g. "Dear Hiring Manager,"), 2-4 body \
-paragraphs making the case for this candidate for this specific role, and \
-a short sign-off paragraph (e.g. "Sincerely, {{candidate_name}}" if a name \
-is inferable from the resume, otherwise just "Sincerely,"). This gets \
-converted straight to a plain .docx.
+"greeting" is a short salutation (e.g. "Dear Hiring Manager,"). \
+"body_paragraphs" is 2-4 plain-text paragraphs making the case for this \
+candidate for this specific role. "closing" is a short sign-off (e.g. \
+"Sincerely, {{candidate_name}}" if a name is inferable from the resume, \
+otherwise just "Sincerely,"). This gets rendered straight into a plain \
+.docx.
 
 Resume text:
 \"\"\"

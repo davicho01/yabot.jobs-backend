@@ -16,6 +16,5 @@ google-auth>=2.34  # ID tokens for calling the private yabot-jobs-browser Cloud 
 boto3>=1.35
 pypdf>=5.0
 python-docx>=1.1
-beautifulsoup4>=4.12
 python-multipart>=0.0.12
 functions-framework>=3.5  # only used by the crawl-dispatcher/worker/crawl-worker Cloud Function deploys

@@ -130,9 +130,20 @@ def score_resume_with_llm(
 # --- Tailored generation ---------------------------------------------------
 
 
+def _as_sections_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    sections = []
+    for item in value:
+        if isinstance(item, dict) and isinstance(item.get("heading"), str):
+            sections.append({"heading": item["heading"], "bullets": _as_str_list(item.get("bullets"))})
+    return sections
+
+
 @dataclass
 class TailoredResumeContent:
-    html: str = ""
+    summary: str = ""
+    sections: list[dict[str, Any]] = field(default_factory=list)
     raw_response: dict[str, Any] | None = None
 
 
@@ -155,7 +166,8 @@ def generate_tailored_resume_with_llm(
         raise LlmError(f"Model response was not valid JSON: {exc}") from exc
 
     return TailoredResumeContent(
-        html=data.get("html") if isinstance(data.get("html"), str) else "",
+        summary=data.get("summary") if isinstance(data.get("summary"), str) else "",
+        sections=_as_sections_list(data.get("sections")),
         raw_response=data,
     )
 
@@ -165,7 +177,9 @@ def generate_tailored_resume_with_llm(
 
 @dataclass
 class CoverLetterContent:
-    html: str = ""
+    greeting: str = ""
+    body_paragraphs: list[str] = field(default_factory=list)
+    closing: str = ""
     raw_response: dict[str, Any] | None = None
 
 
@@ -188,6 +202,8 @@ def generate_cover_letter_with_llm(
         raise LlmError(f"Model response was not valid JSON: {exc}") from exc
 
     return CoverLetterContent(
-        html=data.get("html") if isinstance(data.get("html"), str) else "",
+        greeting=data.get("greeting") if isinstance(data.get("greeting"), str) else "",
+        body_paragraphs=_as_str_list(data.get("body_paragraphs")),
+        closing=data.get("closing") if isinstance(data.get("closing"), str) else "",
         raw_response=data,
     )

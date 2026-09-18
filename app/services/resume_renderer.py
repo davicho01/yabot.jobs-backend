@@ -1,61 +1,85 @@
 import io
 
 import docx
-from bs4 import BeautifulSoup
-from bs4.element import NavigableString, Tag
-from docx.text.paragraph import Paragraph
+from docx.shared import Inches, Pt, RGBColor
 
-# Only these tags are ever requested from the LLM (see app.services.prompts)
-# or accepted from an uploaded tailored-resume/cover-letter HTML fragment —
-# deliberately narrow so rendering stays predictable and the output stays a
-# plain, single-column, ATS-scannable .docx (no tables/columns/images).
-_HEADING_TAGS = {"h1": 0, "h2": 1, "h3": 2}
-_LIST_ITEM_PARENTS = {"ul", "ol"}
-_INLINE_BOLD_TAGS = {"b", "strong"}
-_INLINE_ITALIC_TAGS = {"i", "em"}
+# Word's own built-in template defaults to blue "Office 2007" heading colors
+# and 1"/1.25" margins, neither chosen with a resume in mind — this is our
+# own deliberate look, still plain/single-column so ATS parsing is unaffected.
+_BODY_FONT = "Calibri"
+_INK_COLOR = RGBColor(0x1A, 0x1A, 0x1A)
+_HEADING_SIZES_PT = {1: 18, 2: 12, 3: 11}
 
 
-def _add_inline_runs(paragraph: Paragraph, node: Tag, *, bold: bool = False, italic: bool = False) -> None:
-    for child in node.children:
-        if isinstance(child, NavigableString):
-            text = str(child)
-            if not text:
-                continue
-            run = paragraph.add_run(text.replace("\n", " "))
-            run.bold = bold
-            run.italic = italic
-        elif isinstance(child, Tag):
-            if child.name == "br":
-                paragraph.add_run().add_break()
-                continue
-            _add_inline_runs(
-                paragraph,
-                child,
-                bold=bold or child.name in _INLINE_BOLD_TAGS,
-                italic=italic or child.name in _INLINE_ITALIC_TAGS,
-            )
+def _style_document(document: docx.Document) -> None:
+    normal = document.styles["Normal"]
+    normal.font.name = _BODY_FONT
+    normal.font.size = Pt(10.5)
+    normal.font.color.rgb = _INK_COLOR
+    normal.paragraph_format.space_after = Pt(6)
+
+    for level, size_pt in _HEADING_SIZES_PT.items():
+        style = document.styles[f"Heading {level}"]
+        style.font.name = _BODY_FONT
+        style.font.size = Pt(size_pt)
+        style.font.bold = True
+        style.font.italic = False
+        style.font.color.rgb = _INK_COLOR
+        style.paragraph_format.space_before = Pt(10 if level > 1 else 0)
+        style.paragraph_format.space_after = Pt(4)
+
+    for style_name in ("List Bullet", "List Number"):
+        style = document.styles[style_name]
+        style.font.name = _BODY_FONT
+        style.font.size = Pt(10.5)
+        style.font.color.rgb = _INK_COLOR
+        style.paragraph_format.space_after = Pt(2)
+
+    section = document.sections[0]
+    section.left_margin = Inches(0.75)
+    section.right_margin = Inches(0.75)
+    section.top_margin = Inches(0.6)
+    section.bottom_margin = Inches(0.6)
 
 
-def render_html_docx(html: str) -> bytes:
-    """Render an HTML fragment (LLM-generated or client-uploaded — see
-    POST /resumes/main/tailored, /resumes/main/tailored/upload, and the
-    cover-letter equivalents) into a plain, single-column .docx. Only
-    headings/paragraphs/lists/bold/italic are honored; anything else
-    (tables, images, inline styles) is silently dropped rather than
-    rejected, since ATS parsers don't handle them reliably either.
+def render_tailored_resume_docx(summary: str, sections: list[tuple[str, list[str]]]) -> bytes:
+    """Render a tailored resume's structured content (see
+    app.schemas.resume.TailoredResumeUpload — the same shape produced by
+    this app's own LLM generation and accepted from an uploaded one, e.g.
+    from an MCP client's own LLM) into a plain, single-column, ATS-safe
+    .docx: the summary as an intro paragraph, then each section as a
+    heading plus a flat bullet list.
     """
-    soup = BeautifulSoup(html, "html.parser")
     document = docx.Document()
+    _style_document(document)
 
-    for node in soup.find_all(["h1", "h2", "h3", "p", "ul", "ol"], recursive=False):
-        if node.name in _HEADING_TAGS:
-            document.add_heading(node.get_text(strip=True), level=_HEADING_TAGS[node.name] + 1)
-        elif node.name == "p":
-            _add_inline_runs(document.add_paragraph(), node)
-        elif node.name in _LIST_ITEM_PARENTS:
-            style = "List Bullet" if node.name == "ul" else "List Number"
-            for item in node.find_all("li", recursive=False):
-                _add_inline_runs(document.add_paragraph(style=style), item)
+    if summary:
+        document.add_paragraph(summary)
+
+    for heading, bullets in sections:
+        document.add_heading(heading, level=2)
+        for bullet in bullets:
+            document.add_paragraph(bullet, style="List Bullet")
+
+    buffer = io.BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+def render_cover_letter_docx(greeting: str, body_paragraphs: list[str], closing: str) -> bytes:
+    """Render a cover letter's structured content (see
+    app.schemas.resume.CoverLetterUpload) into a plain .docx: greeting
+    paragraph, each body paragraph, then the closing paragraph.
+    """
+    document = docx.Document()
+    _style_document(document)
+
+    if greeting:
+        document.add_paragraph(greeting)
+    for paragraph in body_paragraphs:
+        document.add_paragraph(paragraph)
+    if closing:
+        document.add_paragraph(closing)
 
     buffer = io.BytesIO()
     document.save(buffer)

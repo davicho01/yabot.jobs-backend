@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from app.models.api_key import UserApiKey
     from app.models.auth import MagicLinkToken, PersonalAccessToken, UserSession
     from app.models.job_application import UserJobApplication
+    from app.models.oauth import OAuthAuthorizationRequest, OAuthRefreshToken
     from app.models.resume import Resume
 
 
@@ -50,6 +51,12 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="user", cascade="all, delete-orphan"
     )
     resumes: Mapped[list["Resume"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    oauth_authorization_requests: Mapped[list["OAuthAuthorizationRequest"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    oauth_refresh_tokens: Mapped[list["OAuthRefreshToken"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
 
