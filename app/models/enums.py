@@ -62,6 +62,7 @@ class AtsType(StrEnum):
     EIGHTFOLD = "eightfold"
     ORACLE_FUSION = "oracle_fusion"
     CLINCH = "clinch"
+    ECHO_JOBS = "echo_jobs"
     TALENTBREW = "talentbrew"
     NLX = "nlx"
     # Single-company, in-house career sites (not a platform other companies
