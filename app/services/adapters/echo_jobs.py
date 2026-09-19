@@ -66,7 +66,7 @@ def _detect_embedded(url: str) -> str | None:
     # — a non-empty job list is just as strong a signal.
     try:
         return host if _fetch_jobs(host) else None
-    except httpx.HTTPError:
+    except (httpx.HTTPError, ValueError):
         return None
 
 
@@ -118,7 +118,7 @@ def extract(url: str, _html: str) -> ExtractedJobFields | None:
     host = urlsplit(url).netloc
     try:
         jobs = _get_jobs(host)
-    except httpx.HTTPError:
+    except (httpx.HTTPError, ValueError):
         return None
     job = _find_job(jobs, url)
     if job is None:

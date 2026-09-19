@@ -56,24 +56,6 @@ def get_or_create_job_posting(
         )
         db.add(url_row)
         db.flush()
-        if crawl_source_id is None:
-            # Only a genuinely user-submitted URL should grow the crawl
-            # surface. A URL the crawler itself just discovered already
-            # belongs to a known, active board — re-running board
-            # detection on it is redundant at best, and actively wrong for
-            # adapters that store board_url verbatim (TalentBrew, Clinch,
-            # Oracle Fusion): each individual job URL would fail the
-            # existing-board_url check and register as its own brand-new
-            # "active" CrawlSource, which the dispatcher would then also
-            # crawl.
-            #
-            # Attribute the URL back to whatever board register_discovered_board
-            # resolved (new or already-known, active or pending) so the
-            # admin per-source listing/stats include user-submitted jobs,
-            # not just ones the crawler found itself.
-            source = register_discovered_board(db, raw_url)
-            if source is not None:
-                url_row.crawl_source_id = source.id
         posting = _create_pending_posting(db, url_row)
         # Committed before publishing, not just flushed: the worker reads
         # this row on a separate DB connection, and a flush is only visible
@@ -129,9 +111,10 @@ def ensure_user_applicant(db: Session, user_id: uuid.UUID, job_posting_id: uuid.
 
 
 def process_scan_job(db: Session, url_id: uuid.UUID) -> None:
-    """Worker-side entry point: fetch, extract, and store a JobPosting for
-    the given JobPostingUrl. Guards against Pub/Sub's at-least-once delivery
-    re-running (and re-billing) a scan that already completed.
+    """Worker-side entry point: resolve board attribution, then fetch,
+    extract, and store a JobPosting for the given JobPostingUrl. Guards
+    against Pub/Sub's at-least-once delivery re-running (and re-billing) a
+    scan that already completed.
 
     The url_row is fetched with SELECT ... FOR UPDATE so that guard is
     actually race-safe: a single worker process handles multiple messages
@@ -149,6 +132,27 @@ def process_scan_job(db: Session, url_id: uuid.UUID) -> None:
     if url_row.scan_status != ScanStatus.PENDING:
         logger.info("url_id=%s already scanned; skipping duplicate delivery.", url_id)
         return
+
+    if url_row.crawl_source_id is None:
+        # Only a genuinely user-submitted URL should grow the crawl
+        # surface. A URL the crawler itself just discovered already
+        # belongs to a known, active board (get_or_create_job_posting sets
+        # crawl_source_id up front for those) — re-running board detection
+        # on it is redundant at best, and actively wrong for adapters that
+        # store board_url verbatim (TalentBrew, Clinch, Oracle Fusion):
+        # each individual job URL would fail the existing-board_url check
+        # and register as its own brand-new "active" CrawlSource, which
+        # the dispatcher would then also crawl.
+        #
+        # Runs here rather than inline in the request (see
+        # get_or_create_job_posting) because it can mean several
+        # sequential page fetches — one per embedded-ATS adapter probing an
+        # unrecognized platform — which this worker already budgets minutes
+        # for per URL, unlike the request/response cycle that created this
+        # row.
+        source = register_discovered_board(db, url_row.url)
+        if source is not None:
+            url_row.crawl_source_id = source.id
 
     result = scan_job_url(url_row.url)
     now = datetime.now(timezone.utc)
