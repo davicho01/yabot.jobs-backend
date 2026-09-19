@@ -80,6 +80,9 @@ class AtsType(StrEnum):
     # Sam's Club postings under the same board, distinguished per-job by
     # jobDetails.brand (see adapters/walmart.py).
     WALMART = "walmart"
+    # Best Buy's careers site (careers.bestbuy.com) — built on ServiceNow's
+    # Service Portal, not any ATS platform (see adapters/bestbuy.py).
+    BESTBUY = "bestbuy"
     # Paycor Recruiting (né Newton) — a shared multi-tenant ATS, white-labeled
     # onto each customer's own careers domain via a "gnewton" embed script, no
     # customer-visible ATS host in the URL at all.
