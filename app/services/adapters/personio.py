@@ -6,7 +6,11 @@ from app.services.adapters.base import TIMEOUT, limit_job_urls, AtsAdapter, get_
 
 _PERSONIO_JOBS_URL = "https://{board_key}.jobs.personio.de/xml"
 _PERSONIO_JOB_URL = "https://{board_key}.jobs.personio.de/job/{job_id}"
-_PERSONIO_URL_RE = re.compile(r"([a-zA-Z0-9-]+)\.jobs\.personio\.de", re.IGNORECASE)
+# Tenants are published on either TLD (`<slug>.jobs.personio.de` or `.com`)
+# and both serve the identical /xml feed (verified live: ohpen, 1nce, stark),
+# so match both but always fetch/store the .de form — that way a .com URL
+# and a .de URL for the same tenant resolve to the same board_key.
+_PERSONIO_URL_RE = re.compile(r"([a-zA-Z0-9-]+)\.jobs\.personio\.(?:de|com)(?=[/:?#]|$)", re.IGNORECASE)
 
 
 def _match(url: str) -> str | None:

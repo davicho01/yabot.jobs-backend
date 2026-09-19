@@ -14,6 +14,16 @@ _PINPOINT_SIGNATURE = "pinpointhq"
 # points at a different-looking legacy subdomain; item links are what
 # matters.
 _JOBS_RSS_PATH = "/jobs.rss"
+_RESERVED_HOSTED_LABELS = {"www", "app", "api", "help", "developers"}
+
+
+def _match_hosted(url: str) -> str | None:
+    # Pinpoint-hosted boards live at <slug>.pinpointhq.com, so the admin
+    # POST (which only runs this static tier) can register them directly;
+    # white-labeled custom domains still need the embedded_match tier below.
+    host = urlsplit(url).netloc.lower()
+    label, _, rest = host.partition(".")
+    return host if rest == "pinpointhq.com" and label not in _RESERVED_HOSTED_LABELS else None
 
 
 def _detect_embedded(url: str) -> str | None:
@@ -47,6 +57,7 @@ def _board_key(url: str) -> str | None:
 # stored verbatim, same reasoning as Avature/Paradox.
 ADAPTER = AtsAdapter(
     AtsType.PINPOINT,
+    match=_match_hosted,
     fetch_jobs=_fetch_jobs,
     board_key=_board_key,
     embedded_match=_detect_embedded,

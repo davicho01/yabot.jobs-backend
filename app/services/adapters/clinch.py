@@ -10,6 +10,18 @@ _CLINCH_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _CLINCH_SIGNATURE = "clinchtalent.com"
 
 
+def _sitemap_job_urls(host: str) -> list[str]:
+    response = get_with_retry(f"https://{host}/sitemap.xml", timeout=TIMEOUT)
+    response.raise_for_status()
+    root = ElementTree.fromstring(response.content)
+    ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+    return [
+        loc.text
+        for loc in root.findall(".//sm:loc", ns)
+        if loc.text and urlsplit(loc.text).path.startswith("/jobs/")
+    ]
+
+
 def _fetch_jobs(host: str) -> list[str]:
     # No public jobs API, but Clinch (a white-label career-site CMS — every
     # tenant runs on its own domain, there's no shared clinch.io host to
@@ -18,16 +30,17 @@ def _fetch_jobs(host: str) -> list[str]:
     # live instance). Small volume in practice (~100 jobs), so no "today
     # only" filtering — just a safety cap like every other adapter's
     # _MAX_JOBS.
-    response = get_with_retry(f"https://{host}/sitemap.xml", timeout=TIMEOUT)
-    response.raise_for_status()
-    root = ElementTree.fromstring(response.content)
-    ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
-    urls = [
-        loc.text
-        for loc in root.findall(".//sm:loc", ns)
-        if loc.text and urlsplit(loc.text).path.startswith("/jobs/")
-    ]
-    return urls[:_CLINCH_MAX_JOBS]
+    return _sitemap_job_urls(host)[:_CLINCH_MAX_JOBS]
+
+
+def _is_own_job_url(url: str, host: str) -> bool:
+    # Real Clinch tenants list their own single-segment /jobs/{slug} pages.
+    # Detection-only strictness (crawling stays lenient: existing rows such
+    # as iCIMS-hosted ones use /jobs/{id}/{slug}/job): schooljobs.com's
+    # sitemap is governmentjobs.com's (other host) and NEOGOV's own jobs are
+    # /jobs/{id}-1/{slug}, and both were registered as active "clinch" rows.
+    parts = urlsplit(url)
+    return parts.netloc == host and len(parts.path.strip("/").split("/")) == 2
 
 
 def _detect_embedded(url: str) -> str | None:
@@ -47,7 +60,7 @@ def _detect_embedded(url: str) -> str | None:
     # contains /jobs/ postings is just as strong a signal as the marketing
     # page's signature string, so fall back to it.
     try:
-        return host if _fetch_jobs(host) else None
+        return host if any(_is_own_job_url(u, host) for u in _sitemap_job_urls(host)) else None
     except (httpx.HTTPError, ElementTree.ParseError):
         return None
 

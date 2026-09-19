@@ -1,8 +1,8 @@
 # Crawl-source discovery ledger
 
-Record of `/discover-crawl-sources` work against prod (`https://api.yabot.jobs`), 2026-09-19, waves 1-6. Status and ATS columns are generated from the live `GET /admin/crawl-sources` roster, so they show what prod actually holds, not what was intended. Per-request outcomes for waves 3-6 are in `docs/crawl-source-ledger.jsonl`.
+Record of `/discover-crawl-sources` work against prod (`https://api.yabot.jobs`), 2026-09-19, waves 1-7. Status and ATS columns are generated from the live `GET /admin/crawl-sources` roster, so they show what prod actually holds, not what was intended. Per-request outcomes for waves 3-6 are in `docs/crawl-source-ledger.jsonl`.
 
-**Prod totals at last update (post wave 6):** 1399 active, 36 pending, 22 rejected (session start: 191 / 11 / 10). The rejected count rose by 12 during wave 4 without any action from this session: those are earlier pending rows from this ledger (shared platform domains such as `jobs.smartrecruiters.com`, `jobs.jobvite.com`, `recruiting.ultipro.com`, `recruiting.paylocity.com`, several Taleo/iCIMS tenants) that look like they were triaged in the pending queue. Pending fell from 52 to 30 the same way (some resolved to active via new adapters, e.g. Ulta and REI now `icims`). Waves 5-6 ran later the same day after checking in with the user on scope — see their sections below. **Wave 6 exhausted the session's WebSearch budget (200/200)**, so all four of its forks (Middle East/Israel, Africa, Eastern Europe, Canada) came back well under target; the user redirected future waves to USA jobs afterward.
+**Prod totals at last update (post wave 7):** 1434 active, 39 pending, 22 rejected (session start: 191 / 11 / 10). The rejected count rose by 12 during wave 4 without any action from this session: those are earlier pending rows from this ledger (shared platform domains such as `jobs.smartrecruiters.com`, `jobs.jobvite.com`, `recruiting.ultipro.com`, `recruiting.paylocity.com`, several Taleo/iCIMS tenants) that look like they were triaged in the pending queue. Pending fell from 52 to 30 the same way (some resolved to active via new adapters, e.g. Ulta and REI now `icims`). Waves 5-6 ran later the same day after checking in with the user on scope — see their sections below. **Wave 6 exhausted the session's WebSearch budget (200/200)**, so all four of its forks (Middle East/Israel, Africa, Eastern Europe, Canada) came back well under target; the user redirected future waves to USA jobs afterward. **Wave 7 ran as a separate, concurrent session** (different sectors: K-12/higher-ed, restaurants/hospitality, sports/entertainment, and a different international slice) — see its section for the overlap this caused and how it resolved.
 
 **How to read the tables:** *Board URL* is the literal URL submitted. **shape-only** means a board added through `POST /admin/crawl-sources`, which only checks URL shape. Workday's SPA can't be fetched, so those boards were never content-verified: a wrong tenant shows up as a `last_error` after the first crawl. Greenhouse/Lever/Ashby/Workable/BambooHR/JazzHR/Personio/Recruitee/Breezy boards were verified live via each platform's public API before adding.
 
@@ -1337,6 +1337,90 @@ No genuinely-unsupported-platform pending submissions this wave — none of the 
 
 **Totals after wave 6:** 1399 active, 36 pending, 22 rejected.
 
+## Wave 7
+
+Ran as a **separate, concurrent session** from waves 5-6, also on 2026-09-19 — this session was not aware of the other until it reached this point in the file. Targeted niche sectors not covered by waves 1-4 (all of which had already covered every broad vertical the playbook suggests): K-12 school districts & higher-ed, restaurants/QSR/hospitality, sports/entertainment/venues, and international (a different slice than wave 5's APAC/LATAM pass — this one skewed toward Japan/Korea/SE Asia/Brazil/Africa/UAE). Prod totals before wave 7: 1331 active / 31 pending / 22 rejected (fetched before the other session's wave 5-6 writes landed, so this wave's dedup exclusion list predates those — see overlap note below).
+
+### Sports, entertainment & ticketing (9/11 added, 2 flagged pending)
+
+| Company | Board URL | ATS | Status | Note |
+|---|---|---|---|---|
+| Fanatics | https://job-boards.greenhouse.io/fanaticsinc | greenhouse | active | |
+| Vivid Seats | https://job-boards.greenhouse.io/vividseatsllc | greenhouse | active | |
+| Golden State Warriors | https://job-boards.greenhouse.io/goldenstatewarriors | greenhouse | active | |
+| Lucky Strike Entertainment (Bowlero) | https://corporatecareers-luckystrikeentertainment.icims.com/ | icims | active | |
+| Six Flags Entertainment | https://careers-sixflags.icims.com/ | icims | active | |
+| PENN Entertainment | https://careersapply-pennentertainment.icims.com/ | icims | active | |
+| TKO Group Holdings (WWE/UFC) | https://wwecorp.wd5.myworkdayjobs.com/TKO | workday | active | shape-only |
+| PGA TOUR | https://pgatour.wd5.myworkdayjobs.com/PGATOURExternal | workday | active | shape-only |
+| Dave & Buster's | https://daveandbusters.wd1.myworkdayjobs.com/en-US/Dave_and_Busters_Careers | workday | active | shape-only |
+| Aristocrat Leisure | https://aristocrat.wd3.myworkdayjobs.com/en-US/AristocratExternalCareersSite | workday | active | shape-only; distinct from Light & Wonder (already in roster) |
+| ESL FACEIT Group | https://apply.workable.com/efg/ | workable | active | esports league/tournament operator |
+| Team Liquid | https://careers.teamliquid.com/jobs/1037950-global-early-careers | Teamtailor | pending (submitted) | |
+| Manchester United | https://careers.manutd.com/postings/a081a592-ef5e-4b39-a5f7-70cda2599093 | Pinpoint HQ | pending (submitted) | |
+
+### Restaurants, QSR & hospitality (10/11 added, 2 flagged pending, 1 failed)
+
+| Company | Board URL | ATS | Status | Note |
+|---|---|---|---|---|
+| Dutch Bros Coffee | https://dutchbros.wd1.myworkdayjobs.com/en-US/DBShops | workday | active | shape-only |
+| Panera Bread | https://panerabread.wd5.myworkdayjobs.com/Panera_Careers | workday | active | shape-only |
+| Cracker Barrel Old Country Store | https://cbrlgroup.wd5.myworkdayjobs.com/CrackerBarrelExternal | workday | active | shape-only |
+| Whataburger | https://whataburger.wd5.myworkdayjobs.com/WAB_CAREERS | workday | active | shape-only |
+| Restaurant Brands International (BK/Popeyes/Tim Hortons/Firehouse Subs) | https://rbi.wd3.myworkdayjobs.com/RBI_External_Career_Site | workday | active | shape-only, multi-brand corporate site |
+| Sonesta International Hotels | https://reitmr.wd5.myworkdayjobs.com/Sonesta | workday | active | shape-only |
+| Dine Brands Global (Applebee's/IHOP/Fuzzy's) | https://dinebrands.wd503.myworkdayjobs.com/RestaurantCareerSite | workday | active | shape-only |
+| Omni Hotels & Resorts | https://externalhourly-omnihotels.icims.com/ | icims | active | |
+| Highgate Hotels | https://externalmanagement-highgate.icims.com/ | icims | active | |
+| Davidson Hospitality Group | https://management-davidsonhospitality.icims.com/ | icims | active | |
+| BJ's Restaurants | https://careers.bjsrestaurants.com | — | **422, not added** | fork reported iCIMS-backed but gave a custom-domain front-end that doesn't match `detect_ats_source`'s iCIMS signature; needs the real `*.icims.com` subdomain, not found before this session's WebSearch budget ran out |
+| Darden Restaurants (Olive Garden, LongHorn, Yard House, etc.) | https://darden.paradox.ai/co/DardenRestaurantSupportCenter/Job?job_id=PDX_DRSC_2B430CE4-501A-4ECD-85AA-95D6BA7845F9_88118 | Paradox.ai | pending (submitted) | |
+| Jack in the Box | https://www.jackintheboxjobs.com/clients/19827/posting/9541681 | talentReef | pending (submitted) | Culver's and Potbelly also confirmed on talentReef, lower incremental value once one adapter exists |
+
+Skipped: Chili's/Brinker (`brinker.taleo.net` DNS no longer resolves, migrated off Taleo to an unclear platform, dropped rather than guess).
+
+### K-12 school districts & higher education (7/7 added, 2 flagged pending)
+
+| Institution | Board URL | ATS | Status | Note |
+|---|---|---|---|---|
+| University of Chicago | https://uchicago.wd5.myworkdayjobs.com/External | workday | active | shape-only; distinct from "UChicago Medicine" already in roster |
+| University of Texas at Austin | https://utaustin.wd1.myworkdayjobs.com/UTstaff | workday | active | shape-only |
+| University of Maryland, College Park | https://umd.wd1.myworkdayjobs.com/UMCP | workday | active | shape-only |
+| University of Wisconsin-Madison | https://wisconsin.wd1.myworkdayjobs.com/UW_Madison | workday | active | shape-only |
+| American University | https://american.wd1.myworkdayjobs.com/AU | workday | active | shape-only |
+| University of Arkansas System | https://uasys.wd5.myworkdayjobs.com/UASYS | workday | active | shape-only |
+| University of Louisville | https://uofl.wd1.myworkdayjobs.com/UofLCareerSite | workday | active | shape-only |
+| Atlanta Public Schools | https://www.applitrack.com/atlantapublicschools/onlineapp/default.aspx?AppliTrackJobID=5315 | Frontline AppliTrack | pending (submitted) | |
+| San Jose Evergreen Community College District | https://sjeccd.peopleadmin.com/postings/4333 | PeopleAdmin | pending (submitted) | |
+
+Notable: Los Angeles Unified School District (careers.lausd.org) runs SAP SuccessFactors (`career41.sapsf.com`, company code `losangel01`, already a supported adapter via embedded-match) but no individual job-requisition URL was found via search before the budget ran out — only category-filter links. Worth a follow-up submission once a real job URL is found.
+
+### International — Asia, Latin America, Africa, Middle East (12/15 added, 2 flagged pending, 1 failed, 3 dupes)
+
+| Company | Board URL | ATS | Status | Region | Note |
+|---|---|---|---|---|---|
+| InMobi | https://job-boards.greenhouse.io/inmobi | greenhouse | active | India | |
+| Meesho | https://jobs.lever.co/meesho | lever | active | India | |
+| PayPay | https://job-boards.greenhouse.io/paypay | greenhouse | active | Japan | |
+| Seoul Robotics | https://job-boards.greenhouse.io/seoulrobotics | greenhouse | active | South Korea | |
+| EasyGo | https://job-boards.greenhouse.io/easygo | greenhouse | active | Australia | |
+| CI&T | https://jobs.lever.co/ciandt | lever | active | Brazil | |
+| iFood | https://job-boards.greenhouse.io/ifoodcarreiras | greenhouse | active | Brazil | |
+| Traveloka | https://traveloka.wd3.myworkdayjobs.com/Traveloka | workday | active | Indonesia | shape-only |
+| ALX Africa | https://job-boards.greenhouse.io/alxafrica | greenhouse | active | South Africa/pan-Africa | edtech |
+| Cobblestone Energy | https://job-boards.greenhouse.io/cobblestoneenergy | greenhouse | active | UAE | |
+| Zomato | https://jobs.smartrecruiters.com/Zomato1/104244178-software-engineer-back-end | SmartRecruiters | pending (submitted) | India | already-known unsupported platform per wave 4/6 |
+| MNT-Halan | https://jobs.halan.com/position/investor-relations-analyst/ | Zenats | pending (submitted) | Egypt | |
+| Jumia | https://job-boards.eu.greenhouse.io/jumia | greenhouse | **422, not added** | Nigeria | same `eu.greenhouse.io` adapter-gap hit as wave 5/6's Hotmart/Groww/Tamara — fourth data point for the one-line regex fix |
+| GoTo Group | https://jobs.lever.co/GoToGroup | lever | **409, dupe** | Indonesia | already added by the concurrent wave 5 session |
+| Ninja Van | https://jobs.lever.co/ninjavan | lever | **409, dupe** | Singapore | already added by the concurrent wave 5 session |
+| Coins.ph | https://jobs.lever.co/coins | lever | **409, dupe** | Philippines | already added by the concurrent wave 5 session |
+| Rappi | https://rappi.wd12.myworkdayjobs.com/Rappi_jobs | workday | **409, dupe** | Colombia | already added by the concurrent wave 5 session |
+
+**Concurrent-session note:** this wave's exclusion list was pulled before the other session's waves 5-6 writes landed, so 4 of its 17 international candidates turned out to already be active (409s, harmless) and one (Jumia) hit an adapter gap the other session had already independently found (Hotmart/Groww/Tamara). No corrective action needed — both are self-resolving (409 = no-op, and the `eu.greenhouse.io` regex gap is now a 4x-confirmed candidate for a follow-up fix). This session's own WebSearch budget also hit the 200/200 cap partway through the international fork, same as wave 6.
+
+**Totals after wave 7:** 1434 active, 39 pending, 22 rejected.
+
 ## Submitted via `POST /jobs` (job-URL / domain submissions)
 
 Unsupported platforms land as `pending` keyed by domain. Supported or embedded platforms resolve to `active`, sometimes on a different board than the submitted URL (e.g. Cleveland Clinic and Palo Alto Networks resolved to their Workday boards). Since commit `59aa263`, board registration runs in the scan worker, so a submission shows **no row yet** while its scan is still `pending`.
@@ -1488,3 +1572,63 @@ Unsupported platforms land as `pending` keyed by domain. Supported or embedded p
 ## Eightfold adapter fix (commit `fcbf89f`, deployed 2026-09-19)
 
 `app/services/adapters/eightfold.py`: `_candidate_domains` takes the job URL's `?domain=` param as a hint (tried first) and, for `<tenant>.eightfold.ai` hosts, also tries `<tenant>.com`. Nine tests were added in `tests/services/adapters/test_eightfold.py` (six fail on the old code). Verified live on PayPal, Eaton, Boston Scientific, TriNet, GlobalFoundries and Lockheed Martin; Keurig Dr Pepper does not resolve.
+
+## Wave 8 (2026-09-19, prod): gov / non-profit / legal-prof / staffing / insurance / agriculture / non-US
+
+Prod went from 1,453 to 1,664 active (some of the difference is other sessions resolving pending rows). This wave created **208 active rows** plus 3 pending. Researchers were fresh general-purpose agents rather than forks (a fork inherits the prod token). Web search budget was never hit (about 115 searches across 7 agents). Writes were paced (0.4s, backoff): no 429s, no 5xx.
+
+| Sector | Added active | Notes |
+|---|---|---|
+| Agriculture / food / environmental | 22 | ERM, Smithfield, Wayne-Sanderson, CGB, Primient on Workday; Halter, Apollo Agriculture etc. |
+| Insurance | 29 | 17 Greenhouse/Lever/Ashby, 12 Workday |
+| Non-profit / NGO / museums | 32 | GiveDirectly, ACLU, IRC, Ford Foundation, Met Museum, WFP, ... |
+| Government / public higher-ed | 23 | 11 PeopleAdmin universities and CCDs, 12 Workday (states, counties, cities, RTD) |
+| Staffing / recruiting | 29 | includes TrueBlue (PeopleReady) and Quess Corp on Oracle Fusion (Quess has ~2,500 reqs) |
+| Legal / professional services | 33 | law firms and accountancies mostly on Workday (search-verified only) |
+| Non-US platforms | 37 + 3 Pinpoint | 8 Gupy (Brazil), Personio, Recruitee, Workable, HireHive, Breezy, APAC/EU Workday, 2 Oracle Fusion |
+
+**Problems found**
+- **Personio adapter only matches `*.jobs.personio.de`** (`_PERSONIO_URL_RE` in `personio.py`); Ohpen, 1NCE and STARK are on `*.jobs.personio.com` and 422'd on the admin endpoint. Not added; an adapter fix would enable them.
+- **Pinpoint is embedded-match-only**, so `POST /admin/crawl-sources` 422s on `*.pinpointhq.com` (same gotcha as SuccessFactors). The Premier League, Made Tech and London Hire Group were added by submitting a real posting URL taken from each board's `postings.json` through `POST /jobs`; all three resolved to active.
+- **Clinch embedded fallback false-positives on NEOGOV**: submitting a governmentjobs.com and a schooljobs.com job URL created *active* `clinch` rows with the job URL as `board_url`. Both were PATCHed to `pending` with the domain root as `board_url`; their `ats_type` label still reads `clinch` (stale). Needs a NEOGOV adapter, or a Clinch guard.
+- **Symetra** (`symetra.eightfold.ai`) 422'd: the tenant domain doesn't resolve (same class as Keurig Dr Pepper).
+- **SmartRecruiters, Paylocity and Jobvite domains were already `rejected`** before this wave (created 13:36-15:19 UTC), so job-URL submissions for them (Frontier Agriculture, Mid Kansas Cooperative, Builders Mutual) created nothing. Rejected rows are excluded from the dedup list by the playbook, so the researchers proposed them again as "unsupported". Pending rows created: `ats.rippling.com`, `jobs.homerun.co`, `www.jobapscloud.com`.
+
+**Not added (verify later or skip)**
+- Board root only, no requisition found: Resolution Life, Jackson Financial, Tufts Health Plan, World Vision, Compassion International, Tony Blair Institute, Simpson Thacher, Alight, Port Houston, Tarrant Regional Water District, Las Vegas Valley Water District, City of Orlando, City of Vancouver, State of Nebraska, MUFG, Tyro.
+- Requisition IDs look old / low confidence: Arch Group, Desjardins, King & Spalding, Onin Group, Forvis Mazars UK, Wonderbox.
+- Marginal (one rolling "general interest" posting): Clean Crop Technologies.
+- Many name-collision, zero-posting and 404 slugs are listed in the individual researcher reports (chat transcript only).
+- Frankenmuth Insurance and Cross Country Healthcare (Dayforce): unverified, no adapter.
+
+**Weakly verified, check `last_error` after first crawl**: all Workday/Oracle rows in this wave (search-surfaced requisition URLs only); Hitachi, Belron, RBA, Fugro (recency unconfirmed); Essity (no individual job URL, listing snippet only); ownership inferred from job content: Insurify, Hi Marley, Flock (UK), One Acre Fund, ACLU, Mercy For Animals, Openwork, Peddler, Emerson (Oracle Fusion; the earlier `emerson.wd5` tenant was Emerson College).
+
+### Wave 8 follow-up: adapter fixes (uncommitted, not yet deployed)
+
+- `personio.py`: `_PERSONIO_URL_RE` now matches `*.jobs.personio.com` as well as `.de` (both serve the same `/xml` feed; still fetched/stored as `.de`, so both TLDs collapse to one board key). Unblocks Ohpen, 1NCE, STARK, which 422'd in wave 8. Tests: `tests/services/adapters/test_personio.py`.
+- `pinpoint.py`: added a static `match` for hosted `<slug>.pinpointhq.com` boards so `POST /admin/crawl-sources` works directly (custom-domain boards still go through `embedded_match`). Tests: `tests/services/adapters/test_pinpoint_clinch.py`.
+- `clinch.py`: the sitemap *fallback* used by `detect_embedded_ats_source` now requires the sitemap's `/jobs/` URLs to be on the same host and single-segment (`/jobs/{slug}`), which stops NEOGOV (`governmentjobs.com` and `schooljobs.com`, whose sitemap is governmentjobs.com's) from registering as active `clinch` rows. Crawling (`_fetch_jobs`) is unchanged on purpose: existing iCIMS-hosted rows labeled `clinch` use `/jobs/{id}/{slug}/job`. Verified live: NEOGOV -> None; careers.upstart.com and careers.toasttab.com still -> clinch. Note existing false-positive `clinch` rows (Teamtailor `houseofcontrol`, `signicat`; ApplicantPro `darlingii`; three iCIMS tenants) are untouched.
+
+## Wave 9 (2026-09-19, prod): 7 more sectors, 343 boards, all 201
+
+Prod went to **2,009 active** (from 1,453 at the start of waves 8-9). No 422/409/5xx on any of the 343 writes. The dedupe list now included rejected rows, and the unsupported-platform bucket was made optional (SmartRecruiters, Jobvite, Paylocity, Taleo, UltiPro, NEOGOV, Rippling, Homerun, JobAps are already evaluated), so no new pending rows this wave.
+
+| Sector | Added active | Notes |
+|---|---|---|
+| Space / defense / robotics / hardware | 37 | Archer (`archer56`; bare `archer` is a vet clinic), Oklo, Neros, Vast, Aerospace Corp, AeroVironment, RTX/Collins, Airbus |
+| Marketing / adtech / media | 42 | Klaviyo, HubSpot (`hubspotjobs`), Trade Desk, NYT, dentsu, Havas, FOX |
+| Mining / materials / chemicals / midstream / waste | 47 | Workday-heavy (Albemarle, Mosaic, Alcoa, Shell, Republic Services), plus Clean Harbors on Oracle |
+| Healthcare providers | 62 | Behavioral health, vet groups, senior living, Planned Parenthood affiliates, ~25 Workday health systems, 3 Oracle |
+| Construction / engineering | 55 | Workable/Greenhouse contractors, ~20 Workday firms, WSP on Oracle |
+| Crypto / web3 / AI infra | 44 | market makers (IMC, Akuna), exchanges (OKX, Bitpanda), Ashby protocol teams |
+| Restaurants / fitness / sports / leisure | 56 | Teams (Monumental, Panthers, NFL), coffee chains, Carnival and ClubCorp on Oracle |
+
+**Held back:** low req numbers or root only: Jefferson Health, AltaMed, Residential Home Health & Hospice (tenant shared with Kaplan), Mortenson, SOM (intern reqs only), Gensler ("Career Site is Moving"), Primoris, Chemours (host unclear), Ashland, Mitsubishi Chemical, CANPACK, Leonardo (owner unconfirmed), Anaheim Ducks (2024 IDs); 1-2 posting boards: Via Separations, Resonant Energy, Philadelphia Eagles, 0x, Subzero; other: M+A (`+` in slug), Solana Foundation (space in Ashby slug), Arc'teryx and Beauty Barrage (off-sector), Bedrock Robotics and Factorial Energy (already added in an earlier batch this wave).
+
+**Crawl state at 20:40 UTC:** only 8 of the 551 rows created in waves 8-9 had been crawled (0 errors), so the Workday/Oracle rows above are still unconfirmed beyond a search-surfaced requisition URL.
+
+### Finding (2026-09-19 ~20:50 UTC): crawl-worker is undersized for 2,009 active sources
+
+Why only 8 of 551 new boards had been crawled: the dispatcher enqueues every active source hourly, but `crawl-worker` is `maxScale=3` with concurrency 1 and a successful crawl averages 7.2s (p50 1.2s, p90 18.5s, max 156s), so it clears ~1,400-1,500 sources/hr. At 1,453 active that was about break-even; at 2,009 it isn't. The eventarc subscription's backlog grows every hour (oldest unacked ~4.7h, ~21,000 429 "no available instance" responses/hr as Pub/Sub retries), and new boards wait behind the FIFO backlog. Not a bug in the adapters. Fix options: raise `crawl-worker --max-instances` (~8 gives ~2x headroom, +5 DB connections) and/or slow the hourly scheduler. Also: the pull subscription `crawl-source-requests-worker` has ~10k unconsumed messages in prod (no prod consumer; recreated by the dispatcher if deleted), so ignore it when reading backlog metrics.
+
+**Applied 2026-09-19 21:33 UTC (prod):** `crawl-worker` `--max-instances` 3 -> 8 (revision `crawl-worker-00049-zfh`) and Scheduler job `crawl-dispatch-hourly` schedule `0 * * * *` -> `0 */2 * * *` (the job's name is now a misnomer). `deploy/gcloud-deploy.sh` updated to match (uncommitted). CI's `gcloud functions deploy crawl-worker` passes no `--max-instances`, so the live value persists across pushes. Five minutes later: instances ramped 3 -> 8, eventarc backlog 2,596 -> 2,287 and falling, DB backends peaked at 48. Expected: ~4,000 crawls/hr capacity vs ~1,000/hr demand (2,009 sources every 2h).

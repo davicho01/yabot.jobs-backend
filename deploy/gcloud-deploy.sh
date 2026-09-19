@@ -212,7 +212,7 @@ gcloud functions deploy worker \
   --set-secrets="$COMMON_SECRETS" \
   --memory=512Mi \
   --timeout=540s \
-  --max-instances=5
+  --max-instances=60
 
 gcloud run services update worker \
   --region="$REGION" \
@@ -230,7 +230,7 @@ gcloud functions deploy crawl-worker \
   --set-secrets="$COMMON_SECRETS" \
   --memory=512Mi \
   --timeout=540s \
-  --max-instances=3
+  --max-instances=8
 
 gcloud run services update crawl-worker \
   --region="$REGION" \
@@ -283,7 +283,7 @@ gcloud functions add-invoker-policy-binding crawl-dispatcher \
 
 gcloud scheduler jobs create http crawl-dispatch-hourly \
   --location="$REGION" \
-  --schedule="0 * * * *" \
+  --schedule="0 */2 * * *" \
   --uri="$FUNCTION_URL" \
   --http-method=POST \
   --oidc-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com" \
