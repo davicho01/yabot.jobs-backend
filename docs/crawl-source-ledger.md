@@ -1,10 +1,10 @@
 # Crawl-source discovery ledger
 
-Record of `/discover-crawl-sources` work against prod (`https://api.yabot.jobs`), 2026-09-19. Status and ATS columns are generated from the live `GET /admin/crawl-sources` roster, so they show what prod actually holds, not what was intended. Per-request outcomes for the wave 3 writes are in `docs/crawl-source-ledger.jsonl`.
+Record of `/discover-crawl-sources` work against prod (`https://api.yabot.jobs`), 2026-09-19, waves 1-4. Status and ATS columns are generated from the live `GET /admin/crawl-sources` roster, so they show what prod actually holds, not what was intended. Per-request outcomes for waves 3-4 are in `docs/crawl-source-ledger.jsonl`.
 
-**Prod totals at last update:** 709 active, 53 pending, 10 rejected (session start: 191 / 11 / 10).
+**Prod totals at last update:** 1327 active, 30 pending, 22 rejected (session start: 191 / 11 / 10). The rejected count rose by 12 during wave 4 without any action from this session: those are earlier pending rows from this ledger (shared platform domains such as `jobs.smartrecruiters.com`, `jobs.jobvite.com`, `recruiting.ultipro.com`, `recruiting.paylocity.com`, several Taleo/iCIMS tenants) that look like they were triaged in the pending queue. Pending fell from 52 to 30 the same way (some resolved to active via new adapters, e.g. Ulta and REI now `icims`).
 
-**How to read the tables:** *Board URL* is the literal URL submitted. **shape-only** means a Workday/Lever/etc. board added through `POST /admin/crawl-sources`, which only checks URL shape. Workday's SPA can't be fetched, so those boards were never content-verified: a wrong tenant shows up as a `last_error` after the first crawl. `pending` rows are new platforms or domains with no adapter yet (the queue for `implement-crawl-adapter`).
+**How to read the tables:** *Board URL* is the literal URL submitted. **shape-only** means a board added through `POST /admin/crawl-sources`, which only checks URL shape. Workday's SPA can't be fetched, so those boards were never content-verified: a wrong tenant shows up as a `last_error` after the first crawl. Greenhouse/Lever/Ashby/Workable/BambooHR/JazzHR/Personio/Recruitee/Breezy boards were verified live via each platform's public API before adding.
 
 
 ## Wave 1
@@ -26,8 +26,8 @@ Record of `/discover-crawl-sources` work against prod (`https://api.yabot.jobs`)
 | Middesk | https://jobs.ashbyhq.com/middesk | ashby | active | |
 | Binance | https://jobs.lever.co/binance | lever | active | |
 | Greenlight | https://jobs.lever.co/greenlight | lever | active | |
-| PayPal | https://paypal.eightfold.ai/careers | – | not added here | Eightfold root 422s on the admin endpoint (no static URL shape); handled below via /jobs + PATCH |
-| American Express | https://aexp.eightfold.ai/careers | – | not added here | Eightfold root 422'd; Amex has no working Eightfold API. Placeholder row later deleted |
+| PayPal | https://paypal.eightfold.ai/careers | – | not in prod | Eightfold root 422s on the admin endpoint (no static URL shape); handled below via /jobs + PATCH |
+| American Express | https://aexp.eightfold.ai/careers | – | not in prod | Eightfold root 422'd; Amex has no working Eightfold API. Placeholder row later deleted |
 | Mastercard | https://mastercard.wd1.myworkdayjobs.com/CorporateCareers | workday | active | |
 | Truist | https://truist.wd1.myworkdayjobs.com/Careers | workday | active | |
 | BlackRock | https://blackrock.wd1.myworkdayjobs.com/BlackRock_Professional | workday | active | |
@@ -586,45 +586,681 @@ Record of `/discover-crawl-sources` work against prod (`https://api.yabot.jobs`)
 | Lumentum | https://lumentum.wd5.myworkdayjobs.com/LITE | workday | active | |
 | Viterra (Bunge) | https://viterra.wd3.myworkdayjobs.com/External-CAN | workday | active | |
 
+## Wave 4
+
+
+### European/international SMBs on Personio, Recruitee & BreezyHR (first boards on these three adapters) (102/102 in prod)
+
+| Company | Board URL | ATS | Status | Note |
+|---|---|---|---|---|
+| Westwing | https://westwing.jobs.personio.de/ | personio | active | |
+| Holidu | https://holidu.jobs.personio.de/ | personio | active | |
+| statworx | https://statworx.jobs.personio.de/ | personio | active | |
+| 360T | https://360t.jobs.personio.de/ | personio | active | |
+| Vivid Money | https://vivid.jobs.personio.de/ | personio | active | |
+| Alexander Thamm | https://alexander-thamm-gmbh.jobs.personio.de/ | personio | active | |
+| XITASO | https://xitaso.jobs.personio.de/ | personio | active | |
+| Mawave Marketing | https://mawave-marketing-gmbh.jobs.personio.de/ | personio | active | |
+| Mercanis | https://mercanis.jobs.personio.de/ | personio | active | |
+| tonies | https://tonies.jobs.personio.de/ | personio | active | |
+| Checkmk | https://checkmk-gmbh.jobs.personio.de/ | personio | active | |
+| KNIME | https://knime.jobs.personio.de/ | personio | active | |
+| Wunderflats | https://wunderflats.jobs.personio.de/ | personio | active | |
+| Capmo | https://capmo.jobs.personio.de/ | personio | active | |
+| ottonova | https://ottonova.jobs.personio.de/ | personio | active | |
+| Highberg | https://schickler.jobs.personio.de/ | personio | active | |
+| Tanso | https://tanso.jobs.personio.de/ | personio | active | |
+| Lumenaza | https://lumenaza.jobs.personio.de/ | personio | active | |
+| Maltego | https://maltego.jobs.personio.de/ | personio | active | |
+| nerdware | https://nerdware.jobs.personio.de/ | personio | active | |
+| baramundi | https://baramundi-software-ag.jobs.personio.de/ | personio | active | |
+| YOUKI | https://youki-gmbh.jobs.personio.de/ | personio | active | |
+| gridX | https://gridx.jobs.personio.de/ | personio | active | |
+| Hypatos | https://hypatos-gmbh.jobs.personio.de/ | personio | active | |
+| Predium | https://predium.jobs.personio.de/ | personio | active | |
+| CodeCamp:N | https://codecampn.jobs.personio.de/ | personio | active | |
+| IPO Solutions | https://ipo.jobs.personio.de/ | personio | active | |
+| Langdock | https://langdock.jobs.personio.de/ | personio | active | |
+| Parqet | https://parqet.jobs.personio.de/ | personio | active | |
+| Choco | https://choco.jobs.personio.de/ | personio | active | |
+| abcfinlab | https://abcfinlab.jobs.personio.de/ | personio | active | |
+| advidera | https://advidera-gmbh-co-kg.jobs.personio.de/ | personio | active | |
+| Finway | https://finway.jobs.personio.de/ | personio | active | |
+| GET.ON | https://geton.jobs.personio.de/ | personio | active | |
+| Humanoo | https://humanoo.jobs.personio.de/ | personio | active | |
+| MeisterLabs | https://meister.jobs.personio.de/ | personio | active | |
+| Mobimeo | https://mobimeo.jobs.personio.de/ | personio | active | |
+| mediaire | https://Mediaire.jobs.personio.de/ | personio | active | |
+| Personio | https://personio.jobs.personio.de/ | personio | active | |
+| Personio (personio-gmbh board, ownership unclear) | https://personio-gmbh.jobs.personio.de/ | personio | active | |
+| Deerns | https://jobsdeerns.recruitee.com/ | recruitee | active | |
+| Aikido Security | https://aikidosecurity.recruitee.com/ | recruitee | active | |
+| Metyis | https://metyisag.recruitee.com/ | recruitee | active | |
+| Trafilea | https://trafilea.recruitee.com/ | recruitee | active | |
+| Fastned | https://fastned.recruitee.com/ | recruitee | active | |
+| Lomography | https://lomography.recruitee.com/ | recruitee | active | |
+| Great Minds | https://greatminds.recruitee.com/ | recruitee | active | |
+| Optics11 | https://optics11.recruitee.com/ | recruitee | active | |
+| Envipco | https://envipco.recruitee.com/ | recruitee | active | |
+| Entyre | https://entyreinc.recruitee.com/ | recruitee | active | |
+| SkyCell | https://skycellag.recruitee.com/ | recruitee | active | |
+| Addepto | https://addepto.recruitee.com/ | recruitee | active | |
+| GRID eSports | https://grid.recruitee.com/ | recruitee | active | |
+| celebrate company | https://celebratecompany.recruitee.com/ | recruitee | active | |
+| Riverflex | https://riverflex.recruitee.com/ | recruitee | active | |
+| Hostaway | https://hostaway.recruitee.com/ | recruitee | active | |
+| AlmavivA de Belgique | https://almavivadebelgique.recruitee.com/ | recruitee | active | |
+| Tidio | https://tidiocareer.recruitee.com/ | recruitee | active | |
+| Kodify | https://kodify.recruitee.com/ | recruitee | active | |
+| Wordbank | https://wordbank.recruitee.com/ | recruitee | active | |
+| Atheneum Partners | https://atheneum.recruitee.com/ | recruitee | active | |
+| BridgeFund | https://bridgefund.recruitee.com/ | recruitee | active | |
+| NEM Energy | https://nemenergy.recruitee.com/ | recruitee | active | |
+| SidelineSwap | https://sidelineswap.recruitee.com/ | recruitee | active | |
+| Time Doctor | https://timedoctor.recruitee.com/ | recruitee | active | |
+| Tiugo | https://tiugotech.recruitee.com/ | recruitee | active | |
+| WoodWing | https://woodwing.recruitee.com/ | recruitee | active | |
+| Eneve | https://eneve.recruitee.com/ | recruitee | active | |
+| Ferryscanner | https://ferryscanner.recruitee.com/ | recruitee | active | |
+| Hygraph | https://hygraph.recruitee.com/ | recruitee | active | |
+| Amilia | https://amilia.recruitee.com/ | recruitee | active | |
+| Skytree | https://skytree.recruitee.com/ | recruitee | active | |
+| American Logistics Authority | https://american-logistics-authority.breezy.hr/ | breezyhr | active | |
+| Surge Staffing | https://surge.breezy.hr/ | breezyhr | active | |
+| Embraer | https://embraer.breezy.hr/ | breezyhr | active | |
+| Urrly | https://urrly.breezy.hr/ | breezyhr | active | |
+| Atlas Technica | https://atlas-technica.breezy.hr/ | breezyhr | active | |
+| LufCo | https://lufco.breezy.hr/ | breezyhr | active | |
+| Seasats | https://seasats.breezy.hr/ | breezyhr | active | |
+| A2H | https://a2h.breezy.hr/ | breezyhr | active | |
+| Aimpoint Digital | https://aimpoint-digital.breezy.hr/ | breezyhr | active | |
+| TXP | https://vigil-global.breezy.hr/ | breezyhr | active | |
+| gritmind | https://gritmind.breezy.hr/ | breezyhr | active | |
+| Norbert Health | https://norbert-health.breezy.hr/ | breezyhr | active | |
+| Vagaro | https://vagaro.breezy.hr/ | breezyhr | active | |
+| Throne Labs | https://thronelabs.breezy.hr/ | breezyhr | active | |
+| Karen Clark & Company | https://karen-clark-company.breezy.hr/ | breezyhr | active | |
+| PrimaryMD | https://primarymd.breezy.hr/ | breezyhr | active | |
+| Totara Learning Solutions | https://totara-learning-solutions.breezy.hr/ | breezyhr | active | |
+| Clarity RCM | https://clarity-rcm.breezy.hr/ | breezyhr | active | |
+| Clever Real Estate | https://clever-real-estate.breezy.hr/ | breezyhr | active | |
+| Manara | https://manara.breezy.hr/ | breezyhr | active | |
+| Ceno Group | https://ceno-group-inc.breezy.hr/ | breezyhr | active | |
+| Opterus | https://opterus.breezy.hr/ | breezyhr | active | |
+| NurseDash | https://nursedash.breezy.hr/ | breezyhr | active | |
+| Aiden Technologies | https://aiden-technologies-inc.breezy.hr/ | breezyhr | active | |
+| Continued | https://continued.breezy.hr/ | breezyhr | active | |
+| Driver | https://driver-ai-inc.breezy.hr/ | breezyhr | active | |
+| Edfinity | https://edfinity.breezy.hr/ | breezyhr | active | |
+| Entermotion | https://entermotion.breezy.hr/ | breezyhr | active | |
+| Falkonry | https://falkonry.breezy.hr/ | breezyhr | active | |
+| Renalogic | https://renalogic.breezy.hr/ | breezyhr | active | |
+
+### AI-native, dev tools, infra, security & robotics (Ashby + Lever) (104/104 in prod)
+
+| Company | Board URL | ATS | Status | Note |
+|---|---|---|---|---|
+| Pika | https://jobs.ashbyhq.com/pika | ashby | active | |
+| Writer (generative AI) | https://jobs.ashbyhq.com/writer | ashby | active | |
+| Synthesia | https://jobs.ashbyhq.com/synthesia | ashby | active | |
+| Anyscale | https://jobs.ashbyhq.com/anyscale | ashby | active | |
+| Poolside | https://jobs.ashbyhq.com/poolside | ashby | active | |
+| Reka | https://jobs.ashbyhq.com/reka | ashby | active | |
+| Physical Intelligence | https://jobs.ashbyhq.com/physicalintelligence | ashby | active | |
+| 1X Technologies | https://jobs.ashbyhq.com/1x | ashby | active | |
+| OSARO | https://jobs.lever.co/osaro | lever | active | |
+| Encord | https://jobs.ashbyhq.com/encord | ashby | active | |
+| Roboflow | https://jobs.ashbyhq.com/roboflow | ashby | active | |
+| Weaviate | https://jobs.ashbyhq.com/weaviate | ashby | active | |
+| Zilliz | https://jobs.lever.co/zilliz | lever | active | |
+| turbopuffer | https://jobs.ashbyhq.com/turbopuffer | ashby | active | |
+| Runpod | https://jobs.ashbyhq.com/runpod | ashby | active | |
+| Render (cloud platform) | https://jobs.ashbyhq.com/render | ashby | active | |
+| Railway (dev platform) | https://jobs.ashbyhq.com/railway | ashby | active | |
+| Prefect | https://jobs.ashbyhq.com/prefect | ashby | active | |
+| Warp (terminal) | https://jobs.ashbyhq.com/warp | ashby | active | |
+| Zed Industries | https://jobs.ashbyhq.com/zed | ashby | active | |
+| Graphite (code review) | https://jobs.ashbyhq.com/graphite | ashby | active | |
+| Lovable | https://jobs.ashbyhq.com/lovable | ashby | active | |
+| Sentry | https://jobs.ashbyhq.com/sentry | ashby | active | |
+| Mux | https://jobs.ashbyhq.com/mux | ashby | active | |
+| LiveKit | https://jobs.ashbyhq.com/livekit | ashby | active | |
+| Stream (chat/feeds SDK) | https://jobs.ashbyhq.com/stream | ashby | active | |
+| Clerk (auth) | https://jobs.ashbyhq.com/clerk | ashby | active | |
+| WorkOS | https://jobs.ashbyhq.com/workos | ashby | active | |
+| Inngest | https://jobs.ashbyhq.com/inngest | ashby | active | |
+| Sonatype | https://jobs.lever.co/sonatype | lever | active | |
+| Semgrep | https://jobs.ashbyhq.com/semgrep | ashby | active | |
+| Secureframe | https://jobs.ashbyhq.com/secureframe | ashby | active | |
+| Secureframe (Lever board) | https://jobs.lever.co/secureframe | lever | active | |
+| Oneleet | https://jobs.ashbyhq.com/oneleet | ashby | active | |
+| Midjourney | https://jobs.ashbyhq.com/midjourney | ashby | active | |
+| Cartesia | https://jobs.ashbyhq.com/cartesia | ashby | active | |
+| Sesame | https://jobs.ashbyhq.com/sesame | ashby | active | |
+| Ideogram | https://jobs.ashbyhq.com/ideogram | ashby | active | |
+| Krea | https://jobs.ashbyhq.com/krea | ashby | active | |
+| Genmo | https://jobs.ashbyhq.com/genmo | ashby | active | |
+| Cognition (Devin) | https://jobs.ashbyhq.com/cognition | ashby | active | |
+| Factory (AI coding) | https://jobs.ashbyhq.com/factory | ashby | active | |
+| Parloa | https://jobs.ashbyhq.com/parloa | ashby | active | |
+| OpenEvidence | https://jobs.ashbyhq.com/openevidence | ashby | active | |
+| Tennr | https://jobs.ashbyhq.com/tennr | ashby | active | |
+| TensorWave | https://jobs.ashbyhq.com/tensorwave | ashby | active | |
+| Hyperbolic Labs | https://jobs.ashbyhq.com/hyperbolic | ashby | active | |
+| SF Compute | https://jobs.ashbyhq.com/sfcompute | ashby | active | |
+| Thinking Machines Lab | https://jobs.ashbyhq.com/thinkingmachines | ashby | active | |
+| Reflection AI | https://jobs.ashbyhq.com/reflectionai | ashby | active | |
+| Harmonic (math AI) | https://jobs.ashbyhq.com/harmonic | ashby | active | |
+| Mercor | https://jobs.ashbyhq.com/mercor | ashby | active | |
+| Agtonomy | https://jobs.lever.co/agtonomy | lever | active | |
+| ANYbotics | https://jobs.lever.co/anybotics | lever | active | |
+| Humanoid (UK robotics) | https://jobs.ashbyhq.com/humanoid | ashby | active | |
+| Genesis AI (robotics) | https://jobs.ashbyhq.com/genesis | ashby | active | |
+| Cloudinary | https://jobs.lever.co/cloudinary | lever | active | |
+| Zapier | https://jobs.ashbyhq.com/zapier | ashby | active | |
+| n8n | https://jobs.ashbyhq.com/n8n | ashby | active | |
+| Materialize | https://jobs.ashbyhq.com/materialize | ashby | active | |
+| MotherDuck | https://jobs.ashbyhq.com/motherduck | ashby | active | |
+| Hightouch | https://jobs.ashbyhq.com/hightouch | ashby | active | |
+| Fullstory | https://jobs.ashbyhq.com/fullstory | ashby | active | |
+| LogRocket | https://jobs.lever.co/logrocket | lever | active | |
+| incident.io | https://jobs.ashbyhq.com/incident | ashby | active | |
+| OpsLevel | https://jobs.ashbyhq.com/opslevel | ashby | active | |
+| Depot (build acceleration) | https://jobs.ashbyhq.com/depot | ashby | active | |
+| Coder (dev environments) | https://jobs.ashbyhq.com/coder | ashby | active | |
+| Sentra (data security) | https://jobs.ashbyhq.com/sentra | ashby | active | |
+| Hoxhunt | https://jobs.ashbyhq.com/hoxhunt | ashby | active | |
+| Neon (game payments) | https://jobs.ashbyhq.com/neon | ashby | active | |
+| Oligo (manufacturing AI) | https://jobs.ashbyhq.com/oligo | ashby | active | |
+| Lightning Labs | https://jobs.ashbyhq.com/lightning | ashby | active | |
+| Orca (Solana DEX) | https://jobs.ashbyhq.com/orca | ashby | active | |
+| Browserbase | https://jobs.ashbyhq.com/browserbase | ashby | active | |
+| E2B | https://jobs.ashbyhq.com/e2b | ashby | active | |
+| Braintrust (AI observability) | https://jobs.ashbyhq.com/braintrust | ashby | active | |
+| Relevance AI | https://jobs.ashbyhq.com/relevanceai | ashby | active | |
+| Dust (AI agents) | https://jobs.ashbyhq.com/dust | ashby | active | |
+| Unstructured | https://jobs.ashbyhq.com/unstructured | ashby | active | |
+| LlamaIndex | https://jobs.ashbyhq.com/llamaindex | ashby | active | |
+| Letta | https://jobs.ashbyhq.com/letta | ashby | active | |
+| Mem0 | https://jobs.ashbyhq.com/mem0 | ashby | active | |
+| Resend | https://jobs.ashbyhq.com/resend | ashby | active | |
+| Knock (notifications) | https://jobs.ashbyhq.com/knock | ashby | active | |
+| Svix | https://jobs.ashbyhq.com/svix | ashby | active | |
+| Speakeasy | https://jobs.ashbyhq.com/speakeasy | ashby | active | |
+| Mintlify | https://jobs.ashbyhq.com/mintlify | ashby | active | |
+| GitBook | https://jobs.ashbyhq.com/gitbook | ashby | active | |
+| Kong | https://jobs.ashbyhq.com/kong | ashby | active | |
+| Cyberhaven | https://jobs.ashbyhq.com/cyberhaven | ashby | active | |
+| ClickHouse | https://jobs.ashbyhq.com/clickhouse | ashby | active | |
+| Snowflake (Ashby board) | https://jobs.ashbyhq.com/snowflake | ashby | active | |
+| Confluent | https://jobs.ashbyhq.com/confluent | ashby | active | |
+| Axiom (zero-knowledge) | https://jobs.ashbyhq.com/axiom | ashby | active | |
+| Checkly | https://jobs.ashbyhq.com/checkly | ashby | active | |
+| Ghost (AI agents) | https://jobs.ashbyhq.com/ghost | ashby | active | |
+| Sanity | https://jobs.ashbyhq.com/sanity | ashby | active | |
+| Miro | https://jobs.ashbyhq.com/miro | ashby | active | |
+| ClickUp | https://jobs.ashbyhq.com/clickup | ashby | active | |
+| Vultr | https://jobs.ashbyhq.com/vultr | ashby | active | |
+| Scaleway | https://jobs.lever.co/scaleway | lever | active | |
+| Unify (GTM) | https://jobs.ashbyhq.com/unify | ashby | active | |
+| Demandbase | https://jobs.ashbyhq.com/demandbase | ashby | active | |
+
+### Fintech, crypto, digital health, biotech, climate & consumer (Ashby + Lever) (89/89 in prod)
+
+| Company | Board URL | ATS | Status | Note |
+|---|---|---|---|---|
+| Airwallex | https://jobs.ashbyhq.com/airwallex | ashby | active | |
+| Nubank | https://jobs.ashbyhq.com/nubank | ashby | active | |
+| Pennylane | https://jobs.ashbyhq.com/pennylane | ashby | active | |
+| Alan | https://jobs.ashbyhq.com/alan | ashby | active | |
+| Lendable | https://jobs.ashbyhq.com/lendable | ashby | active | |
+| Qonto | https://jobs.ashbyhq.com/qonto | ashby | active | |
+| Mollie | https://jobs.ashbyhq.com/mollie | ashby | active | |
+| Lemonade | https://jobs.ashbyhq.com/lemonade | ashby | active | |
+| Elliptic | https://jobs.ashbyhq.com/elliptic | ashby | active | |
+| Bestow | https://jobs.ashbyhq.com/bestow | ashby | active | |
+| Alchemy | https://jobs.ashbyhq.com/alchemy | ashby | active | |
+| Oscilar | https://jobs.ashbyhq.com/oscilar | ashby | active | |
+| Mesh | https://jobs.ashbyhq.com/mesh | ashby | active | |
+| Kin Insurance | https://jobs.ashbyhq.com/kin | ashby | active | |
+| Paxos | https://jobs.ashbyhq.com/paxos | ashby | active | |
+| Phantom | https://jobs.ashbyhq.com/phantom | ashby | active | |
+| Novo | https://jobs.ashbyhq.com/novo | ashby | active | |
+| Astra Financial | https://jobs.ashbyhq.com/astra | ashby | active | |
+| Marshmallow | https://jobs.ashbyhq.com/marshmallow | ashby | active | |
+| Acorns | https://jobs.ashbyhq.com/acorns | ashby | active | |
+| Modern Treasury | https://jobs.ashbyhq.com/moderntreasury | ashby | active | |
+| Uniswap Labs | https://jobs.ashbyhq.com/uniswap | ashby | active | |
+| Zilch | https://jobs.ashbyhq.com/zilch | ashby | active | |
+| Velocity | https://jobs.ashbyhq.com/velocity | ashby | active | |
+| Ledger | https://jobs.ashbyhq.com/ledger | ashby | active | |
+| Sky Mavis | https://jobs.ashbyhq.com/skymavis | ashby | active | |
+| Capchase | https://jobs.ashbyhq.com/capchase | ashby | active | |
+| Magic Eden | https://jobs.ashbyhq.com/magiceden | ashby | active | |
+| Meow | https://jobs.ashbyhq.com/meow | ashby | active | |
+| Found | https://jobs.ashbyhq.com/found | ashby | active | |
+| Mysten Labs | https://jobs.ashbyhq.com/mystenlabs | ashby | active | |
+| Openly | https://jobs.ashbyhq.com/openly | ashby | active | |
+| Clearco | https://jobs.ashbyhq.com/clearco | ashby | active | |
+| OpenSea | https://jobs.ashbyhq.com/opensea | ashby | active | |
+| Caribou (international tax) | https://jobs.ashbyhq.com/caribou | ashby | active | |
+| Mosaic (deal modeling) | https://jobs.ashbyhq.com/mosaic | ashby | active | |
+| Talkiatry | https://jobs.ashbyhq.com/talkiatry | ashby | active | |
+| Benchling | https://jobs.ashbyhq.com/benchling | ashby | active | |
+| Rula Health | https://jobs.ashbyhq.com/rula | ashby | active | |
+| Leap (specialty pharmacy benefits) | https://jobs.ashbyhq.com/leap | ashby | active | |
+| insitro | https://jobs.ashbyhq.com/insitro | ashby | active | |
+| Lunar (health-system software, flag for review) | https://jobs.ashbyhq.com/lunar | ashby | active | |
+| Akasa | https://jobs.ashbyhq.com/akasa | ashby | active | |
+| Latent Labs | https://jobs.ashbyhq.com/latentlabs | ashby | active | |
+| Basecamp Research | https://jobs.ashbyhq.com/basecamp-research | ashby | active | |
+| Wheel | https://jobs.ashbyhq.com/wheel | ashby | active | |
+| ZOE | https://jobs.ashbyhq.com/zoe | ashby | active | |
+| Firsthand | https://jobs.ashbyhq.com/firsthand | ashby | active | |
+| Form Energy | https://jobs.ashbyhq.com/formenergy | ashby | active | |
+| Base Power | https://jobs.ashbyhq.com/base-power | ashby | active | |
+| Helion Energy | https://jobs.ashbyhq.com/helion | ashby | active | |
+| Span | https://jobs.ashbyhq.com/span | ashby | active | |
+| Watershed | https://jobs.ashbyhq.com/watershed | ashby | active | |
+| Generate Capital | https://jobs.ashbyhq.com/generate | ashby | active | |
+| Aurora Solar | https://jobs.ashbyhq.com/aurorasolar | ashby | active | |
+| Sylvera | https://jobs.ashbyhq.com/sylvera | ashby | active | |
+| Twelve | https://jobs.ashbyhq.com/twelve | ashby | active | |
+| Rothy's | https://jobs.ashbyhq.com/rothys | ashby | active | |
+| Angi | https://jobs.ashbyhq.com/angi | ashby | active | |
+| Poshmark (Ashby) | https://jobs.ashbyhq.com/poshmark | ashby | active | |
+| Strava | https://jobs.ashbyhq.com/strava | ashby | active | |
+| Tonal | https://jobs.ashbyhq.com/tonal | ashby | active | |
+| Patreon | https://jobs.ashbyhq.com/patreon | ashby | active | |
+| Circle.so (community platform) | https://jobs.ashbyhq.com/circle | ashby | active | |
+| Ladder (fitness) | https://jobs.ashbyhq.com/ladder | ashby | active | |
+| Ankorstore | https://jobs.ashbyhq.com/ankorstore | ashby | active | |
+| Oyster | https://jobs.ashbyhq.com/oyster | ashby | active | |
+| Zip (procurement) | https://jobs.ashbyhq.com/zip | ashby | active | |
+| LifeStance Health | https://jobs.lever.co/lifestance | lever | active | |
+| Sila Services (home services) | https://jobs.lever.co/sila | lever | active | |
+| Ro | https://jobs.lever.co/ro | lever | active | |
+| Farfetch | https://jobs.lever.co/farfetch | lever | active | |
+| Zopa | https://jobs.lever.co/zopa | lever | active | |
+| Rover | https://jobs.lever.co/rover | lever | active | |
+| Nium | https://jobs.lever.co/nium | lever | active | |
+| Anchorage Digital | https://jobs.lever.co/anchorage | lever | active | |
+| Crypto.com | https://jobs.lever.co/crypto | lever | active | |
+| Arcadia | https://jobs.lever.co/arcadia | lever | active | |
+| Voltus | https://jobs.lever.co/voltus | lever | active | |
+| Everlywell | https://jobs.lever.co/everlywell | lever | active | |
+| Mindful (ADHD care) | https://jobs.lever.co/mindful | lever | active | |
+| Enveda | https://jobs.lever.co/enveda | lever | active | |
+| Immutable | https://jobs.lever.co/immutable | lever | active | |
+| Kavak | https://jobs.lever.co/kavak | lever | active | |
+| Zus Health | https://jobs.lever.co/zushealth | lever | active | |
+| Relay (web3 messenger) | https://jobs.lever.co/relay | lever | active | |
+| Viome | https://jobs.lever.co/viome | lever | active | |
+| Synthego | https://jobs.lever.co/synthego | lever | active | |
+| Arsenal Bio | https://jobs.lever.co/arsenalbio | lever | active | |
+
+### US mid-market/SMB on Workable, BambooHR, JazzHR & Gem (105/105 in prod)
+
+| Company | Board URL | ATS | Status | Note |
+|---|---|---|---|---|
+| Greenlife Healthcare Staffing | https://apply.workable.com/greenlife-healthcare-staffing-1 | workable | active | |
+| Staffing for Doctors | https://apply.workable.com/staffing-for-doctors | workable | active | |
+| Quick Hire Staffing | https://apply.workable.com/quickhirestaffing | workable | active | |
+| Triage Staffing | https://apply.workable.com/triagestaffing | workable | active | |
+| Natilus | https://apply.workable.com/natilus | workable | active | |
+| Destinus | https://apply.workable.com/destinusgroup | workable | active | |
+| Intercontinental Engineering-Manufacturing | https://apply.workable.com/intercon-eng-mfg | workable | active | |
+| New Flyer | https://apply.workable.com/new-flyer | workable | active | |
+| Exponent Energy | https://apply.workable.com/exponent-energy | workable | active | |
+| Vanguard EMS | https://apply.workable.com/vanguard-ems-inc | workable | active | |
+| Anthro | https://apply.workable.com/anthro | workable | active | |
+| Granite State Manufacturing | https://apply.workable.com/granite-state-manufacturing | workable | active | |
+| Nextern | https://apply.workable.com/nextern | workable | active | |
+| PowerLines | https://apply.workable.com/powerlines | workable | active | |
+| Vertex Sigma Software | https://apply.workable.com/vertex-sigma-software | workable | active | |
+| Sigma Defense | https://apply.workable.com/sigmadefense | workable | active | |
+| Branching Minds | https://apply.workable.com/branchingminds | workable | active | |
+| NOW Courier | https://apply.workable.com/now-courier | workable | active | |
+| Pj Fitzpatrick | https://apply.workable.com/pj-fitz | workable | active | |
+| SwiftX | https://apply.workable.com/swiftx-express | workable | active | |
+| Al Warren Oil Company | https://apply.workable.com/al-warren-oil-company-inc | workable | active | |
+| United Concrete | https://apply.workable.com/united-concrete | workable | active | |
+| talentpluto | https://apply.workable.com/talentpluto | workable | active | |
+| TherapyNotes | https://apply.workable.com/therapynotes | workable | active | |
+| Common App | https://apply.workable.com/commonapp | workable | active | |
+| Resource Innovations | https://apply.workable.com/resource-innovations | workable | active | |
+| Rodizio Grill | https://apply.workable.com/rodizio-grill-1 | workable | active | |
+| Riot Hospitality Group | https://apply.workable.com/riot-hospitality-group | workable | active | |
+| The Common Market | https://apply.workable.com/the-common-market | workable | active | |
+| REEF | https://apply.workable.com/nbrhd | workable | active | |
+| I.Rice & Company | https://apply.workable.com/irice-and-company | workable | active | |
+| Hilo by Aktiia | https://apply.workable.com/hilobyaktiia | workable | active | |
+| Quantis | https://apply.workable.com/quantis | workable | active | |
+| Optimile | https://apply.workable.com/optimile | workable | active | |
+| D2B | https://apply.workable.com/d2b-1 | workable | active | |
+| Foodics | https://apply.workable.com/foodics | workable | active | |
+| RISE Enterprise | https://apply.workable.com/rise-enterprise | workable | active | |
+| EatClub | https://apply.workable.com/eatclub | workable | active | |
+| Charger Logistics | https://apply.workable.com/charger-logistics-inc | workable | active | |
+| BrightOrder | https://apply.workable.com/brightorder | workable | active | |
+| JOEY Restaurants | https://apply.workable.com/joey-restaurants-1 | workable | active | |
+| UniUni Logistics (count unverified) | https://apply.workable.com/uniuni-logistics | workable | active | |
+| Alfil Logistics (count unverified) | https://apply.workable.com/alfil-logistics | workable | active | |
+| Marini HR | https://marinihr.bamboohr.com/careers | bamboohr | active | |
+| Whitman | https://whitman.bamboohr.com/careers | bamboohr | active | |
+| Emerald Charter Schools | https://emeraldcharterschools.bamboohr.com/careers | bamboohr | active | |
+| Oregon Family School | https://oregonfamilyschool.bamboohr.com/careers | bamboohr | active | |
+| Rainier Scholars | https://rainierscholars.bamboohr.com/careers | bamboohr | active | |
+| Greene County Public Health | https://gcph.bamboohr.com/careers | bamboohr | active | |
+| Trinity Tool | https://trinitytool.bamboohr.com/careers | bamboohr | active | |
+| Bare (BambooHR board, unconfirmed) | https://bare.bamboohr.com/careers | bamboohr | active | |
+| Technique Inc | https://techniqueinc.applytojob.com/apply/jobs | jazzhr | active | |
+| NRO (National Reconnaissance Office) | https://nro.applytojob.com/apply/jobs | jazzhr | active | |
+| Aerotech | https://aerotech.applytojob.com/apply/jobs | jazzhr | active | |
+| GliaCell Technologies | https://gliacelltechnologies.applytojob.com/apply/jobs | jazzhr | active | |
+| Porter Logistics | https://porterlogistics.applytojob.com/apply/jobs | jazzhr | active | |
+| WME Express | https://wmeexpress.applytojob.com/apply/jobs | jazzhr | active | |
+| Impact Workforce Solutions | https://iwsllc.applytojob.com/apply/jobs | jazzhr | active | |
+| Amsive | https://amsive.applytojob.com/apply/jobs | jazzhr | active | |
+| Ladgov Corporation | https://httpsladgovcomjobopenings.applytojob.com/apply/jobs | jazzhr | active | |
+| Foxconn Industrial Internet (FII) | https://foxconnassemblyllc.applytojob.com/apply/jobs | jazzhr | active | |
+| WGNSTAR | https://wgnstar.applytojob.com/apply/jobs | jazzhr | active | |
+| NSI Industries | https://nsiindustries.applytojob.com/apply/jobs | jazzhr | active | |
+| Rittal | https://rittal.applytojob.com/apply/jobs | jazzhr | active | |
+| Codekeeper | https://codekeeper.applytojob.com/apply/jobs | jazzhr | active | |
+| TicketManager | https://ticketmanager.applytojob.com/apply/jobs | jazzhr | active | |
+| Labelmaster | https://labelmaster.applytojob.com/apply/jobs | jazzhr | active | |
+| Computronix | https://cxusa.applytojob.com/apply/jobs | jazzhr | active | |
+| Sphere (company unconfirmed) | https://sphere.applytojob.com/apply/jobs | jazzhr | active | |
+| Exceptional Healthcare | https://exceptionalhealthcareinc.applytojob.com/apply/jobs | jazzhr | active | |
+| Fair Haven Community Health Care | https://fairhavencommunityhealthcare.applytojob.com/apply/jobs | jazzhr | active | |
+| Cassia Health | https://cassia.applytojob.com/apply/jobs | jazzhr | active | |
+| Miami County Public Health | https://miamicounty.applytojob.com/apply/jobs | jazzhr | active | |
+| PainPoint Health | https://painpointhealth.applytojob.com/apply/jobs | jazzhr | active | |
+| Whittier Health Network | https://whittierhealthnetwork.applytojob.com/apply/jobs | jazzhr | active | |
+| Fonemed | https://fonemed.applytojob.com/apply/jobs | jazzhr | active | |
+| ODMHSAS (Oklahoma mental health dept.) | https://odmhsas.applytojob.com/apply/jobs | jazzhr | active | |
+| Aspen Medical | https://aspenmedical.applytojob.com/apply/jobs | jazzhr | active | |
+| CECP | https://cecp.applytojob.com/apply/jobs | jazzhr | active | |
+| JazzHR 'landing' board (unconfirmed) | https://landing.applytojob.com/apply/jobs | jazzhr | active | |
+| Linktree | https://jobs.gem.com/linktree | gem | active | |
+| Fetch | https://jobs.gem.com/fetch | gem | active | |
+| Bilt | https://jobs.gem.com/bilt | gem | active | |
+| Motion (AI calendar) | https://jobs.gem.com/motion | gem | active | |
+| Paces | https://jobs.gem.com/paces | gem | active | |
+| Nominal | https://jobs.gem.com/nominal | gem | active | |
+| Fabric (health) | https://jobs.gem.com/fabrichealth | gem | active | |
+| Cartwheel | https://jobs.gem.com/cartwheel-1 | gem | active | |
+| Félix | https://jobs.gem.com/felix | gem | active | |
+| Superblocks | https://jobs.gem.com/superblocks | gem | active | |
+| Vantora | https://jobs.gem.com/up-labs | gem | active | |
+| StartupTAP | https://jobs.gem.com/startuptap | gem | active | |
+| Function Health | https://jobs.gem.com/function-health | gem | active | |
+| Bolna | https://jobs.gem.com/bolna | gem | active | |
+| Agora | https://jobs.gem.com/agora | gem | active | |
+| Apartment List | https://jobs.gem.com/apartment-list | gem | active | |
+| Productboard | https://jobs.gem.com/productboard | gem | active | |
+| Logixboard | https://jobs.gem.com/logixboard | gem | active | |
+| Inception | https://jobs.gem.com/inception | gem | active | |
+| Jetty | https://jobs.gem.com/jetty-careers | gem | active | |
+| Roe AI | https://jobs.gem.com/roe-ai | gem | active | |
+| Gem (recruiting software) | https://jobs.gem.com/gem | gem | active | |
+| Emerge Career (possibly stale) | https://jobs.gem.com/emerge-career | gem | active | |
+| Black Ore (possibly stale) | https://jobs.gem.com/black-ore | gem | active | |
+| Myriad Technology (likely stale) | https://jobs.gem.com/myriad-technology | gem | active | |
+
+### Consumer lifestyle: fitness, wellness, beauty, pets, home, games, events (88/88 in prod)
+
+| Company | Board URL | ATS | Status | Note |
+|---|---|---|---|---|
+| BetterHelp | https://job-boards.greenhouse.io/betterhelp | greenhouse | active | |
+| Fashion Nova | https://job-boards.greenhouse.io/fashionnova | greenhouse | active | |
+| Ōura | https://job-boards.greenhouse.io/oura | greenhouse | active | |
+| Wellhub (Gympass) | https://job-boards.greenhouse.io/gympass | greenhouse | active | |
+| WW (Weight Watchers) | https://job-boards.greenhouse.io/ww | greenhouse | active | |
+| KRAFTON | https://job-boards.greenhouse.io/krafton | greenhouse | active | |
+| Genius Sports | https://job-boards.greenhouse.io/geniussports | greenhouse | active | |
+| SimpliSafe | https://job-boards.greenhouse.io/simplisafe | greenhouse | active | |
+| Later | https://job-boards.greenhouse.io/later | greenhouse | active | |
+| The Farmer's Dog | https://job-boards.greenhouse.io/thefarmersdog | greenhouse | active | |
+| PrizePicks | https://job-boards.greenhouse.io/prizepicks | greenhouse | active | |
+| StubHub | https://job-boards.greenhouse.io/stubhubinc | greenhouse | active | |
+| Hudl | https://job-boards.greenhouse.io/hudl | greenhouse | active | |
+| AXS | https://job-boards.greenhouse.io/axs | greenhouse | active | |
+| Gymshark | https://job-boards.greenhouse.io/gymshark | greenhouse | active | |
+| Nextdoor | https://job-boards.greenhouse.io/nextdoor | greenhouse | active | |
+| onX | https://job-boards.greenhouse.io/onxmaps | greenhouse | active | |
+| Harry's | https://job-boards.greenhouse.io/harrys | greenhouse | active | |
+| SHEIN | https://job-boards.greenhouse.io/shein | greenhouse | active | |
+| MyFitnessPal | https://job-boards.greenhouse.io/myfitnesspal | greenhouse | active | |
+| Bombas | https://job-boards.greenhouse.io/bombas | greenhouse | active | |
+| Underdog | https://job-boards.greenhouse.io/underdog | greenhouse | active | |
+| AG1 | https://job-boards.greenhouse.io/ag1 | greenhouse | active | |
+| Insomniac Games | https://job-boards.greenhouse.io/insomniac | greenhouse | active | |
+| Dollar Shave Club | https://job-boards.greenhouse.io/dollarshaveclub | greenhouse | active | |
+| Peak Design | https://job-boards.greenhouse.io/peakdesign | greenhouse | active | |
+| Bandai Namco Entertainment | https://job-boards.greenhouse.io/bandainamco | greenhouse | active | |
+| Headspace | https://job-boards.greenhouse.io/hs | greenhouse | active | |
+| Gearbox | https://job-boards.greenhouse.io/gearbox | greenhouse | active | |
+| BARK | https://job-boards.greenhouse.io/bark | greenhouse | active | |
+| Future (fitness, ownership unconfirmed) | https://job-boards.greenhouse.io/future | greenhouse | active | |
+| Fetch (pet insurance, ownership unconfirmed) | https://job-boards.greenhouse.io/fetch | greenhouse | active | |
+| e.l.f. Beauty | https://jobs.lever.co/elfbeauty | lever | active | |
+| Match Group | https://jobs.lever.co/matchgroup | lever | active | |
+| Kabam | https://jobs.lever.co/kabam | lever | active | |
+| Dream Games | https://jobs.lever.co/dreamgames | lever | active | |
+| Wattpad | https://jobs.lever.co/wattpad | lever | active | |
+| Raya (unconfirmed) | https://jobs.lever.co/raya | lever | active | |
+| TeamSnap | https://jobs.lever.co/teamsnap | lever | active | |
+| Yardzen | https://jobs.lever.co/yardzen | lever | active | |
+| AllTrails | https://jobs.lever.co/alltrails | lever | active | |
+| Hims & Hers | https://jobs.ashbyhq.com/hims-and-hers | ashby | active | |
+| Voodoo | https://jobs.ashbyhq.com/voodoo | ashby | active | |
+| BeReal | https://jobs.ashbyhq.com/bereal | ashby | active | |
+| Sleeper | https://jobs.ashbyhq.com/sleeper | ashby | active | |
+| Brooklinen | https://jobs.ashbyhq.com/brooklinen | ashby | active | |
+| Posh | https://jobs.ashbyhq.com/posh | ashby | active | |
+| Partiful | https://jobs.ashbyhq.com/partiful | ashby | active | |
+| Quora | https://jobs.ashbyhq.com/quora | ashby | active | |
+| Sorare | https://jobs.ashbyhq.com/sorare | ashby | active | |
+| Yubo | https://jobs.ashbyhq.com/yubo | ashby | active | |
+| Second Dinner | https://jobs.ashbyhq.com/seconddinner | ashby | active | |
+| thatgamecompany | https://jobs.ashbyhq.com/thatgamecompany | ashby | active | |
+| Celsius (Workable, ownership unconfirmed) | https://apply.workable.com/celsius | workable | active | |
+| Petco | https://petco.wd1.myworkdayjobs.com/External | workday | active | |
+| Life Time | https://lifetime.wd1.myworkdayjobs.com/lifetime | workday | active | |
+| Topgolf Callaway Brands | https://tcbrands.wd1.myworkdayjobs.com/callaway-careers | workday | active | |
+| YETI | https://yeticoolers.wd5.myworkdayjobs.com/YETI | workday | active | |
+| Bumble | https://bumble.wd3.myworkdayjobs.com/Bumble_Careers | workday | active | |
+| Columbia Sportswear | https://columbiasportswearcompany.wd5.myworkdayjobs.com/CSC_Careers | workday | active | |
+| LEGO | https://lego.wd103.myworkdayjobs.com/LEGO_External | workday | active | |
+| Spin Master | https://spinmaster.wd3.myworkdayjobs.com/SpinMaster_Careers | workday | active | |
+| Dick's Sporting Goods | https://dickssportinggoods.wd1.myworkdayjobs.com/DSG | workday | active | |
+| Skechers | https://skechers.wd5.myworkdayjobs.com/One-career-site | workday | active | |
+| Deckers | https://deckers.wd5.myworkdayjobs.com/Deckers | workday | active | |
+| Kontoor Brands | https://kbi.wd5.myworkdayjobs.com/Kontoor | workday | active | |
+| Nu Skin | https://nuskin.wd5.myworkdayjobs.com/nuskin | workday | active | |
+| Beachbody (BODi) | https://beachbody.wd1.myworkdayjobs.com/Careers | workday | active | |
+| DraftKings | https://draftkings.wd1.myworkdayjobs.com/DraftKings | workday | active | |
+| Cinemark | https://cinemark.wd1.myworkdayjobs.com/cinemark | workday | active | |
+| Scotts Miracle-Gro | https://scottsmiraclegro.wd5.myworkdayjobs.com/SMGExternal | workday | active | |
+| Orangetheory Fitness | https://orangetheory.wd1.myworkdayjobs.com/orangetheory | workday | active | |
+| Purpose Brands | https://purposebrands.wd503.myworkdayjobs.com/purposebrands | workday | active | |
+| POWDR | https://powdr.wd12.myworkdayjobs.com/POWDR_Careers | workday | active | |
+| Pet Supermarket (Pet Retail Brands) | https://petretailbrands.wd5.myworkdayjobs.com/External_Career_Site_Pet_Supermarket_Inc | workday | active | |
+| VCA / Banfield vet hospitals | https://vca.wd1.myworkdayjobs.com/BFCareers | workday | active | |
+| Taymax (Planet Fitness franchisee) | https://taymax.wd5.myworkdayjobs.com/External_Careers | workday | active | |
+| Collectors | https://collectorsuniverse.wd1.myworkdayjobs.com/collectors | workday | active | |
+| Ticketmaster (Live Nation) | https://livenation.wd1.myworkdayjobs.com/TMExternalSite | workday | active | |
+| Light & Wonder | https://lnw.wd5.myworkdayjobs.com/LightWonderExternalCareers | workday | active | |
+| Excel Fitness | https://excelfitness.wd5.myworkdayjobs.com/Excel_Fitness | workday | active | |
+| Alterra Mountain (Deer Valley) | https://alterra.wd1.myworkdayjobs.com/DeerValleyResort | workday | active | |
+| Life Fitness | https://lifefitness.wd1.myworkdayjobs.com/searchLFN | workday | active | |
+| Tractor Supply (low confidence) | https://tsc.wd12.myworkdayjobs.com/TSC-Careers | workday | active | |
+| Ilitch (Little Caesars) | https://ilitch.wd5.myworkdayjobs.com/LC | workday | active | |
+| Wawa | https://wawa.wd1.myworkdayjobs.com/careers | workday | active | |
+| Fogo de Chão | https://fogo.wd5.myworkdayjobs.com/Fogo | workday | active | |
+| WeWork | https://wework.wd1.myworkdayjobs.com/WeWork | workday | active | |
+
+### Fortune 500 & large enterprises (Workday + Oracle Fusion) (115/115 in prod)
+
+| Company | Board URL | ATS | Status | Note |
+|---|---|---|---|---|
+| Academy Sports + Outdoors | https://academy.wd1.myworkdayjobs.com/Careers | workday | active | |
+| Ally Financial | https://ally.wd1.myworkdayjobs.com/Ally | workday | active | |
+| Baker Hughes | https://bakerhughes.wd5.myworkdayjobs.com/BakerHughes | workday | active | |
+| Barclays | https://barclays.wd3.myworkdayjobs.com/External_Career_Site_Barclays | workday | active | |
+| BMO | https://bmo.wd3.myworkdayjobs.com/External | workday | active | |
+| Burlington | https://burlington.wd5.myworkdayjobs.com/BurlingtonCareers | workday | active | |
+| Campbell's | https://campbellsoup.wd5.myworkdayjobs.com/ExternalCareers_GlobalSite | workday | active | |
+| CarMax | https://carmax.wd1.myworkdayjobs.com/External | workday | active | |
+| Carrier | https://carrier.wd5.myworkdayjobs.com/jobs | workday | active | |
+| Church & Dwight | https://churchdwight.wd1.myworkdayjobs.com/chdcareers | workday | active | |
+| CME Group | https://cmegroup.wd1.myworkdayjobs.com/cme_careers | workday | active | |
+| CNA | https://cna.wd1.myworkdayjobs.com/CNA_Careers | workday | active | |
+| ConocoPhillips (eQuest) | https://conocophillips.wd1.myworkdayjobs.com/eQuest | workday | active | |
+| Danaher | https://danaher.wd1.myworkdayjobs.com/DanaherJobs | workday | active | |
+| Dollar Tree | https://dollartree.wd5.myworkdayjobs.com/dollartreeus | workday | active | |
+| Dover | https://dover.wd103.myworkdayjobs.com/Dover | workday | active | |
+| Dow | https://dow.wd1.myworkdayjobs.com/ExternalCareers | workday | active | |
+| DuPont | https://dupont.wd5.myworkdayjobs.com/Jobs | workday | active | |
+| eBay | https://ebay.wd5.myworkdayjobs.com/apply | workday | active | |
+| Equifax | https://equifax.wd5.myworkdayjobs.com/External | workday | active | |
+| Fidelity Investments | https://fmr.wd1.myworkdayjobs.com/FidelityCareers | workday | active | |
+| Fiserv | https://fiserv.wd5.myworkdayjobs.com/EXT | workday | active | |
+| Franklin Templeton (Clarion sites) | https://franklintempleton.wd5.myworkdayjobs.com/Jobs-Clarion | workday | active | |
+| Global Payments (TSYS) | https://tsys.wd1.myworkdayjobs.com/TSYS | workday | active | |
+| Henry Schein | https://henryschein.wd1.myworkdayjobs.com/External_Careers | workday | active | |
+| Hewlett Packard Enterprise | https://hpe.wd5.myworkdayjobs.com/Jobsathpe | workday | active | |
+| Huntington Bancshares | https://huntington.wd12.myworkdayjobs.com/HNBcareers | workday | active | |
+| Intel | https://intel.wd1.myworkdayjobs.com/External | workday | active | |
+| Invesco | https://invesco.wd1.myworkdayjobs.com/IVZ | workday | active | |
+| J.M. Smucker | https://smucker.wd5.myworkdayjobs.com/US_External_Careers | workday | active | |
+| Johnson Controls | https://jci.wd5.myworkdayjobs.com/JCI | workday | active | |
+| KeyBank | https://keybank.wd5.myworkdayjobs.com/External_Career_Site | workday | active | |
+| KLA | https://kla.wd1.myworkdayjobs.com/Search | workday | active | |
+| Lamb Weston | https://lambweston.wd1.myworkdayjobs.com/Lamb_External | workday | active | |
+| LPL Financial | https://lplfinancial.wd1.myworkdayjobs.com/External | workday | active | |
+| M&T Bank | https://mtb.wd5.myworkdayjobs.com/MTB | workday | active | |
+| Marathon Petroleum | https://mpc.wd1.myworkdayjobs.com/MPCCareers | workday | active | |
+| Mars | https://mars.wd3.myworkdayjobs.com/External | workday | active | |
+| Motorola Solutions | https://motorolasolutions.wd5.myworkdayjobs.com/Careers | workday | active | |
+| Nasdaq | https://nasdaq.wd1.myworkdayjobs.com/Global_External_Site | workday | active | |
+| Northern Trust | https://ntrs.wd1.myworkdayjobs.com/northerntrust | workday | active | |
+| Northwestern Mutual | https://northwesternmutual.wd5.myworkdayjobs.com/CORPORATE-CAREERS | workday | active | |
+| Occidental | https://oxy.wd5.myworkdayjobs.com/Corporate | workday | active | |
+| Otis | https://otis.wd504.myworkdayjobs.com/REC_Ext_Gateway | workday | active | |
+| Owens & Minor | https://owensminor.wd1.myworkdayjobs.com/OMCareers | workday | active | |
+| Raymond James | https://raymondjames.wd1.myworkdayjobs.com/RaymondJamesCareers | workday | active | |
+| RBC | https://rbc.wd3.myworkdayjobs.com/RBCGLOBAL1 | workday | active | |
+| S&P Global | https://spgi.wd5.myworkdayjobs.com/SPGI_Careers | workday | active | |
+| Sanford Health | https://sanford.wd5.myworkdayjobs.com/SanfordHealth | workday | active | |
+| Santander US | https://santander.wd3.myworkdayjobs.com/SantanderCareers | workday | active | |
+| Stanley Black & Decker | https://sbdinc.wd1.myworkdayjobs.com/Stanley_Black_Decker_Career_Site | workday | active | |
+| State Street | https://statestreet.wd1.myworkdayjobs.com/eQuest | workday | active | |
+| Stellantis (India site) | https://stellantis.wd3.myworkdayjobs.com/External_Career_Site_ID01 | workday | active | |
+| Sutter Health | https://sutterhealth.wd1.myworkdayjobs.com/SH | workday | active | |
+| T. Rowe Price | https://troweprice.wd5.myworkdayjobs.com/TRowePrice | workday | active | |
+| TD Bank | https://td.wd3.myworkdayjobs.com/TD_Bank_Careers | workday | active | |
+| The Coca-Cola Company | https://coke.wd1.myworkdayjobs.com/coca-cola-careers | workday | active | |
+| TJX | https://tjx.wd1.myworkdayjobs.com/TJX_EXTERNAL | workday | active | |
+| Toyota Motor North America | https://toyota.wd503.myworkdayjobs.com/TMNA | workday | active | |
+| Trane Technologies | https://tranetechnologies.wd12.myworkdayjobs.com/Trane_Technologies_Careers | workday | active | |
+| U.S. Bank | https://usbank.wd1.myworkdayjobs.com/US_Bank_Careers | workday | active | |
+| Unilever | https://unilever.wd3.myworkdayjobs.com/Unilever_Experienced_Professionals | workday | active | |
+| Wells Fargo | https://wf.wd1.myworkdayjobs.com/WellsFargoJobs | workday | active | |
+| Williams Companies | https://williams.wd5.myworkdayjobs.com/External | workday | active | |
+| Xcel Energy | https://xcelenergy.wd1.myworkdayjobs.com/External | workday | active | |
+| JPMorgan Chase | https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs | oracle_fusion | active | |
+| BNY | https://eofe.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs | oracle_fusion | active | |
+| Macy's | https://ebwh.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs | oracle_fusion | active | |
+| Albertsons Companies | https://eofd.fa.us6.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs | oracle_fusion | active | |
+| WM (Waste Management) | https://emcm.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/WMCareers/jobs | oracle_fusion | active | |
+| Wesco | https://eklm.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX/jobs | oracle_fusion | active | |
+| EECOL (Wesco) | https://eklm.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs | oracle_fusion | active | |
+| Staples | https://fa-exhh-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/StaplesInc/jobs | oracle_fusion | active | |
+| Northwell Health | https://eppr.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_2/jobs | oracle_fusion | active | |
+| Mount Sinai Health System | https://ejis.fa.us6.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX/jobs | oracle_fusion | active | |
+| Texas Children's | https://eohh.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX/jobs | oracle_fusion | active | |
+| UChicago Medicine | https://fa-etnf-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs | oracle_fusion | active | |
+| Molina Healthcare | https://hckd.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs | oracle_fusion | active | |
+| NOV | https://egay.fa.us6.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_4001/jobs | oracle_fusion | active | |
+| Frontgrade Technologies | https://exzj.fa.us8.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs | oracle_fusion | active | |
+| FirstEnergy | https://fa-etjd-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/FirstEnergyCareers/jobs | oracle_fusion | active | |
+| DTCC | https://ebxr.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs | oracle_fusion | active | |
+| Hearst | https://eevd.fa.us6.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX/jobs | oracle_fusion | active | |
+| Perficient | https://fa-etqd-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs | oracle_fusion | active | |
+| Crawford & Company | https://fa-esau-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/crawco-jobs/jobs | oracle_fusion | active | |
+| Cantor Fitzgerald / BGC | https://hdow.fa.us6.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1003/jobs | oracle_fusion | active | |
+| Westpac | https://ebuu.fa.ap1.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX/jobs | oracle_fusion | active | |
+| First Abu Dhabi Bank (FAB) | https://ehjd.fa.em2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/fabCareers/jobs | oracle_fusion | active | |
+| Bank of England | https://eoff.fa.em1.ukg.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs | oracle_fusion | active | |
+| El Paso Electric | https://ibrvjb.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs | oracle_fusion | active | |
+| Suncorp | https://fa-evew-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs | oracle_fusion | active | |
+| Verisk | https://fa-ewmy-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs | oracle_fusion | active | |
+| Emergent Holdings | https://ejko.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_2/jobs | oracle_fusion | active | |
+| Definity Insurance | https://hdks.fa.ca2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/Careers-Definity/jobs | oracle_fusion | active | |
+| Ascot Group | https://fa-emkq-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX/jobs | oracle_fusion | active | |
+| UL Solutions | https://fa-eups-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/ULSolutionsCareers/jobs | oracle_fusion | active | |
+| Honeywell Aerospace | https://icfcjb.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/Aerospace/jobs | oracle_fusion | active | |
+| Howmet Aerospace | https://fa-exty-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs | oracle_fusion | active | |
+| Coherent | https://hcwp.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_2004/jobs | oracle_fusion | active | |
+| Yum! Brands | https://eczd.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs | oracle_fusion | active | |
+| Corsair | https://edix.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs | oracle_fusion | active | |
+| KIK Consumer Products | https://edwa.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_2/jobs | oracle_fusion | active | |
+| Wood | https://ehif.fa.em2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs | oracle_fusion | active | |
+| Oceaneering | https://ebfr.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/jobs/jobs | oracle_fusion | active | |
+| Technip Energies | https://hcxg.fa.em2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs | oracle_fusion | active | |
+| AutoZone | https://egud.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs | oracle_fusion | active | |
+| GM Financial | https://fa-exvu-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs | oracle_fusion | active | |
+| Daimler Truck | https://fa-exdu-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs | oracle_fusion | active | |
+| Subaru | https://hcal.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs | oracle_fusion | active | |
+| TTX | https://ejjc.fa.us6.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX/jobs | oracle_fusion | active | |
+| Caesars Entertainment | https://edmn.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs | oracle_fusion | active | |
+| Marriott International | https://ejwl.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX/jobs | oracle_fusion | active | |
+| Hilton | https://efet.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs | oracle_fusion | active | |
+| Hilton Grand Vacations | https://efuq.fa.us6.oraclecloud.com/hcmUI/CandidateExperience/en/sites/HiltonGrandVacations/jobs | oracle_fusion | active | |
+| IHG Hotels & Resorts | https://fa-evax-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs | oracle_fusion | active | |
+
 ## Submitted via `POST /jobs` (job-URL / domain submissions)
 
-Unsupported platforms land as `pending` keyed by domain. Supported or embedded platforms resolve to `active`, sometimes on a different board than the submitted URL (e.g. Cleveland Clinic and Palo Alto Networks resolved to their Workday boards).
+Unsupported platforms land as `pending` keyed by domain. Supported or embedded platforms resolve to `active`, sometimes on a different board than the submitted URL (e.g. Cleveland Clinic and Palo Alto Networks resolved to their Workday boards). Since commit `59aa263`, board registration runs in the scan worker, so a submission shows **no row yet** while its scan is still `pending`.
 
 | Company | Submitted | Row in prod | Status / ATS |
 |---|---|---|---|
 | PayPal | https://paypal.eightfold.ai/careers/job/274904264573 | https://paypal.eightfold.ai | active / eightfold |
 | American Express | https://aexp.eightfold.ai/careers/job/38842605 | (placeholder deleted) | – |
 | USAA | https://www.usaajobs.com/job/san-antonio/senior-infrastructure-engineer-data-pro | https://usaa.wd1.myworkdayjobs.com/USAAJOBSWD | active / workday |
-| Liberty Mutual | https://searchjobs.libertymutualgroup.com/careers/job/618519419340 | https://searchjobs.libertymutualgroup.com | pending / None |
-| Fidelity | https://jobs.fidelity.com/en/jobs/2134523/director-data-platform-mainframe-devel | https://jobs.fidelity.com | pending / None |
-| Synopsys | https://synopsys.avature.net/careers/JobDetail/Validation-Verification-Eng-Sr-En | https://synopsys.avature.net | pending / None |
-| Heitman | https://jobs.jobvite.com/heitman/job/oGgyAfwO | https://jobs.jobvite.com | pending / None |
-| McGraw Hill | https://careers.mheducation.com/jobs/6545 | https://careers.mheducation.com | pending / None |
-| Ellucian | https://careers.ellucian.com/jobs/6309 | https://careers.ellucian.com | pending / None |
-| CBRE | https://careers.cbre.com/en_US/careers/JobDetail/268297 | **no row** (500, see Problems) | – |
-| Rocket Companies | https://careers.rocket.com/careers/r-081326/capital-markets-associate/ | https://careers.rocket.com | pending / None |
+| Liberty Mutual | https://searchjobs.libertymutualgroup.com/careers/job/618519419340 | https://searchjobs.libertymutualgroup.com | active / eightfold |
+| Fidelity | https://jobs.fidelity.com/en/jobs/2134523/director-data-platform-mainframe-devel | https://jobs.fidelity.com | rejected / None |
+| Synopsys | https://synopsys.avature.net/careers/JobDetail/Validation-Verification-Eng-Sr-En | https://synopsys.avature.net | active / avature |
+| Heitman | https://jobs.jobvite.com/heitman/job/oGgyAfwO | https://jobs.jobvite.com | rejected / None |
+| McGraw Hill | https://careers.mheducation.com/jobs/6545 | https://careers.mheducation.com | active / icims |
+| Ellucian | https://careers.ellucian.com/jobs/6309 | https://careers.ellucian.com | active / icims |
+| CBRE | https://careers.cbre.com/en_US/careers/JobDetail/268297 | – | **no row yet** (returned 500 before fix `59aa263`; resubmitted, 202, scan queued) |
+| Rocket Companies | https://careers.rocket.com/careers/r-081326/capital-markets-associate/ | https://careers.rocket.com | rejected / None |
 | D.R. Horton | https://drhorton.taleo.net/careersection/2/jobdetail.ftl?job=2602082 | https://drhorton.taleo.net | pending / None |
 | Texas Instruments | https://careers.ti.com/en/sites/CX/job/25009893 | https://careers.ti.com/en/sites/CX/job/25009893 | active / oracle_fusion |
-| Lattice Semiconductor | https://careers-latticesemi.icims.com/jobs/3476/applications-eng-3/job | https://careers-latticesemi.icims.com | pending / None |
-| Keysight | https://careers-keysight.icims.com | https://careers-keysight.icims.com | pending / None |
+| Lattice Semiconductor | https://careers-latticesemi.icims.com/jobs/3476/applications-eng-3/job | https://careers-latticesemi.icims.com | rejected / None |
+| Keysight | https://careers-keysight.icims.com | https://careers-keysight.icims.com | active / icims |
 | PowerSchool | https://careers3-powerschool.icims.com | https://careers3-powerschool.icims.com/ | active / clinch |
 | Goldman Sachs | https://higher.gs.com | https://higher.gs.com | pending / None |
 | Qualcomm | https://careers.qualcomm.com | https://careers.qualcomm.com | active / eightfold |
-| AbbVie | https://careers.abbvie.com/en/job/senior-scientist-i-in-worcester-ma-jid-31706 | https://careers.abbvie.com | pending / None |
+| AbbVie | https://careers.abbvie.com/en/job/senior-scientist-i-in-worcester-ma-jid-31706 | https://careers.abbvie.com | active / attrax |
 | Eaton | https://eaton.eightfold.ai/careers/job/687238289031-lead-engineer-systems-engine | https://eaton.eightfold.ai | active / eightfold |
-| TireHub (UKG) | https://recruiting.ultipro.com/HAW1005HAWNE/JobBoard/fb14a429-ca54-48db-b7e0-0c5 | https://recruiting.ultipro.com | pending / None |
+| TireHub (UKG) | https://recruiting.ultipro.com/HAW1005HAWNE/JobBoard/fb14a429-ca54-48db-b7e0-0c5 | https://recruiting.ultipro.com | rejected / None |
 | UnitedHealth Group | https://careers.unitedhealthgroup.com/job/eden-prairie/senior-software-engineer- | https://careers.unitedhealthgroup.com/job/eden-prairie/senior-so | active / talentbrew |
-| Larry H. Miller Senior Health (Paylocity) | https://recruiting.paylocity.com/recruiting/jobs/Details/4430542/Larry-H-Miller- | https://recruiting.paylocity.com | pending / None |
+| Larry H. Miller Senior Health (Paylocity) | https://recruiting.paylocity.com/recruiting/jobs/Details/4430542/Larry-H-Miller- | https://recruiting.paylocity.com | rejected / None |
 | Boston Scientific | https://bostonscientific.eightfold.ai/careers/job/563602813281108-senior-ai-solu | https://bostonscientific.eightfold.ai | active / eightfold |
 | Under Armour | https://careers.underarmour.com/job/Remote-Sr_-Product-Manager-Analytics-and-Dat | https://careers.underarmour.com/job/Remote-Sr_-Product-Manager-A | active / successfactors |
 | The Hershey Company | https://careers.thehersheycompany.com/job/Hershey-Production-Operator-Reese-Plan | https://careers.thehersheycompany.com/job/Hershey-Production-Ope | active / successfactors |
-| Mattel | https://jobs.smartrecruiters.com/mattelinc/744000146081909-mattel-retail-team-as | https://jobs.smartrecruiters.com | pending / None |
-| Genentech | https://careers.gene.com/us/en/job/ | https://careers.gene.com | pending / None |
-| HCA Healthcare | https://careers.hcahealthcare.com/jobs/16648854-sales-and-use-tax-intern | https://careers.hcahealthcare.com | pending / None |
+| Mattel | https://jobs.smartrecruiters.com/mattelinc/744000146081909-mattel-retail-team-as | https://jobs.smartrecruiters.com | rejected / None |
+| Genentech | https://careers.gene.com/us/en/job/ | https://careers.gene.com | active / phenom |
+| HCA Healthcare | https://careers.hcahealthcare.com/jobs/16648854-sales-and-use-tax-intern | https://careers.hcahealthcare.com | rejected / None |
 | Cleveland Clinic | https://jobs.clevelandclinic.org | https://ccf.wd1.myworkdayjobs.com/ClevelandClinicCareers | active / workday |
 | Mayo Clinic | https://jobs.mayoclinic.org | https://jobs.mayoclinic.org/ | active / talentbrew |
 | Colgate-Palmolive | https://jobs.colgate.com | https://jobs.colgate.com/ | active / successfactors |
-| Electronic Arts | https://ea.gr8people.com | https://ea.gr8people.com | pending / None |
+| Electronic Arts | https://ea.gr8people.com | https://ea.gr8people.com | rejected / None |
 | Estee Lauder | https://careers.elcompanies.com | https://careers.elcompanies.com | active / eightfold |
 | Best Buy | https://careers.bestbuy.com/bby | https://careers.bestbuy.com | pending / None |
 | Keurig Dr Pepper | https://kdrp.eightfold.ai | https://kdrp.eightfold.ai | pending / None |
@@ -636,24 +1272,24 @@ Unsupported platforms land as `pending` keyed by domain. Supported or embedded p
 | SAIC | https://jobs.saic.com/jobs/17974700-senior-systems-engineer | https://jobs.saic.com | pending / None |
 | Battelle | https://jobs.battelle.org | https://jobs.battelle.org | pending / None |
 | Peraton | https://careers-peraton.icims.com | https://careers-peraton.icims.com/ | active / clinch |
-| Jacobs | https://careers.jacobs.com | **no row** (500, see Problems) | – |
+| Jacobs | https://careers.jacobs.com | – | **no row yet** (returned 500 before fix `59aa263`; resubmitted, 202, scan queued) |
 | AECOM | https://aecom.jobs | https://aecom.jobs/ | active / nlx |
 | Sandia National Labs | https://sandia.jobs | https://sandia.jobs | pending / None |
 | Harvard University | https://careers.harvard.edu | https://careers.harvard.edu | pending / None |
 | Stanford University | https://careersearch.stanford.edu | https://careersearch.stanford.edu | pending / None |
 | Johns Hopkins University | https://hiring.jhu.edu | https://hiring.jhu.edu | active / eightfold |
 | Eightfold AI | https://app.eightfold.ai/careers/job/68763888174 | https://app.eightfold.ai | active / eightfold |
-| ServiceNow | https://jobs.smartrecruiters.com/servicenow/744000149961559-staff-software-engin | https://jobs.smartrecruiters.com | pending / None |
+| ServiceNow | https://jobs.smartrecruiters.com/servicenow/744000149961559-staff-software-engin | https://jobs.smartrecruiters.com | rejected / None |
 | IBM | https://careers.ibm.com/en_US/careers/JobDetail/Software-Developer-Intern-2027/1 | https://careers.ibm.com | pending / None |
 | SAP | https://jobs.sap.com | https://jobs.sap.com/ | active / successfactors |
 | Palo Alto Networks | https://jobs.paloaltonetworks.com/en/job/santa-clara/principal-engineer-software | https://paloaltonetworks.wd5.myworkdayjobs.com/panwexternalcaree | active / workday |
 | State Farm | https://careers-statefarm.icims.com | https://careers-statefarm.icims.com | pending / None |
 | Progressive | https://careers.progressive.com/jobs/17648069-medical-claims-representative-trai | https://careers.progressive.com | pending / None |
 | TriNet | https://trinet.eightfold.ai | https://trinet.eightfold.ai | active / eightfold |
-| GlobalFoundries | https://globalfoundries.eightfold.ai | https://globalfoundries.eightfold.ai | active / eightfold (PATCHed after the adapter fix deployed) |
+| GlobalFoundries | https://globalfoundries.eightfold.ai | https://globalfoundries.eightfold.ai | active / eightfold |
 | Deloitte (Belgium/Avature) | https://deloittebe.avature.net/en_US/careers/JobDetail/SAP-Supply-Chain-Project- | https://deloittebe.avature.net | pending / None |
-| Kelly Services | https://jobs.smartrecruiters.com/PartneredStaffing-KellyServices/743999652752715 | https://jobs.smartrecruiters.com | pending / None |
-| Wolters Kluwer (SmartRecruiters) | https://jobs.smartrecruiters.com/WoltersKluwer1/83235277-application-support-spe | https://jobs.smartrecruiters.com | pending / None |
+| Kelly Services | https://jobs.smartrecruiters.com/PartneredStaffing-KellyServices/743999652752715 | https://jobs.smartrecruiters.com | rejected / None |
+| Wolters Kluwer (SmartRecruiters) | https://jobs.smartrecruiters.com/WoltersKluwer1/83235277-application-support-spe | https://jobs.smartrecruiters.com | rejected / None |
 | TEKsystems | https://careers-teksystems.icims.com | https://careers-teksystems.icims.com | pending / None |
 | Insight Global | https://careers-insightglobal.icims.com/jobs | https://careers-insightglobal.icims.com | pending / None |
 | Aerotek | https://careers-aerotek.icims.com | https://careers-aerotek.icims.com/ | active / clinch |
@@ -667,45 +1303,73 @@ Unsupported platforms land as `pending` keyed by domain. Supported or embedded p
 | Hertz | https://www.hertz.com/gfj/courtesy-bus-driver-pasadena-ca-6a7d24cde3761521cdbca9 | https://www.hertz.com | pending / None |
 | Hyatt | https://careers.hyatt.com/en-US/careers/details/10880/DAR000279 | https://careers.hyatt.com | pending / None |
 | Cummins | https://cummins.jobs/columbus-in/cloud-network-engineer/38c5eb15293c46e394cef75f | https://cummins.jobs/columbus-in/cloud-network-engineer/38c5eb15 | active / nlx |
+| House of Control (Teamtailor) | https://houseofcontrol.teamtailor.com/jobs/8310459-digital-marketing-specialist- | – | **no row yet**: scan still `pending` in the worker queue (202 accepted); re-check |
+| Signicat (Teamtailor) | https://signicat.teamtailor.com/jobs/8370976-java-cloud-devops-engineer-readid | – | **no row yet**: scan still `pending` in the worker queue (202 accepted); re-check |
+| chatarmin (JOIN) | https://join.com/companies/chatarmin/16713707-key-account-customer-success-b2b-s | https://join.com | pending / None |
+| NVISO (JOIN) | https://join.com/companies/nviso/16672486-information-security-resilience-senior | https://join.com | pending / None |
+| BRANDAD (softgarden) | https://brandad.softgarden.io/job/14637273/Software%C2%ADentwickler-w-m-d-Schwer | – | **no row yet**: scan still `pending` in the worker queue (202 accepted); re-check |
+| Patagonia (HireHive) | https://patagonia.hirehive.com/senior-director-finance-operations-fmd-amsterdam- | https://patagonia.hirehive.com | pending / None |
+| Ulta Beauty | https://careers.ulta.com | https://careers.ulta.com/ | active / icims |
+| REI Co-op | https://www.rei.jobs/jobs | https://www.rei.jobs/jobs | active / icims |
+| Applied Materials | https://appliedmaterials.eightfold.ai | – | **no row yet**: scan still `pending` in the worker queue (202 accepted); re-check |
+| Fortive | https://fortive.eightfold.ai | – | **no row yet**: scan still `pending` in the worker queue (202 accepted); re-check |
+| HP Inc. | https://hp.eightfold.ai | – | **no row yet**: scan still `pending` in the worker queue (202 accepted); re-check |
+| Lam Research | https://lamresearch.eightfold.ai | – | **no row yet**: scan still `pending` in the worker queue (202 accepted); re-check |
+| SLB | https://slb.eightfold.ai | – | **no row yet**: scan still `pending` in the worker queue (202 accepted); re-check |
+| Starbucks | https://starbucks.eightfold.ai | – | **no row yet**: scan still `pending` in the worker queue (202 accepted); re-check |
+| Whirlpool | https://whirlpool.eightfold.ai | – | **no row yet**: scan still `pending` in the worker queue (202 accepted); re-check |
 
-## Known problems (open)
+## Known problems
 
 | Issue | Detail | Status |
 |---|---|---|
-| CBRE `POST /jobs` returns 500 | `https://careers.cbre.com/en_US/careers/JobDetail/268297` (Avature, `cbreglobal.avature.net` redirects here). Returned `500 Internal Server Error` on 3 separate attempts, so it is deterministic. No row exists for CBRE. | Uninvestigated. Saved as a project memory. |
-| Eightfold job-URL detection gap | For `<tenant>.eightfold.ai` hosts, `_candidate_domains` in `app/services/adapters/eightfold.py` only tries the host and `eightfold.ai` as the tenant domain. The real domain (`paypal.com`, `eaton.com`, ...) is in the job URL's `?domain=` query, never read. A live job URL therefore lands as an empty `pending` row. | Worked around for PayPal, Eaton and Boston Scientific with `PATCH /admin/crawl-sources/{id}` (bare `board_url`, `status: active`). Adapter fix not made. |
-| Prod rate limiting | ~500 writes in one session triggered `Rate exceeded.` and timeouts on prod. Later batches use `add2.py`-style pacing with backoff. | Recovered on its own. |
-| Existing Greenhouse 404 rows (not from this work) | 10x Genomics, Allbirds, Applied Intuition, Aurora Innovation, Chewy (Fulfillment), Marqeta, Niantic, Opendoor, Rivian, plus `career4.successfactors.com` carry `last_error` 404s from before this session. | Not touched. |
+| CBRE and Jacobs `POST /jobs` returned 500 | Root cause (from the Cloud Run `api` logs): `echo_jobs._get_jobs` called `response.json()` on the HTML page CBRE/Jacobs return for the Echo Jobs probe, raising `JSONDecodeError` (a `ValueError`) that only `httpx.HTTPError` was caught for; it escaped `detect_embedded_ats_source` inside `register_discovered_board`. It was never Avature-specific. | **Fixed** by `59aa263` (catches `(httpx.HTTPError, ValueError)`), deployed. Both URLs were resubmitted afterwards and returned 202; their scans are queued behind the worker backlog (see below). |
+| Eightfold job-URL detection gap | `<tenant>.eightfold.ai` job URLs only tried `[host, eightfold.ai]` as the tenant domain, so live job URLs landed as empty pending rows. | **Fixed** in `fcbf89f` (`?domain=` hint + `<tenant>.com` guess), pushed and deployed 2026-09-19. PayPal, Eaton, Boston Scientific, TriNet, GlobalFoundries and Lockheed are active Eightfold rows. Keurig Dr Pepper (`kdrp.eightfold.ai`) still doesn't resolve (its tenant domain isn't `kdrp.com`); it was pending at last check and may since have been rejected. |
+| Scan worker is saturated (found 2026-09-19 17:16 UTC) | The `worker` Cloud Function (Pub/Sub `job-scan-requests`) is configured `maxInstanceCount=5`, concurrency 1, 540s timeout, and its logs show a steady stream of `The request was aborted because there was no available instance`. Adding ~600 boards in wave 4 made the dispatcher's first crawls enqueue a scan per discovered job, far more than 5 workers can drain. Effect: `POST /jobs` submissions stay `scan_status: pending` with **no crawl-source row** (board registration runs inside the scan worker since `59aa263`); ten wave 4 submissions (7 Eightfold tenants, 2 Teamtailor, 1 softgarden) were still in that state 1+ hour later. | Not lost: the eventarc subscriptions retry every 10s with no dead-letter limit and 24h retention, so the backlog drains on its own. To speed it up, raise the worker's `--max-instances` (watch the Cloud SQL connection limit, see the comment near line 23 of `deploy/gcloud-deploy.sh`). Not changed by this session. |
+| Adding many boards floods the scan pipeline | Same cause: every new active board is crawled and each discovered job enqueues a scan. | Add large batches gradually, or raise worker capacity first. |
+| Prod rate limiting | ~500 rapid writes triggered `Rate exceeded.` and timeouts on prod. Waves 3-4 used a paced writer with backoff and saw no 429s. | Recovered. |
+| Adding many boards floods the scan pipeline | Each new active board is crawled by the dispatcher, which enqueues a scan per discovered job. | Expected; consider batching large additions. |
+| Existing Greenhouse 404 rows (not from this work) | 10x Genomics, Allbirds, Applied Intuition, Aurora Innovation, Chewy (Fulfillment), Marqeta, Niantic, Opendoor, Rivian, plus `career4.successfactors.com` carried `last_error` 404s before this session. | Not touched. |
 
-## Placeholder rows created by mistake (fixed)
+## Rows created by mistake (all fixed)
 
 - `aexp.eightfold.ai` (American Express): created from a stale job ID; Amex has no working Eightfold API. **Deleted.**
-- `paypal.eightfold.ai`, `eaton.eightfold.ai`, `bostonscientific.eightfold.ai`: created empty/pending, then **PATCHed to active Eightfold**.
+- `paypal.eightfold.ai`, `eaton.eightfold.ai`, `bostonscientific.eightfold.ai`: created empty/pending, then **PATCHed to active Eightfold**. GlobalFoundries the same, after the fix deployed.
 
 ## Verify later
 
-- **Shape-only boards** (never content-verified; check `last_error` after the first crawl): PNC, Citi, FIS, Seagate, Fannie Mae, Chegg, Atomi; the extra Workday tenants (Brown University Health, Boston Medical Center, Kansas Health System, R1 RCM, Summit Health/CityMD, UVM Health Porter, Sonora Quest, General Mills, Tapestry, VF Corp, Constellation Brands, Kohl's, Belk, BioMarin, Genentech (Roche)); and most other Workday boards, which rest on a search-result requisition URL only.
-- **Zero/near-zero posting boards added on request** (playbook normally skips these): Thinkific, Vacasa, Poshmark, Kiddom, Docebo, Arcadia Science, Outpace Bio (0 jobs); Learneo, Mercari, Calm (1 job).
-- **Weak evidence:** Lockheed Martin resolved active as Eightfold although a local `_fetch_jobs` test failed to resolve its tenant; Dollar General's pending row is a `login-` iCIMS host; D.R. Horton's submitted job URL path was partly constructed (only the domain is stored); Radiant's company name is unconfirmed; Vertex (Workday) may be a stale tenant; Genentech pending row came from a dead (410) job URL, only the domain is meaningful.
-- **Pending rows** need `implement-crawl-adapter` review: they are new platforms or domains with no adapter yet.
+- **Shape-only boards** (never content-verified; check `last_error` after the first crawl): PNC, Citi, FIS, Seagate, Fannie Mae, Chegg, Atomi; the extra Workday tenants from the leftover pass (Brown University Health, Boston Medical Center, Kansas Health System, R1 RCM, Summit Health/CityMD, UVM Health Porter, Sonora Quest, General Mills, Tapestry, VF Corp, Constellation Brands, Kohl's, Belk, BioMarin, Genentech (Roche)); most wave 2-3 Workday boards (a search-result requisition URL only). The wave 4 Fortune 500 Workday and Oracle Fusion boards were checked more strongly (sitemap requisitions / `hcmRestApi` live counts, dated 8-19 Sept 2026).
+- **Zero/near-zero posting boards added on request** in the leftover pass: Thinkific, Vacasa, Poshmark (Greenhouse), Kiddom, Docebo, Arcadia Science, Outpace Bio (0 jobs); Learneo, Mercari, Calm (1 job).
+- **Names with unconfirmed ownership, review these:** Radiant, `Bare (BambooHR board)`, `JazzHR 'landing' board`, `Sphere (company unconfirmed)`, `Future (fitness)`, `Fetch (pet insurance)`, `Raya`, `Celsius (Workable)`, `Lunar (health-system software)`, `Cursor (flag for review)`, `Genesis AI` (medium confidence), `Personio (personio-gmbh board)` (may duplicate Personio's own board), `Tractor Supply (low confidence)`.
+- **Possibly stale:** Gem boards Emerge Career (newest posting 2025-10), Black Ore (2025-08), Myriad Technology (2024-06); Vertex (Workday); UniUni and Alfil Logistics (Workable, counts never verified: the API 429'd).
+- **Duplicate-company boards** (same company on two ATS boards, both added; watch for duplicate jobs): Secureframe (Ashby + Lever, different postings). Poshmark's live board is Ashby (the Greenhouse one is empty).
+- **Other weak evidence:** Lockheed Martin resolved active as Eightfold although an early local test couldn't resolve its tenant (later resolved by the adapter fix); Dollar General's row was a `login-` iCIMS host; D.R. Horton's submitted job URL path was partly constructed (only the domain is stored); Genentech's pending row came from a dead (410) job URL.
+- **Pending rows** need `implement-crawl-adapter` review. Several were since rejected or resolved (see the totals note above).
 
-## Looked at, NOT added (nothing silently dropped)
+## Deliberately NOT added, wave 4 (nothing silently dropped)
 
-No usable board URL or domain was found for these, so nothing real could be submitted.
+- **Duplicate coverage skipped:** Cribl on Ashby (same 55 postings as the Greenhouse board added in wave 3); Qonto on Lever (Ashby board added instead); Applied Materials and HP Inc. on Workday (added on Eightfold instead, same jobs); Petco `wd504` host (the `wd1` board was added); Dick's Sporting Goods (identical URL in two forks); Toast on Greenhouse (already covered via a Clinch row); Snowflake's pending `careers.snowflake.com` row was left alone (the live Ashby board was added).
+- **Zero postings, not added (playbook rule):**
+  - Workable: healthcare-support-staffing-1, usa-healthcare-staffing-inc, host-healthcare, quorum, peoplepowered.
+  - BambooHR: valneva, conservationmn, abortionfunds, douglascountyil.
+  - JazzHR: yoursupportservicesnetwork, search, raptive, genalyte, surecost, skillcycle.
+  - Gem: mission, gc-ai.
+  - Personio: surein.
+  - Breezy: awardspring, transact-campus, bluetread, resultstack, disruptive-advertising, localize, blue-orange-digital, predictionhealth, vosyn.
+  - Ashby: bolt, bumble, consensys, figure, maven, mercury, reddit, solanalabs, stash, synctera, moneybox, truelayer, carbonhealth, lifestance, vast, raycast, stytch, ssi, turing, humanitec, valence, langfuse, readme, airtable, loom, vercel, beacons, billie, netease, tonies, opentable, function-health (Gem board added instead).
+  - Lever: beam, form, gridmatic, mirror, pachama, carbonhealth, sesame, labelbox, teleport, pillar, imbue, pipedream, normalyze, clari, fitbod, whoop.
+- **Dead or inactive accounts (search results are stale):** 15 closed BambooHR accounts that now redirect to bamboohr.com (metamaterialtechnologiesinc, amberkinetics, ambri, daavlin, gearboxsoftware, pittfoodpolicy, glitc, advancementproject, literacyaction, creativemindsetconsulting, ninetwothree, nvoicepay, simplecode, vitrum, knoxhr); JazzHR acrisure, tlc1, evotix (inactive), careerpage3 and jazzhrwhitelabel (vendor sandboxes); Personio tenants that 307 to `personio.com` (egym, pitch, receeve, gethorizon, hospitalitydigital, skopos-elements, gesellschaft-fuer-informatik, nvision-quantum-technologies); Personio `/xml` feed 404 (finapi-gmbh, finanzritter-gmbh).
+- **Name collisions, skipped:** Ashby `sonder`, `levels`, `relay`, `scribe`, `cedar`, `capsule`, `sesame`, `flink`, `yotta`, `sanctuary`, `osmo`, `paradox`; Lever `alloy`, `neon`, `genesis`, `unify`, `latch`; Greenhouse `bethesda`, `remedy`, `vuori`, `ritual`; unidentified Ashby `arbor`, `vivid`, `dapper`, `swan`, `sunrise`.
+- **Unsupported platforms found, no pending row created (no job URL fetched):** Teamtailor companies Salt, Varnish Software, Sofigate, Puzzel, Visma Software Nordic, EcoOnline, David Kennedy Recruitment; JOIN companies Software Engineering GmbH (`seg`), Nejo, IESF, fotograf.de, itestra; softgarden companies Karl Mayer, LV 1871, andrena, KBB; Wayfair and Noom (ATS not identified); AB InBev (`wd1.myworkdaysite.com/recruiting/abinbev`, 0 jobs, shape the adapter can't ingest).
+- **Fortune 500 tenants not resolved (109 companies, guesses missed, not necessarily off Workday):** e.g. Regions, Discover, HSBC, MetLife, Aflac, Kroger, Publix, Walgreens, McDonald's, PepsiCo, ExxonMobil, Southern Co, Dominion, NextEra, Halliburton, Valero, RTX, General Dynamics, Union Pacific, CSX, Tesla, Honda, Kaiser, UPMC, Dell, AMD, NetApp, Western Digital. Wrong-company tenants rejected: `emerson.wd5` (Emerson College), `aa.wd105` (Auckland roles, not American Airlines), Fidelity's Oracle tenant (Fidelity Bank Ghana). Unidentified Oracle tenants skipped: `hcbt.fa.em2` (8,986 jobs), `ecnf.fa.us2`, `ejta.fa.us6`, `ehtl.fa.us6`, `eibd.fa.em2`; BHE returned 503.
+- **No board at the slugs tried (other ATS or other slug):** ~550 fintech/health/climate slugs, ~370 AI/dev-tools slugs, and lifestyle/games names (Hydrow, Barry's, Noom, Olaplex, Funko, Ubisoft, Sega, Capcom, ...). The fork probe data was in the (temporary) scratchpad, not the repo.
 
-- **No board/domain:** Lululemon, Ralph Lauren, Teladoc (Workday site name unknown, probably migrated), Citizens Financial, Chubb, Apollo Education Systems and Flatiron School (no Greenhouse board at any tested slug), Hologic, Quest Diagnostics, Zimmer Biomet, Incyte (no Workday board found), Charles River, Thermo Fisher, Enphase, Cummins, Emerson (wrong-company search hits), Extreme Networks (Jobvite, zero jobs; covered by the shared Jobvite pending row), extra UKG boards (Meritus, Sheppard Pratt, Valley View, Independence Health, Monadnock, CTDI, Comprehensive Logistics; all collapse into the single `recruiting.ultipro.com` pending row).
-- **Name collisions, deliberately skipped:** Greenhouse `handshake` (unrelated consulting firm), Greenhouse `caribou` (car-loan fintech, not the biotech), Greenhouse `archer` (veterinary clinic), Intuitive Surgical Workday tenant (belongs to Intuitive Research & Technology), Ascensus (not healthcare).
-- **Slugs that 404'd at the guessed slug (company probably on another platform or slug):** long lists per sector; see the sector sections of the chat transcript. Notable: Ripple, Plaid, Paxos, Groq, Zipline, SoundCloud, Etsy, DraftKings, Warner Music Group, Fanatics, Whatnot, Benchling, insitro, Grail, Sarepta, Neurocrine, Hims, Cedar, Zus, Innovaccer.
-- **Not searched (out of budget/scope in their wave):** Danaher, J&J, AstraZeneca, Tesla, Sierra Space, Firefly, GE Vernova, Deere, Textron, Parker Hannifin, Johnson Controls, XPO, Expeditors, FedEx, UPS, Kellanova, Molson Coors, Smucker, Macy's, PepsiCo, Coca-Cola, Paramount, Fox, Disney, Nexstar.
+## Earlier waves: looked at, not added
 
-## Wave 3 notes
+- **No board/domain found:** Lululemon, Ralph Lauren, Teladoc, Citizens Financial, Chubb (Oracle board added in wave 3), Apollo Education, Flatiron School, Hologic, Quest Diagnostics, Zimmer Biomet, Incyte, Charles River, Thermo Fisher, Enphase, Cummins (added as NLX), Emerson, Extreme Networks.
+- **Name collisions, skipped:** Greenhouse `handshake`, `caribou`, `archer`; Intuitive Surgical's Workday tenant; Ascensus.
+- **404 slugs and unsearched company lists** per wave are in the wave summaries in the chat transcript; none had a real board URL or domain to submit.
 
-- **Not added / looked at, wave 3:** the 404-slug lists, wrong-company collisions (Ashby `ladder` and `slate`, Greenhouse `raven`/`liftoff`, Lever `factor`, Intapp's stale tenant), zero-posting boards (HubSpot, Vercel, Mistral, several travel/mobility slugs) and the unsearched company lists are in the fork reports in the chat transcript; none had a real board URL or domain to submit.
-- **Duplicate coverage:** Wayve is live on both Greenhouse (`job-boards.greenhouse.io/wayve`, 192) and Ashby (189); only the Ashby board was added (newer). Add the Greenhouse one if you want both.
-- **Cursor (Ashby `cursor`)** was added as "Cursor (flag for review)": the description says "automate coding" but the fetch summary named the company "SpaceXAI".
-- **GlobalFoundries** (`globalfoundries.eightfold.ai`, 522 jobs; now active) and **Keurig Dr Pepper** (`kdrp.eightfold.ai`, 500 jobs) are pending Eightfold rows. GlobalFoundries was PATCHed to active after the adapter fix deployed (see below); KDP still needs its real tenant domain.
-- **Second CBRE-style 500:** `POST /jobs {"url": "https://careers.jacobs.com"}` also returned a bare 500 (no row for Jacobs).
+## Eightfold adapter fix (commit `fcbf89f`, deployed 2026-09-19)
 
-## Eightfold adapter fix (committed `fcbf89f`, deployed 2026-09-19)
-
-`app/services/adapters/eightfold.py`: `_candidate_domains` now takes the job URL's `?domain=` param as a hint (tried first) and, for `<tenant>.eightfold.ai` hosts, also tries `<tenant>.com`. Tests added in `tests/services/adapters/test_eightfold.py` (6 of the 9 new tests fail on the old code). Live check against real tenants: PayPal, Eaton, Boston Scientific, TriNet, GlobalFoundries and Lockheed Martin all resolve with and without `?domain=`; KDP does not (its tenant domain isn't `kdrp.com`).
+`app/services/adapters/eightfold.py`: `_candidate_domains` takes the job URL's `?domain=` param as a hint (tried first) and, for `<tenant>.eightfold.ai` hosts, also tries `<tenant>.com`. Nine tests were added in `tests/services/adapters/test_eightfold.py` (six fail on the old code). Verified live on PayPal, Eaton, Boston Scientific, TriNet, GlobalFoundries and Lockheed Martin; Keurig Dr Pepper does not resolve.
