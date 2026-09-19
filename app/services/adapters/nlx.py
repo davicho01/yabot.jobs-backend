@@ -78,9 +78,13 @@ def _detect_embedded(url: str) -> str | None:
         return None
     try:
         response = httpx.get(url, timeout=TIMEOUT, follow_redirects=True)
-        response.raise_for_status()
     except httpx.HTTPError:
         return None
+    # No raise_for_status(): some tenants (verified live: sandia.jobs) serve
+    # a real, fully-populated NLX-templated page with an HTTP 404 status on
+    # every route — a client-side-routed SPA's catch-all misreporting status,
+    # not an actual missing page — so a status check here would wrongly
+    # treat a working board as undetectable.
     return host if _NLX_SIGNATURE in response.text else None
 
 
