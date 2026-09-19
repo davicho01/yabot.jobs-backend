@@ -174,7 +174,7 @@ def _detect_embedded(url: str) -> str | None:
             return host
         try:
             return host if _fetch_jobs(host) else None
-        except (httpx.HTTPError, ValueError):
+        except (httpx.HTTPError, ValueError, ElementTree.ParseError):
             return None
 
     job_id = job_match.group(1)
