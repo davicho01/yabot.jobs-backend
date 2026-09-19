@@ -1,8 +1,8 @@
 # Crawl-source discovery ledger
 
-Record of `/discover-crawl-sources` work against prod (`https://api.yabot.jobs`), 2026-09-19, waves 1-4. Status and ATS columns are generated from the live `GET /admin/crawl-sources` roster, so they show what prod actually holds, not what was intended. Per-request outcomes for waves 3-4 are in `docs/crawl-source-ledger.jsonl`.
+Record of `/discover-crawl-sources` work against prod (`https://api.yabot.jobs`), 2026-09-19, waves 1-5. Status and ATS columns are generated from the live `GET /admin/crawl-sources` roster, so they show what prod actually holds, not what was intended. Per-request outcomes for waves 3-5 are in `docs/crawl-source-ledger.jsonl`.
 
-**Prod totals at last update:** 1327 active, 30 pending, 22 rejected (session start: 191 / 11 / 10). The rejected count rose by 12 during wave 4 without any action from this session: those are earlier pending rows from this ledger (shared platform domains such as `jobs.smartrecruiters.com`, `jobs.jobvite.com`, `recruiting.ultipro.com`, `recruiting.paylocity.com`, several Taleo/iCIMS tenants) that look like they were triaged in the pending queue. Pending fell from 52 to 30 the same way (some resolved to active via new adapters, e.g. Ulta and REI now `icims`).
+**Prod totals at last update (post wave 5):** 1376 active, 32 pending, 22 rejected (session start: 191 / 11 / 10). The rejected count rose by 12 during wave 4 without any action from this session: those are earlier pending rows from this ledger (shared platform domains such as `jobs.smartrecruiters.com`, `jobs.jobvite.com`, `recruiting.ultipro.com`, `recruiting.paylocity.com`, several Taleo/iCIMS tenants) that look like they were triaged in the pending queue. Pending fell from 52 to 30 the same way (some resolved to active via new adapters, e.g. Ulta and REI now `icims`). Wave 5 ran later the same day after checking in with the user on scope — see its section below.
 
 **How to read the tables:** *Board URL* is the literal URL submitted. **shape-only** means a board added through `POST /admin/crawl-sources`, which only checks URL shape. Workday's SPA can't be fetched, so those boards were never content-verified: a wrong tenant shows up as a `last_error` after the first crawl. Greenhouse/Lever/Ashby/Workable/BambooHR/JazzHR/Personio/Recruitee/Breezy boards were verified live via each platform's public API before adding.
 
@@ -1221,6 +1221,91 @@ Record of `/discover-crawl-sources` work against prod (`https://api.yabot.jobs`)
 | Hilton | https://efet.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs | oracle_fusion | active | |
 | Hilton Grand Vacations | https://efuq.fa.us6.oraclecloud.com/hcmUI/CandidateExperience/en/sites/HiltonGrandVacations/jobs | oracle_fusion | active | |
 | IHG Hotels & Resorts | https://fa-evax-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs | oracle_fusion | active | |
+
+## Wave 5
+
+Ran later on 2026-09-19 after checking in with the user: waves 1-4 had already covered nearly every standard sector, so this wave targeted sectors that were thin or missing — agriculture/agtech, legal services (deeper than wave 3's staffing/legal/consulting pass), and international (APAC, LATAM) — via four parallel research forks. Prod totals before wave 5: 1331 active / 31 pending / 22 rejected.
+
+### Agriculture & agtech (11/13 researched, 3 flagged pending)
+
+| Company | Board URL | ATS | Status | Note |
+|---|---|---|---|---|
+| Land O'Lakes | https://landolakes.wd1.myworkdayjobs.com/LandOLakes | workday | active | |
+| AeroFarms | https://aerofarms.applytojob.com/apply | jazzhr | active | |
+| Elanco | https://elanco.wd5.myworkdayjobs.com/External_Career | workday | active | |
+| FMC Corporation | https://fmc.wd12.myworkdayjobs.com/FMC | workday | active | shape-only (JS SPA) |
+| Inari Agriculture | https://job-boards.greenhouse.io/inariagriculture | greenhouse | active | |
+| Farmers Business Network | https://apply.workable.com/farmers-business-network/ | workable | active | fork gave a job-detail URL on the company's own subdomain, 422'd; corrected to the `apply.workable.com/{account}/` shape |
+| Valmont Industries | https://valmont.wd1.myworkdayjobs.com/ValmontCareers | workday | active | |
+| Wilbur-Ellis | https://wilburellis.wd12.myworkdayjobs.com/WILBUR-ELLIS | workday | active | shape-only (JS SPA) |
+| Sound Agriculture | https://job-boards.greenhouse.io/soundagriculture | greenhouse | active | |
+| Bayer | https://talent.bayer.com/careers/job/562949978570371-... | eightfold | active (via /jobs) | Eightfold has no static shape, 422'd on admin endpoint; real job URL pulled from its sitemap (`talent.bayer.com`, tenant host differs from `bayer.eightfold.ai`) and submitted via `/jobs` instead |
+| Darling Ingredients | https://darlingii.applicantpro.com/jobs/4172619.html | ApplicantPro (isolved) | pending (submitted) | |
+| J.R. Simplot Company | https://careers.simplot.com/job/Boise-Associate-Agronomist-II-ID-83706-1211/1290756100/ | unidentified custom portal | pending (submitted) | |
+| Nutrien | https://jobs.nutrien.com/North-America/job/Operator/32466-en_US/ | unidentified custom portal | pending (submitted) | possibly same vendor as Simplot |
+
+### Legal services (16/16 added, 1 flagged pending, 1 skipped)
+
+| Company | Board URL | ATS | Status | Note |
+|---|---|---|---|---|
+| Latham & Watkins | https://careers-lw.icims.com | icims | active | |
+| Sidley Austin | https://careers-sidley.icims.com | icims | active | |
+| Integreon | https://careers-integreon.icims.com | icims | active | legal process outsourcing |
+| Wilson Sonsini (WSGR) | https://wsgr.wd503.myworkdayjobs.com/WSGR | workday | active | shape-only |
+| Goodwin Procter | https://goodwinprocter.wd5.myworkdayjobs.com/External_Careers | workday | active | shape-only |
+| Clio | https://clio.wd3.myworkdayjobs.com/ClioCareerSite | workday | active | legal practice-mgmt software |
+| Epiq Systems | https://epiqsystems.wd5.myworkdayjobs.com/Epiq_Careers | workday | active | eDiscovery/legal services |
+| Perkins Coie | https://perkinscoie.wd1.myworkdayjobs.com/perkinscoieexternal | workday | active | |
+| Relativity (eDiscovery) | https://kcura.wd1.myworkdayjobs.com/External_Career_Site | workday | active | named to disambiguate from the existing "Relativity Space" row (different company) |
+| DLA Piper | https://dlapiper.wd1.myworkdayjobs.com/dlapiper | workday | active | |
+| White & Case | https://whitecase.wd1.myworkdayjobs.com/External | workday | active | also runs a Taleo tenant (see skipped below) |
+| Filevine | https://jobs.lever.co/filevine | lever | active | legal case-mgmt software |
+| Litify | https://job-boards.greenhouse.io/litify | greenhouse | active | Salesforce-based legal practice-mgmt |
+| Ironclad | https://jobs.ashbyhq.com/ironcladhq | ashby | active | contract lifecycle mgmt |
+| Spellbook | https://jobs.ashbyhq.com/spellbook.legal | ashby | active | AI contract drafting |
+| EvenUp | https://jobs.ashbyhq.com/evenup | ashby | active | legal AI for personal-injury claims |
+| Axiom Law | https://www.axiomlaw.com/careers/lawyers/available-positions/8687361002 | unclear (custom domain, job-ID pattern resembles embedded Greenhouse) | pending (submitted) | testing embedded-match detection |
+
+Skipped: **Jones Day** (viRecruit/viGlobal, 77 live postings confirmed, but no deep-linkable individual job URL exists — filter-driven UI, no guessed URL submitted per the never-template rule). **White & Case's Taleo tenant** (`whitecase.taleo.net`) — real live requisition found, but not submitted since the company is already covered via its Workday row above (duplicate-coverage skip, same convention as wave 4).
+
+### International — APAC (11/17 researched, 3 flagged pending)
+
+| Company | Board URL | ATS | Status | Note |
+|---|---|---|---|---|
+| Razorpay | https://job-boards.greenhouse.io/razorpaysoftwareprivatelimited | greenhouse | active | India fintech |
+| Ninja Van | https://jobs.lever.co/ninjavan | lever | active | Singapore logistics |
+| Aspire | https://job-boards.greenhouse.io/aspire | greenhouse | active | Singapore fintech |
+| CRED | https://jobs.lever.co/cred | lever | active | India fintech |
+| ShopBack | https://jobs.lever.co/shopback-2 | lever | active | Singapore fintech/e-commerce |
+| PhonePe | https://job-boards.greenhouse.io/phonepe | greenhouse | active | India fintech |
+| Rakuten | https://rakuten.wd1.myworkdayjobs.com/RakutenInc | workday | active | Japan; main tenant only, several other Rakuten Workday tenants exist unadded |
+| GoTo Group | https://jobs.lever.co/GoToGroup | lever | active | Indonesia (Gojek+Tokopedia) |
+| Coupang | https://boards.greenhouse.io/coupang | greenhouse | active | South Korea e-commerce; older `boards.greenhouse.io` host |
+| Coins.ph | https://jobs.lever.co/coins | lever | active | Philippines crypto/fintech |
+| Groww | https://job-boards.eu.greenhouse.io/groww | greenhouse | **422, not added** | genuine adapter gap: `_GREENHOUSE_URL_RE` only matches `job-boards.\|boards.greenhouse.io`, not the `eu.` region subdomain — real Greenhouse board, not company-specific |
+| Canva | https://jobs.smartrecruiters.com/canva/6000000001379665-... | SmartRecruiters | pending (submitted) | already-known unsupported platform per earlier waves |
+| LINE Corporation | https://careers.linecorp.com/jobs/2913/ | in-house/custom | pending (submitted) | |
+| Toss / Viva Republica | https://toss.im/career/job-detail?job_id=4553599003 | in-house/custom | pending (submitted) | South Korea fintech |
+
+### International — LATAM (9/9 added, 2 flagged pending)
+
+| Company | Board URL | ATS | Status | Note |
+|---|---|---|---|---|
+| EBANX | https://job-boards.greenhouse.io/ebanx | greenhouse | active | Brazil payments |
+| Clara | https://job-boards.greenhouse.io/clara | greenhouse | active | Mexico corporate cards |
+| VTEX | https://job-boards.greenhouse.io/vtex | greenhouse | active | Brazil e-commerce platform |
+| Grupo QuintoAndar | https://job-boards.greenhouse.io/quintoandar | greenhouse | active | Brazil/Portugal real estate |
+| Stone (StoneCo) | https://job-boards.greenhouse.io/stone | greenhouse | active | Brazil payments |
+| Banco Inter (Inter&Co) | https://job-boards.greenhouse.io/inter | greenhouse | active | Brazil digital bank |
+| Addi | https://jobs.ashbyhq.com/addi | ashby | active | Colombia BNPL/fintech |
+| Rappi | https://rappi.wd12.myworkdayjobs.com/Rappi_jobs | workday | active | Colombia super-app, shape-only |
+| Hotmart | https://job-boards.eu.greenhouse.io/hotmartcareersbr | greenhouse | **422, not added** | same `eu.greenhouse.io` adapter gap as Groww above |
+| Assaí Atacadista | https://assai.gupy.io/jobs/11935518 | Gupy | pending (submitted) | major Brazilian ATS, not yet supported |
+| Lojas Renner | https://lojasrenner.gupy.io/jobs/8997587 | Gupy | pending (submitted) | separate per-tenant domain from Assaí; will land as its own pending row |
+
+**Known gap found this wave:** `app/services/adapters/greenhouse.py`'s `_GREENHOUSE_URL_RE` only matches `job-boards.greenhouse.io` and `boards.greenhouse.io`, not regional subdomains like `job-boards.eu.greenhouse.io` — a real, working Greenhouse board (Hotmart, Groww confirmed) 422s on the admin endpoint purely because of the host regex. Worth a one-line regex fix in a future `implement-crawl-adapter` pass; not changed here (out of scope for a discovery run).
+
+**Totals after wave 5:** 1376 active, 32 pending, 22 rejected (immediately after submission — most of the 9 new `/jobs` pending submissions were still `scan_status: pending` on their own URL row, not yet resolved into a `crawl_source` row, due to the same worker-saturation issue noted in Known Problems below; expect the pending count to climb further as the backlog drains).
 
 ## Submitted via `POST /jobs` (job-URL / domain submissions)
 
