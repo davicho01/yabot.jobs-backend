@@ -1,8 +1,8 @@
 # Crawl-source discovery ledger
 
-Record of `/discover-crawl-sources` work against prod (`https://api.yabot.jobs`), 2026-09-19, waves 1-5. Status and ATS columns are generated from the live `GET /admin/crawl-sources` roster, so they show what prod actually holds, not what was intended. Per-request outcomes for waves 3-5 are in `docs/crawl-source-ledger.jsonl`.
+Record of `/discover-crawl-sources` work against prod (`https://api.yabot.jobs`), 2026-09-19, waves 1-6. Status and ATS columns are generated from the live `GET /admin/crawl-sources` roster, so they show what prod actually holds, not what was intended. Per-request outcomes for waves 3-6 are in `docs/crawl-source-ledger.jsonl`.
 
-**Prod totals at last update (post wave 5):** 1376 active, 32 pending, 22 rejected (session start: 191 / 11 / 10). The rejected count rose by 12 during wave 4 without any action from this session: those are earlier pending rows from this ledger (shared platform domains such as `jobs.smartrecruiters.com`, `jobs.jobvite.com`, `recruiting.ultipro.com`, `recruiting.paylocity.com`, several Taleo/iCIMS tenants) that look like they were triaged in the pending queue. Pending fell from 52 to 30 the same way (some resolved to active via new adapters, e.g. Ulta and REI now `icims`). Wave 5 ran later the same day after checking in with the user on scope — see its section below.
+**Prod totals at last update (post wave 6):** 1399 active, 36 pending, 22 rejected (session start: 191 / 11 / 10). The rejected count rose by 12 during wave 4 without any action from this session: those are earlier pending rows from this ledger (shared platform domains such as `jobs.smartrecruiters.com`, `jobs.jobvite.com`, `recruiting.ultipro.com`, `recruiting.paylocity.com`, several Taleo/iCIMS tenants) that look like they were triaged in the pending queue. Pending fell from 52 to 30 the same way (some resolved to active via new adapters, e.g. Ulta and REI now `icims`). Waves 5-6 ran later the same day after checking in with the user on scope — see their sections below. **Wave 6 exhausted the session's WebSearch budget (200/200)**, so all four of its forks (Middle East/Israel, Africa, Eastern Europe, Canada) came back well under target; the user redirected future waves to USA jobs afterward.
 
 **How to read the tables:** *Board URL* is the literal URL submitted. **shape-only** means a board added through `POST /admin/crawl-sources`, which only checks URL shape. Workday's SPA can't be fetched, so those boards were never content-verified: a wrong tenant shows up as a `last_error` after the first crawl. Greenhouse/Lever/Ashby/Workable/BambooHR/JazzHR/Personio/Recruitee/Breezy boards were verified live via each platform's public API before adding.
 
@@ -1306,6 +1306,36 @@ Skipped: **Jones Day** (viRecruit/viGlobal, 77 live postings confirmed, but no d
 **Known gap found this wave:** `app/services/adapters/greenhouse.py`'s `_GREENHOUSE_URL_RE` only matches `job-boards.greenhouse.io` and `boards.greenhouse.io`, not regional subdomains like `job-boards.eu.greenhouse.io` — a real, working Greenhouse board (Hotmart, Groww confirmed) 422s on the admin endpoint purely because of the host regex. Worth a one-line regex fix in a future `implement-crawl-adapter` pass; not changed here (out of scope for a discovery run).
 
 **Totals after wave 5:** 1376 active, 32 pending, 22 rejected (immediately after submission — most of the 9 new `/jobs` pending submissions were still `scan_status: pending` on their own URL row, not yet resolved into a `crawl_source` row, due to the same worker-saturation issue noted in Known Problems below; expect the pending count to climb further as the backlog drains).
+
+## Wave 6
+
+Ran right after wave 5, still 2026-09-19: user asked to continue, so this wave targeted international regions not yet touched — Middle East/Israel, Africa, Eastern Europe, Canada — via four more parallel forks. All four hit the **session-wide WebSearch cap (200/200)** partway through, so each came back well short of the ~15-18 target; the user was told before writing anything, and then said to focus future waves on USA jobs but to still write the already-verified international finds since the research was already done. Prod totals before wave 6: 1378 active / 36 pending / 22 rejected.
+
+| Company | Board URL | ATS | Status | Region | Note |
+|---|---|---|---|---|---|
+| Torq | https://job-boards.greenhouse.io/torq | greenhouse | active | Israel | AI SOC/security-automation |
+| Kuda Technologies | https://apply.workable.com/kuda/ | workable | active | Nigeria | digital bank |
+| M-KOPA | https://jobs.ashbyhq.com/M-KOPA | ashby | active | Kenya/Uganda/Nigeria | connected-asset financing |
+| Wave Mobile Money | https://job-boards.greenhouse.io/wavemm1 | greenhouse | active | Senegal/Côte d'Ivoire/Mali/Uganda | |
+| UiPath | https://jobs.ashbyhq.com/uipath | ashby | active | Romania-founded | RPA |
+| Nord Security (NordVPN) | https://jobs.ashbyhq.com/nord-security | ashby | active | Lithuania-founded | |
+| Lightspeed Commerce | https://job-boards.greenhouse.io/lightspeedhq | greenhouse | active | Canada (Montreal) | |
+| Coveo | https://job-boards.greenhouse.io/coveoen | greenhouse | active | Canada (Quebec City) | |
+| Vidyard | https://boards.greenhouse.io/vidyard | greenhouse | active | Canada (Kitchener) | |
+| Benevity | https://boards.greenhouse.io/benevity | greenhouse | active | Canada (Calgary) | |
+| League Inc. | https://job-boards.greenhouse.io/leagueinc | greenhouse | active | Canada (Toronto) | |
+| Neo Financial | https://jobs.ashbyhq.com/neofinancial | ashby | active | Canada (Calgary) | |
+| KOHO | https://jobs.ashbyhq.com/koho | ashby | active | Canada (Vancouver) | |
+| Top Hat | https://jobs.ashbyhq.com/top-hat | ashby | active | Canada (Toronto) | |
+| Jane App | https://jobs.lever.co/janeapp | lever | active | Canada (remote-first) | healthcare practice software |
+| ApplyBoard | https://jobs.lever.co/applyboard | lever | active | Canada (Kitchener) | |
+| CAE Inc | https://cae.wd3.myworkdayjobs.com/career | workday | active | Canada (Montreal) | shape-only |
+
+No genuinely-unsupported-platform pending submissions this wave — none of the forks found a confirmed individual job-posting URL on a new platform before the search budget ran out.
+
+**More `eu.greenhouse.io` adapter-gap hits (not added, same as wave 5's Hotmart/Groww):** Tamara (Saudi fintech, `job-boards.eu.greenhouse.io/tamara`, 31 live jobs) and Jumia (`job-boards.eu.greenhouse.io/jumia`, 21 live jobs) — both real, working Greenhouse boards that 422 on the admin endpoint purely due to the host regex. Third data point for the same one-line fix noted in wave 5.
+
+**Totals after wave 6:** 1399 active, 36 pending, 22 rejected.
 
 ## Submitted via `POST /jobs` (job-URL / domain submissions)
 
