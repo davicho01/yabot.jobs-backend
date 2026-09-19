@@ -329,7 +329,18 @@ def fetch_html(url: str) -> FetchedPage:
     """
     try:
         response = _fetch_direct(url)
-        return FetchedPage(text=response.text, url=str(response.url))
+        if response.text.strip():
+            return FetchedPage(text=response.text, url=str(response.url))
+        # A 2xx status with an empty body is a WAF JS-challenge, not a real
+        # page — raise_for_status() never catches this (verified live on
+        # delta.avature.net: every path, including job detail pages, answers
+        # a plain httpx request with an empty 202). Left unhandled, this
+        # scanned as a "successful" fetch of nothing, silently producing a
+        # ScanResult with every field null instead of falling back to a real
+        # browser render. avature.py's own _fetch_page_html already guards
+        # against this same signature; this mirrors that check here so every
+        # caller of fetch_html (the generic default scanner included) gets it.
+        logger.info("Direct fetch of %s returned an empty body; retrying via browser_fetch_service.", url)
     except httpx.HTTPError as exc:
         logger.info("Direct fetch of %s failed (%s); retrying via browser_fetch_service.", url, exc)
 
