@@ -133,6 +133,16 @@ class AtsType(StrEnum):
     # domain (e.g. jobs.halan.com), jobs server-rendered as plain
     # /position/{slug}/ anchors on the board root.
     ZENATS = "zenats"
+    # LINE's career site (careers.linecorp.com) — a Gatsby/Strapi static
+    # site with the whole job catalog inline in its own page-data.json, no
+    # separate API (see adapters/linecorp.py).
+    LINECORP = "linecorp"
+    # Toss/Viva Republica's career site (toss.im) — Greenhouse-backed
+    # (absolute_url carries gh_jid) but the public boards-api.greenhouse.io
+    # candidate API is disabled for this tenant; Toss's own public
+    # job-groups API mirrors the same Greenhouse job data instead (see
+    # adapters/toss.py).
+    TOSS = "toss"
 
 
 class CrawlSourceStatus(StrEnum):
