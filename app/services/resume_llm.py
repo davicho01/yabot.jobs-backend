@@ -140,13 +140,35 @@ def score_resume_with_llm(
 # --- Tailored generation ---------------------------------------------------
 
 
+def _as_entries_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    entries = []
+    for item in value:
+        if isinstance(item, dict) and isinstance(item.get("title"), str):
+            entries.append(
+                {
+                    "title": item["title"],
+                    "subtitle": item.get("subtitle") if isinstance(item.get("subtitle"), str) else None,
+                    "bullets": _as_str_list(item.get("bullets")),
+                }
+            )
+    return entries
+
+
 def _as_sections_list(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     sections = []
     for item in value:
         if isinstance(item, dict) and isinstance(item.get("heading"), str):
-            sections.append({"heading": item["heading"], "bullets": _as_str_list(item.get("bullets"))})
+            sections.append(
+                {
+                    "heading": item["heading"],
+                    "bullets": _as_str_list(item.get("bullets")),
+                    "entries": _as_entries_list(item.get("entries")),
+                }
+            )
     return sections
 
 

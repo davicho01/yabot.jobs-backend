@@ -25,9 +25,23 @@ class ResumeDetailRead(ResumeRead):
     parsed_text: str
 
 
+class ResumeEntryContent(BaseModel):
+    # One job/degree/project block within a section — e.g. a single role
+    # under "Experience". subtitle is typically "Company · Dates".
+    title: str
+    subtitle: str | None = None
+    bullets: list[str] = []
+
+
 class ResumeSectionContent(BaseModel):
+    # Either flat `bullets` (right for Skills/Certifications) or a list of
+    # `entries` (right for Experience/Education/Projects, one block per job/
+    # degree/project) — see TAILOR_PROMPT for which shape the LLM picks per
+    # section. Both default to [] so older stored content (flat bullets
+    # only, no "entries" key) still validates unchanged.
     heading: str
-    bullets: list[str]
+    bullets: list[str] = []
+    entries: list[ResumeEntryContent] = []
 
 
 class ContactInfo(BaseModel):

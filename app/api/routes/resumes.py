@@ -383,7 +383,10 @@ def _store_tailored_resume(
 ) -> TailoredResume:
     docx_bytes = render_tailored_resume_docx(
         content.summary,
-        [(section.heading, section.bullets) for section in content.sections],
+        [
+            (section.heading, section.bullets, [entry.model_dump() for entry in section.entries])
+            for section in content.sections
+        ],
         _resolve_contact(content.contact, current_user),
     )
     filename = f"{(current_user.display_name or '').replace('/', '_')}-{(posting.title or '').replace('/', '_')}-resume.docx"

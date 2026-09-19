@@ -127,7 +127,9 @@ Respond with ONLY a single JSON object (no markdown fences, no commentary) \
 "location": string|null, "linkedin": string|null}},
   "summary": string,
   "sections": [
-    {{"heading": string, "bullets": [string, ...]}},
+    {{"heading": string,
+      "entries": [{{"title": string, "subtitle": string|null, "bullets": [string, ...]}}, ...],
+      "bullets": [string, ...]}},
     ...
   ]
 }}
@@ -136,11 +138,18 @@ Respond with ONLY a single JSON object (no markdown fences, no commentary) \
 name, email, phone, location, LinkedIn URL. Use null for any field not \
 actually present; never invent contact details.
 "summary" is a 2-3 sentence professional summary tailored to this role. \
-"sections" is the rest of the resume broken into named sections (typically \
-"Experience", "Skills", "Education") — each a plain heading plus a flat \
-list of bullet points (e.g. one bullet per role/responsibility/skill). \
-Keep bullets as plain text, no markup. This gets rendered straight into a \
-plain, single-column, ATS-scannable .docx.
+"sections" is the rest of the resume broken into named sections. For each \
+section, use exactly one of "entries" or "bullets" (the other an empty list):
+- "entries" for a section listing multiple distinct items, one entry per \
+item — one per job for "Experience" (title = role title, subtitle = \
+"Company · Dates"), one per degree for "Education", one per project for \
+"Projects", etc. Each entry's own "bullets" are its accomplishment/detail \
+statements — don't repeat the entry's title inside them.
+- "bullets" directly on the section for simple flat sections that aren't a \
+list of distinct items, e.g. "Skills" or "Certifications" (one bullet per \
+skill/item, or one per category like "Languages: Python, Go, Java").
+Keep all bullet/title/subtitle text plain, no markup. This gets rendered \
+straight into a plain, single-column, ATS-scannable .docx.
 
 Resume text:
 \"\"\"
