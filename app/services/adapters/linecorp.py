@@ -24,7 +24,11 @@ from app.services.adapters.text import clean_text, html_to_formatted_text
 _LINE_JOBS_PAGE_DATA_URL = "https://careers.linecorp.com/page-data/jobs/page-data.json"
 _LINE_JOB_PAGE_DATA_URL = "https://careers.linecorp.com/page-data/jobs/{job_id}/page-data.json"
 _LINE_JOB_URL = "https://careers.linecorp.com/jobs/{job_id}/"
-_LINE_URL_RE = re.compile(r"careers\.linecorp\.com/jobs/(\d+)", re.IGNORECASE)
+# Broad host check — matches both a submitted job URL and the canonical
+# board_url (which has no job id in it at all, just .../jobs/).
+_LINE_URL_RE = re.compile(r"careers\.linecorp\.com", re.IGNORECASE)
+# Job id extraction, only meaningful against an actual job URL.
+_LINE_JOB_ID_RE = re.compile(r"careers\.linecorp\.com/jobs/(\d+)", re.IGNORECASE)
 _LINE_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 
 
@@ -85,7 +89,7 @@ def _company_name_of(job: dict[str, Any]) -> str | None:
 
 
 def scan_job_url(url: str) -> ScanResult | None:
-    match = _LINE_URL_RE.search(url)
+    match = _LINE_JOB_ID_RE.search(url)
     if match is None:
         return None
     job_id = match.group(1)
