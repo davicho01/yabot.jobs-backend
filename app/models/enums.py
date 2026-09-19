@@ -75,6 +75,7 @@ class AtsType(StrEnum):
     MOTION_RECRUITMENT = "motion_recruitment"
     DYNATRACE = "dynatrace"
     GLIDEFAST = "glidefast"
+    SUCCESSFACTORS = "successfactors"
     # Paycor Recruiting (né Newton) — a shared multi-tenant ATS, white-labeled
     # onto each customer's own careers domain via a "gnewton" embed script, no
     # customer-visible ATS host in the URL at all.

@@ -30,6 +30,7 @@ from app.services.adapters import (
     personio,
     recruitee,
     stripe,
+    successfactors,
     talentbrew,
     workable,
     workday,
@@ -65,4 +66,5 @@ ADAPTERS: list[AtsAdapter] = [
     dynatrace.ADAPTER,
     glidefast.ADAPTER,
     paycor_recruiting.ADAPTER,
+    successfactors.ADAPTER,
 ]
