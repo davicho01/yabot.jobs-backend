@@ -99,3 +99,81 @@ def test_extract_none_when_url_has_no_job_id(monkeypatch):
 def test_extract_none_when_every_candidate_domain_fails(monkeypatch):
     monkeypatch.setattr(eightfold.httpx, "get", lambda *a, **k: FakeResponse(status_code=403))
     assert eightfold.extract("https://jobs.twilio.com/careers/job/555", _SIGNATURE_HTML) is None
+
+
+def test_candidate_domains_unchanged_for_ordinary_hosts():
+    assert eightfold._candidate_domains("jobs.twilio.com") == ["jobs.twilio.com", "twilio.com"]
+
+
+def test_candidate_domains_hint_goes_first():
+    assert eightfold._candidate_domains("jobs.twilio.com", "twilio.com") == ["twilio.com", "jobs.twilio.com"]
+
+
+def test_candidate_domains_guesses_tenant_dot_com_for_eightfold_hosted_tenants():
+    # <tenant>.eightfold.ai says nothing about the tenant's own domain, so
+    # with no hint the only useful guess is <tenant>.com — tried after the
+    # host and its parent (eightfold.ai, Eightfold's own app tenant).
+    assert eightfold._candidate_domains("paypal.eightfold.ai") == ["paypal.eightfold.ai", "eightfold.ai", "paypal.com"]
+    assert eightfold._candidate_domains("paypal.eightfold.ai", "paypal.com") == [
+        "paypal.com",
+        "paypal.eightfold.ai",
+        "eightfold.ai",
+    ]
+
+
+def test_domain_hint_reads_query_param():
+    assert eightfold._domain_hint("https://paypal.eightfold.ai/careers/job/1-x?domain=paypal.com") == "paypal.com"
+    assert eightfold._domain_hint("https://paypal.eightfold.ai/careers/job/1") is None
+
+
+def _fake_position_details(job_id: str, real_domain: str):
+    # Only the tenant's real domain identifies the job, like the live API:
+    # every other guess 404s.
+    def fake_get_with_retry(url, params, timeout):
+        if params.get("domain") == real_domain:
+            return FakeResponse(json_data={"data": {"id": job_id}})
+        return FakeResponse(status_code=404)
+
+    return fake_get_with_retry
+
+
+def test_detect_embedded_resolves_eightfold_hosted_tenant_from_domain_query_param(monkeypatch):
+    # The PayPal/Eaton/Boston Scientific bug: a live job URL on
+    # <tenant>.eightfold.ai only tried [host, eightfold.ai] as the tenant
+    # domain, so detection returned None and the submission landed as an
+    # empty pending row. The ?domain= param in the URL names the tenant.
+    monkeypatch.setattr(eightfold.httpx, "get", lambda *a, **k: FakeResponse(text=_SIGNATURE_HTML))
+    monkeypatch.setattr(eightfold, "get_with_retry", _fake_position_details("274922421933", "paypal.com"))
+    url = "https://paypal.eightfold.ai/careers/job/274922421933-sr-manager?domain=paypal.com"
+    assert eightfold._detect_embedded(url) == "paypal.eightfold.ai/paypal.com"
+
+
+def test_detect_embedded_resolves_eightfold_hosted_tenant_without_query_param(monkeypatch):
+    # A hand-copied job link often has no ?domain= — the <tenant>.com guess
+    # covers it.
+    monkeypatch.setattr(eightfold.httpx, "get", lambda *a, **k: FakeResponse(text=_SIGNATURE_HTML))
+    monkeypatch.setattr(eightfold, "get_with_retry", _fake_position_details("274922421933", "paypal.com"))
+    url = "https://paypal.eightfold.ai/careers/job/274922421933"
+    assert eightfold._detect_embedded(url) == "paypal.eightfold.ai/paypal.com"
+
+
+def test_detect_embedded_still_none_when_no_candidate_matches_the_job(monkeypatch):
+    monkeypatch.setattr(eightfold.httpx, "get", lambda *a, **k: FakeResponse(text=_SIGNATURE_HTML))
+    monkeypatch.setattr(eightfold, "get_with_retry", lambda *a, **k: FakeResponse(status_code=404))
+    url = "https://paypal.eightfold.ai/careers/job/1?domain=paypal.com"
+    assert eightfold._detect_embedded(url) is None
+
+
+def test_extract_uses_domain_query_param_for_position_details(monkeypatch):
+    calls = []
+
+    def fake_get(url, params, timeout):
+        calls.append(params["domain"])
+        if params["domain"] != "paypal.com":
+            return FakeResponse(status_code=404)
+        return FakeResponse(json_data={"data": {"id": "555", "name": "Engineer"}})
+
+    monkeypatch.setattr(eightfold.httpx, "get", fake_get)
+    result = eightfold.extract("https://paypal.eightfold.ai/careers/job/555?domain=paypal.com", _SIGNATURE_HTML)
+    assert result.title == "Engineer"
+    assert calls == ["paypal.com"]

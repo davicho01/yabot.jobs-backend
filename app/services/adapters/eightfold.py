@@ -1,7 +1,7 @@
 import re
 from datetime import date
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 from xml.etree import ElementTree
 
 import httpx
@@ -36,17 +36,38 @@ _EIGHTFOLD_JOB_URL_RE = re.compile(r"/careers/job/(\d+)")
 _EIGHTFOLD_SIGNATURE = "eightfold.ai/privacy-policy"
 
 
-def _candidate_domains(host: str) -> list[str]:
+def _domain_hint(url: str) -> str | None:
+    # Eightfold's own listing API emits job URLs like
+    # https://paypal.eightfold.ai/careers/job/123-title?domain=paypal.com —
+    # the tenant's real domain rides along in the query string, and it's the
+    # only place it appears for tenants hosted on <tenant>.eightfold.ai
+    # (whose host says nothing about the tenant's own domain).
+    values = parse_qs(urlsplit(url).query).get("domain")
+    return values[0] if values else None
+
+
+def _candidate_domains(host: str, hint: str | None = None) -> list[str]:
     """Eightfold's "domain" tenant identifier is usually the requesting
     host's registrable domain, but the career site itself often lives on a
     subdomain (jobs.twilio.com's tenant domain is twilio.com) — try the host
     as-is, then progressively strip leading subdomain labels.
+
+    Tenants hosted on <tenant>.eightfold.ai itself are the exception: the
+    host and its parents (paypal.eightfold.ai, eightfold.ai) never match the
+    tenant's own domain (paypal.com), so an explicit hint from the job URL's
+    ?domain= param goes first, and <tenant>.com is tried last as a guess for
+    when no hint is available (a bare board URL, or a hand-copied job link).
+    Every caller verifies a candidate against the API before trusting it, so
+    a wrong guess costs a request, nothing more.
     """
     labels = host.lower().split(".")
-    candidates = [host.lower()]
+    candidates = [hint.lower()] if hint else []
+    candidates.append(host.lower())
     for strip in (1, 2):
         if len(labels) > strip + 1:
             candidates.append(".".join(labels[strip:]))
+    if len(labels) == 3 and ".".join(labels[1:]) == "eightfold.ai":
+        candidates.append(f"{labels[0]}.com")
     return list(dict.fromkeys(candidates))  # dedupe, keep order
 
 
@@ -186,7 +207,7 @@ def _detect_embedded(url: str) -> str | None:
     if _EIGHTFOLD_SIGNATURE not in response.text:
         return None
 
-    for domain in _candidate_domains(host):
+    for domain in _candidate_domains(host, _domain_hint(url)):
         try:
             detail = get_with_retry(
                 f"https://{host}/api/pcsx/position_details",
@@ -222,7 +243,7 @@ def _fetch_job_data(url: str, html: str) -> dict[str, Any] | None:
         return None
     job_id = job_match.group(1)
     host = urlsplit(url).netloc
-    for domain in _candidate_domains(host):
+    for domain in _candidate_domains(host, _domain_hint(url)):
         try:
             response = httpx.get(
                 f"https://{host}/api/pcsx/position_details",
