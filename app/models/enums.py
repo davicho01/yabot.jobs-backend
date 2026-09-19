@@ -76,6 +76,10 @@ class AtsType(StrEnum):
     DYNATRACE = "dynatrace"
     GLIDEFAST = "glidefast"
     SUCCESSFACTORS = "successfactors"
+    # Walmart's in-house career site (careers.walmart.com) — also hosts
+    # Sam's Club postings under the same board, distinguished per-job by
+    # jobDetails.brand (see adapters/walmart.py).
+    WALMART = "walmart"
     # Paycor Recruiting (né Newton) — a shared multi-tenant ATS, white-labeled
     # onto each customer's own careers domain via a "gnewton" embed script, no
     # customer-visible ATS host in the URL at all.
