@@ -511,6 +511,12 @@ def job_ld_location(job_ld: dict[str, Any]) -> str | None:
     if not isinstance(job_location, dict):
         return None
     address = job_location.get("address")
+    # schema.org's PostalAddress object is the strict shape, but some sites
+    # (verified live: Dynatrace) just put a plain string straight in
+    # "address" instead — a looser but common real-world deviation, worth
+    # taking as-is rather than dropping the location entirely.
+    if isinstance(address, str):
+        return clean_text(address)
     if not isinstance(address, dict):
         return None
     country = address.get("addressCountry")
@@ -554,7 +560,14 @@ def job_ld_employment_type(job_ld: dict[str, Any]) -> str:
     if isinstance(employment_type, list):
         employment_type = employment_type[0] if employment_type else None
     if isinstance(employment_type, str):
-        return EMPLOYMENT_TYPE_MAP.get(employment_type.upper(), EmploymentType.UNKNOWN)
+        # schema.org's enum tokens are strictly "FULL_TIME"-style, but some
+        # sites (verified live: Dynatrace's "Full-time") use a human-
+        # readable, hyphenated variant instead — normalizing separators
+        # before the uppercase lookup catches both without growing
+        # EMPLOYMENT_TYPE_MAP's keys, since no real schema.org token itself
+        # contains a hyphen or space to collide with.
+        normalized = employment_type.strip().upper().replace("-", "_").replace(" ", "_")
+        return EMPLOYMENT_TYPE_MAP.get(normalized, EmploymentType.UNKNOWN)
     return EmploymentType.UNKNOWN
 
 

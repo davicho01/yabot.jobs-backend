@@ -39,6 +39,35 @@ def _match(url: str) -> str | None:
     return f"{host}/{site_number}"
 
 
+# Some tenants front their Oracle Fusion candidate-experience site with a
+# custom domain (a CNAME-style vanity URL, e.g. careers.claritev.com/en/
+# sites/CX_1) that rewrites away the /hcmUI/CandidateExperience/ path
+# segment _match needs — verified live against claritev.com, whose page
+# still carries the real oraclecloud.com API host and site number in the
+# same <base> tag Oracle's own SPA reads them from
+# (data-apibaseurl="https://{host}:443" data-sitenumber="{site}"). Reused
+# as both embedded_match (submission-time detection) and board_key
+# (re-deriving from a *stored*, verbatim custom-domain board_url at crawl
+# time) since both need the same one-page fetch.
+_EMBED_APIBASEURL_RE = re.compile(
+    r'data-apibaseurl="https://([a-zA-Z0-9.-]+\.oraclecloud\.com)(?::\d+)?"', re.IGNORECASE
+)
+_EMBED_SITENUMBER_RE = re.compile(r'data-sitenumber="([^"]+)"', re.IGNORECASE)
+
+
+def _detect_embedded(url: str) -> str | None:
+    try:
+        response = httpx.get(url, timeout=TIMEOUT, follow_redirects=True)
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return None
+    host_match = _EMBED_APIBASEURL_RE.search(response.text)
+    site_match = _EMBED_SITENUMBER_RE.search(response.text)
+    if not host_match or not site_match:
+        return None
+    return f"{host_match.group(1)}/{site_match.group(1)}"
+
+
 def _fetch_jobs(board_key: str) -> list[str]:
     # Free, public, unauthenticated REST API — the same one Oracle's own
     # candidate-experience UI calls client-side, no key required.
@@ -237,5 +266,7 @@ ADAPTER = AtsAdapter(
     AtsType.ORACLE_FUSION,
     match=_match,
     fetch_jobs=_fetch_jobs,
+    board_key=_detect_embedded,
+    embedded_match=_detect_embedded,
     scan_job_url=scan_job_url,
 )

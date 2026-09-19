@@ -73,6 +73,12 @@ class AtsType(StrEnum):
     APPLE = "apple"
     FULLSTACK = "fullstack"
     MOTION_RECRUITMENT = "motion_recruitment"
+    DYNATRACE = "dynatrace"
+    GLIDEFAST = "glidefast"
+    # Paycor Recruiting (né Newton) — a shared multi-tenant ATS, white-labeled
+    # onto each customer's own careers domain via a "gnewton" embed script, no
+    # customer-visible ATS host in the URL at all.
+    PAYCOR_RECRUITING = "paycor_recruiting"
     # Scan-only: job URLs are only ever submitted directly, never discovered
     # by crawling a board (no ADAPTER.fetch_jobs) — see
     # app.services.adapters.stripe.

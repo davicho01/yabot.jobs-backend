@@ -21,7 +21,14 @@ OG_TITLE_RE = re.compile(
     r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\'](.*?)["\']', re.IGNORECASE | re.DOTALL
 )
 
-_TAG_RE = re.compile(r"<[^>]+>")
+# Requires the char right after "<"/"</" to be a real tag-name start (a
+# letter), or "!"/"?" for comments/doctype/XML declarations — verified live
+# on a GlideFast posting whose "Travel Requirements: <25%" (a literal "<"
+# from an unescaped HTML entity, not a tag) otherwise got misread as an
+# opening tag by the original bare `<[^>]+>`, which then swallowed
+# everything up to the next real tag's ">" as that one "tag" — silently
+# deleting an entire paragraph of the description.
+_TAG_RE = re.compile(r"</?[a-zA-Z][^>]*>|<[!?][^>]*>")
 
 # Used by html_to_formatted_text to turn block-level HTML structure into
 # readable whitespace instead of collapsing it away (see clean_text, which
