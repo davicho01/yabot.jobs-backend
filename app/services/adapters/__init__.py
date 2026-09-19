@@ -23,6 +23,8 @@ from app.services.adapters import (
     glidefast,
     google,
     greenhouse,
+    gupy,
+    hirehive,
     icims,
     jazzhr,
     lever,
@@ -31,14 +33,17 @@ from app.services.adapters import (
     oracle_fusion,
     paradox,
     paycor_recruiting,
+    peopleadmin,
     personio,
     phenom,
+    pinpoint,
     recruitee,
     stripe,
     successfactors,
     talentbrew,
     workable,
     workday,
+    zenats,
 )
 from app.services.adapters.base import AtsAdapter
 
@@ -82,4 +87,9 @@ ADAPTERS: list[AtsAdapter] = [
     phenom.ADAPTER,
     avature.ADAPTER,
     paradox.ADAPTER,
+    gupy.ADAPTER,
+    hirehive.ADAPTER,
+    peopleadmin.ADAPTER,
+    pinpoint.ADAPTER,
+    zenats.ADAPTER,
 ]

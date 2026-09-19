@@ -36,8 +36,15 @@ _WORKDAY_POSTED_AGE_RE = re.compile(r"^Posted (?:(Today)|(Yesterday)|(\d+)\+? Da
 # company), and the career site name — joined "/" into one board_key (e.g.
 # "salesforce/wd12/External_Career_Site") since board_key is a single
 # string, not a structured value.
+#
+# The site-name group excludes quotes/whitespace/angle brackets, not just
+# "/" and "?" — _detect_embedded runs this against a full HTML document
+# (careers.toyota.com verified live), where the URL is followed immediately
+# by a closing quote and more attributes with no "/" for a long stretch;
+# without the tighter class the match ran on past the real site name into
+# surrounding markup.
 _WORKDAY_URL_RE = re.compile(
-    r"([a-zA-Z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[A-Z]{2}/)?([^/?]+)", re.IGNORECASE
+    r"([a-zA-Z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[A-Z]{2}/)?([^/?\s\"'<>]+)", re.IGNORECASE
 )
 
 

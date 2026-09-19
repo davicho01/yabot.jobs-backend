@@ -49,9 +49,15 @@ def _match(url: str) -> str | None:
 # as both embedded_match (submission-time detection) and board_key
 # (re-deriving from a *stored*, verbatim custom-domain board_url at crawl
 # time) since both need the same one-page fetch.
-_EMBED_APIBASEURL_RE = re.compile(
-    r'data-apibaseurl="https://([a-zA-Z0-9.-]+\.oraclecloud\.com)(?::\d+)?"', re.IGNORECASE
-)
+#
+# The captured host isn't always oraclecloud.com itself — some tenants
+# (verified live: careersearch.stanford.edu) CNAME their whole stack,
+# UI *and* REST API, onto their own domain, so data-apibaseurl
+# self-references the vanity domain rather than pointing at a separate
+# oraclecloud.com host. The REST API answers identically either way (same
+# path, same response shape), so any host works, not just oraclecloud.com
+# ones.
+_EMBED_APIBASEURL_RE = re.compile(r'data-apibaseurl="https://([a-zA-Z0-9.-]+)(?::\d+)?"', re.IGNORECASE)
 _EMBED_SITENUMBER_RE = re.compile(r'data-sitenumber="([^"]+)"', re.IGNORECASE)
 
 

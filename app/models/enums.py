@@ -105,6 +105,27 @@ class AtsType(StrEnum):
     # own domain (e.g. careers.marriott.com), no shared host to detect
     # statically.
     PARADOX = "paradox"
+    # Gupy — a Brazilian multi-tenant ATS at {tenant}.gupy.io, jobs listed
+    # server-side into a Next.js __NEXT_DATA__ JSON blob (no plain job-list
+    # API found).
+    GUPY = "gupy"
+    # HireHive — a multi-tenant ATS at {tenant}.hirehive.com, jobs
+    # server-rendered as plain anchors on the board root (no pagination or
+    # API found; verified live: patagonia.hirehive.com).
+    HIREHIVE = "hirehive"
+    # PeopleAdmin — a multi-tenant ATS at {tenant}.peopleadmin.com, common
+    # in higher-ed; jobs server-rendered at /postings/search?page=N,
+    # paginating until a page returns none (verified live: San Jose
+    # Evergreen Community College District).
+    PEOPLEADMIN = "peopleadmin"
+    # Pinpoint (Pinpoint HQ) — a career-site CMS white-labeled onto each
+    # customer's own domain (e.g. careers.manutd.com), no shared host to
+    # detect statically; publishes a public jobs.rss feed.
+    PINPOINT = "pinpoint"
+    # Zenats — a career-site CMS white-labeled onto each customer's own
+    # domain (e.g. jobs.halan.com), jobs server-rendered as plain
+    # /position/{slug}/ anchors on the board root.
+    ZENATS = "zenats"
 
 
 class CrawlSourceStatus(StrEnum):
