@@ -650,7 +650,7 @@ Unsupported platforms land as `pending` keyed by domain. Supported or embedded p
 | State Farm | https://careers-statefarm.icims.com | https://careers-statefarm.icims.com | pending / None |
 | Progressive | https://careers.progressive.com/jobs/17648069-medical-claims-representative-trai | https://careers.progressive.com | pending / None |
 | TriNet | https://trinet.eightfold.ai | https://trinet.eightfold.ai | active / eightfold |
-| GlobalFoundries | https://globalfoundries.eightfold.ai | https://globalfoundries.eightfold.ai | pending / None |
+| GlobalFoundries | https://globalfoundries.eightfold.ai | https://globalfoundries.eightfold.ai | active / eightfold (PATCHed after the adapter fix deployed) |
 | Deloitte (Belgium/Avature) | https://deloittebe.avature.net/en_US/careers/JobDetail/SAP-Supply-Chain-Project- | https://deloittebe.avature.net | pending / None |
 | Kelly Services | https://jobs.smartrecruiters.com/PartneredStaffing-KellyServices/743999652752715 | https://jobs.smartrecruiters.com | pending / None |
 | Wolters Kluwer (SmartRecruiters) | https://jobs.smartrecruiters.com/WoltersKluwer1/83235277-application-support-spe | https://jobs.smartrecruiters.com | pending / None |
@@ -703,9 +703,9 @@ No usable board URL or domain was found for these, so nothing real could be subm
 - **Not added / looked at, wave 3:** the 404-slug lists, wrong-company collisions (Ashby `ladder` and `slate`, Greenhouse `raven`/`liftoff`, Lever `factor`, Intapp's stale tenant), zero-posting boards (HubSpot, Vercel, Mistral, several travel/mobility slugs) and the unsearched company lists are in the fork reports in the chat transcript; none had a real board URL or domain to submit.
 - **Duplicate coverage:** Wayve is live on both Greenhouse (`job-boards.greenhouse.io/wayve`, 192) and Ashby (189); only the Ashby board was added (newer). Add the Greenhouse one if you want both.
 - **Cursor (Ashby `cursor`)** was added as "Cursor (flag for review)": the description says "automate coding" but the fetch summary named the company "SpaceXAI".
-- **GlobalFoundries** (`globalfoundries.eightfold.ai`, 522 jobs) and **Keurig Dr Pepper** (`kdrp.eightfold.ai`, 500 jobs) are pending Eightfold rows. The adapter fix (see below) resolves GlobalFoundries once deployed; KDP still needs its real tenant domain.
+- **GlobalFoundries** (`globalfoundries.eightfold.ai`, 522 jobs; now active) and **Keurig Dr Pepper** (`kdrp.eightfold.ai`, 500 jobs) are pending Eightfold rows. GlobalFoundries was PATCHed to active after the adapter fix deployed (see below); KDP still needs its real tenant domain.
 - **Second CBRE-style 500:** `POST /jobs {"url": "https://careers.jacobs.com"}` also returned a bare 500 (no row for Jacobs).
 
-## Eightfold adapter fix (uncommitted, not yet deployed)
+## Eightfold adapter fix (committed `fcbf89f`, deployed 2026-09-19)
 
 `app/services/adapters/eightfold.py`: `_candidate_domains` now takes the job URL's `?domain=` param as a hint (tried first) and, for `<tenant>.eightfold.ai` hosts, also tries `<tenant>.com`. Tests added in `tests/services/adapters/test_eightfold.py` (6 of the 9 new tests fail on the old code). Live check against real tenants: PayPal, Eaton, Boston Scientific, TriNet, GlobalFoundries and Lockheed Martin all resolve with and without `?domain=`; KDP does not (its tenant domain isn't `kdrp.com`).
