@@ -10,6 +10,7 @@ from app.models.job_posting import JobPosting
 from app.models.resume import CoverLetter, Resume, ResumeReview, ResumeScore, TailoredResume, TailoredResumeScore
 from app.models.user import User
 from app.schemas.resume import (
+    ContactInfo,
     CoverLetterRead,
     CoverLetterUpload,
     ResumeDetailRead,
@@ -356,6 +357,22 @@ def get_main_resume_score(
     return score
 
 
+def _resolve_contact(contact: ContactInfo | None, current_user: User) -> dict[str, str]:
+    """Merge LLM-extracted (or /upload-supplied) contact fields with a
+    fallback to the User row's own name/email — so a document is never
+    fully contact-less, even if extraction missed something or an /upload
+    caller (e.g. an MCP client) didn't send a contact block at all.
+    """
+    fields = contact.model_dump() if contact else {}
+    return {
+        "name": (fields.get("name") or current_user.display_name or "").strip(),
+        "email": (fields.get("email") or current_user.email or "").strip(),
+        "phone": (fields.get("phone") or "").strip(),
+        "location": (fields.get("location") or "").strip(),
+        "linkedin": (fields.get("linkedin") or "").strip(),
+    }
+
+
 def _store_tailored_resume(
     db: Session,
     current_user: User,
@@ -365,9 +382,11 @@ def _store_tailored_resume(
     raw_response: dict | None,
 ) -> TailoredResume:
     docx_bytes = render_tailored_resume_docx(
-        content.summary, [(section.heading, section.bullets) for section in content.sections]
+        content.summary,
+        [(section.heading, section.bullets) for section in content.sections],
+        _resolve_contact(content.contact, current_user),
     )
-    filename = f"tailored-{(posting.title or 'resume').replace('/', '_')}.docx"
+    filename = f"{(current_user.display_name or '').replace('/', '_')}-{(posting.title or '').replace('/', '_')}-resume.docx"
     storage_key = f"tailored/{current_user.id}/{uuid.uuid4()}-{filename}"
     upload_file(storage_key, docx_bytes, _TAILORED_CONTENT_TYPE)
 
@@ -411,6 +430,7 @@ def generate_main_tailored_resume(
     content = TailoredResumeUpload(
         summary=generated.summary,
         sections=[ResumeSectionContent(**section) for section in generated.sections],
+        contact=ContactInfo(**generated.contact) if generated.contact else None,
     )
     return _store_tailored_resume(db, current_user, resume, posting, content, generated.raw_response)
 
@@ -565,8 +585,10 @@ def _store_cover_letter(
     content: CoverLetterUpload,
     raw_response: dict | None,
 ) -> CoverLetter:
-    docx_bytes = render_cover_letter_docx(content.greeting, content.body_paragraphs, content.closing)
-    filename = f"cover-letter-{(posting.title or 'letter').replace('/', '_')}.docx"
+    docx_bytes = render_cover_letter_docx(
+        content.greeting, content.body_paragraphs, content.closing, _resolve_contact(content.contact, current_user)
+    )
+    filename = f"{(current_user.display_name or '').replace('/', '_')}-{(posting.title or '').replace('/', '_')}-cover-letter.docx"
     storage_key = f"cover-letters/{current_user.id}/{uuid.uuid4()}-{filename}"
     upload_file(storage_key, docx_bytes, _TAILORED_CONTENT_TYPE)
 
@@ -608,7 +630,10 @@ def generate_main_cover_letter(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM request failed: {exc}") from exc
 
     content = CoverLetterUpload(
-        greeting=generated.greeting, body_paragraphs=generated.body_paragraphs, closing=generated.closing
+        greeting=generated.greeting,
+        body_paragraphs=generated.body_paragraphs,
+        closing=generated.closing,
+        contact=ContactInfo(**generated.contact) if generated.contact else None,
     )
     return _store_cover_letter(db, current_user, resume, posting, content, generated.raw_response)
 

@@ -42,16 +42,36 @@ def _style_document(document: docx.Document) -> None:
     section.bottom_margin = Inches(0.6)
 
 
-def render_tailored_resume_docx(summary: str, sections: list[tuple[str, list[str]]]) -> bytes:
+def _add_contact_header(document: docx.Document, contact: dict[str, str]) -> None:
+    """Write the candidate's name (as the document's one Heading 1) and a
+    single line of whatever contact details are available, in a fixed
+    order. Silently omits whatever is blank rather than leaving gaps.
+    """
+    name = contact.get("name", "")
+    if name:
+        document.add_heading(name, level=1)
+
+    line = " | ".join(
+        contact[key] for key in ("email", "phone", "location", "linkedin") if contact.get(key)
+    )
+    if line:
+        document.add_paragraph(line)
+
+
+def render_tailored_resume_docx(
+    summary: str, sections: list[tuple[str, list[str]]], contact: dict[str, str] | None = None
+) -> bytes:
     """Render a tailored resume's structured content (see
     app.schemas.resume.TailoredResumeUpload — the same shape produced by
     this app's own LLM generation and accepted from an uploaded one, e.g.
     from an MCP client's own LLM) into a plain, single-column, ATS-safe
-    .docx: the summary as an intro paragraph, then each section as a
-    heading plus a flat bullet list.
+    .docx: a contact header, the summary as an intro paragraph, then each
+    section as a heading plus a flat bullet list.
     """
     document = docx.Document()
     _style_document(document)
+
+    _add_contact_header(document, contact or {})
 
     if summary:
         document.add_paragraph(summary)
@@ -66,13 +86,18 @@ def render_tailored_resume_docx(summary: str, sections: list[tuple[str, list[str
     return buffer.getvalue()
 
 
-def render_cover_letter_docx(greeting: str, body_paragraphs: list[str], closing: str) -> bytes:
+def render_cover_letter_docx(
+    greeting: str, body_paragraphs: list[str], closing: str, contact: dict[str, str] | None = None
+) -> bytes:
     """Render a cover letter's structured content (see
-    app.schemas.resume.CoverLetterUpload) into a plain .docx: greeting
-    paragraph, each body paragraph, then the closing paragraph.
+    app.schemas.resume.CoverLetterUpload) into a plain .docx: a contact
+    header, greeting paragraph, each body paragraph, then the closing
+    paragraph.
     """
     document = docx.Document()
     _style_document(document)
+
+    _add_contact_header(document, contact or {})
 
     if greeting:
         document.add_paragraph(greeting)

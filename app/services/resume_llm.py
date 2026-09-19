@@ -52,6 +52,16 @@ def _as_str_list(value: Any) -> list[str]:
     return [item for item in value if isinstance(item, str)]
 
 
+_CONTACT_KEYS = ("name", "email", "phone", "location", "linkedin")
+
+
+def _as_contact_dict(value: Any) -> dict[str, str] | None:
+    if not isinstance(value, dict):
+        return None
+    contact = {key: value[key] for key in _CONTACT_KEYS if isinstance(value.get(key), str)}
+    return contact or None
+
+
 # --- Review ------------------------------------------------------------
 
 
@@ -144,6 +154,7 @@ def _as_sections_list(value: Any) -> list[dict[str, Any]]:
 class TailoredResumeContent:
     summary: str = ""
     sections: list[dict[str, Any]] = field(default_factory=list)
+    contact: dict[str, str] | None = None
     raw_response: dict[str, Any] | None = None
 
 
@@ -168,6 +179,7 @@ def generate_tailored_resume_with_llm(
     return TailoredResumeContent(
         summary=data.get("summary") if isinstance(data.get("summary"), str) else "",
         sections=_as_sections_list(data.get("sections")),
+        contact=_as_contact_dict(data.get("contact")),
         raw_response=data,
     )
 
@@ -180,6 +192,7 @@ class CoverLetterContent:
     greeting: str = ""
     body_paragraphs: list[str] = field(default_factory=list)
     closing: str = ""
+    contact: dict[str, str] | None = None
     raw_response: dict[str, Any] | None = None
 
 
@@ -205,5 +218,6 @@ def generate_cover_letter_with_llm(
         greeting=data.get("greeting") if isinstance(data.get("greeting"), str) else "",
         body_paragraphs=_as_str_list(data.get("body_paragraphs")),
         closing=data.get("closing") if isinstance(data.get("closing"), str) else "",
+        contact=_as_contact_dict(data.get("contact")),
         raw_response=data,
     )

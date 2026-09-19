@@ -123,6 +123,8 @@ Respond with ONLY a single JSON object (no markdown fences, no commentary) \
     with exactly these keys:
 
 {{
+  "contact": {{"name": string|null, "email": string|null, "phone": string|null, \
+"location": string|null, "linkedin": string|null}},
   "summary": string,
   "sections": [
     {{"heading": string, "bullets": [string, ...]}},
@@ -130,6 +132,9 @@ Respond with ONLY a single JSON object (no markdown fences, no commentary) \
   ]
 }}
 
+"contact" is extracted verbatim from the header of the resume text below — \
+name, email, phone, location, LinkedIn URL. Use null for any field not \
+actually present; never invent contact details.
 "summary" is a 2-3 sentence professional summary tailored to this role. \
 "sections" is the rest of the resume broken into named sections (typically \
 "Experience", "Skills", "Education") — each a plain heading plus a flat \
@@ -159,11 +164,16 @@ Respond with ONLY a single JSON object (no markdown fences, no commentary) \
 with exactly these keys:
 
 {{
+  "contact": {{"name": string|null, "email": string|null, "phone": string|null, \
+"location": string|null, "linkedin": string|null}},
   "greeting": string,
   "body_paragraphs": [string, ...],
   "closing": string
 }}
 
+"contact" is extracted verbatim from the header of the resume text below — \
+name, email, phone, location, LinkedIn URL. Use null for any field not \
+actually present; never invent contact details.
 "greeting" is a short salutation (e.g. "Dear Hiring Manager,"). \
 "body_paragraphs" is 2-4 plain-text paragraphs making the case for this \
 candidate for this specific role. "closing" is a short sign-off (e.g. \

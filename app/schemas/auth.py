@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.schemas.user import UserRead
 
@@ -12,6 +12,10 @@ class MagicLinkRequest(BaseModel):
 
 class MagicLinkVerifyRequest(BaseModel):
     token: str
+
+
+class UserUpdate(BaseModel):
+    display_name: str | None = Field(default=None, max_length=120)
 
 
 class AuthResponse(BaseModel):

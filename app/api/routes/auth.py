@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user, get_db
 from app.core.config import settings
 from app.models.user import User
-from app.schemas.auth import AuthResponse, MagicLinkRequest, MagicLinkVerifyRequest
+from app.schemas.auth import AuthResponse, MagicLinkRequest, MagicLinkVerifyRequest, UserUpdate
 from app.schemas.user import UserRead
 from app.services import auth as auth_service
 from app.services.email import send_magic_link_email
@@ -62,4 +62,14 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)) 
 
 @router.get("/me", response_model=UserRead)
 def read_current_user(current_user: User = Depends(get_current_user)) -> UserRead:
+    return UserRead.model_validate(current_user)
+
+
+@router.patch("/me", response_model=UserRead)
+def update_current_user(
+    payload: UserUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> UserRead:
+    display_name = payload.display_name.strip() if payload.display_name else None
+    current_user.display_name = display_name or None
+    db.flush()
     return UserRead.model_validate(current_user)

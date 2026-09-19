@@ -30,6 +30,18 @@ class ResumeSectionContent(BaseModel):
     bullets: list[str]
 
 
+class ContactInfo(BaseModel):
+    # All optional — extracted from the source resume text (see TAILOR_PROMPT /
+    # COVER_LETTER_PROMPT) or supplied directly by an /upload caller. Missing
+    # fields are filled in from the User row (name/email only) at render time —
+    # see _resolve_contact in app.api.routes.resumes.
+    name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    location: str | None = None
+    linkedin: str | None = None
+
+
 class TailoredResumeUpload(BaseModel):
     # Structured content — matches what the frontend already expects on
     # TailoredResume.content (src/api/types.ts) and what render_tailored_resume_docx
@@ -37,6 +49,7 @@ class TailoredResumeUpload(BaseModel):
     # as this app's own LLM output shape, so both paths produce the same content shape.
     summary: str
     sections: list[ResumeSectionContent]
+    contact: ContactInfo | None = None
 
 
 class CoverLetterUpload(BaseModel):
@@ -45,6 +58,7 @@ class CoverLetterUpload(BaseModel):
     greeting: str
     body_paragraphs: list[str]
     closing: str
+    contact: ContactInfo | None = None
 
 
 class ResumeReviewRead(BaseModel):
