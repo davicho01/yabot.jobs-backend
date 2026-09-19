@@ -133,6 +133,13 @@ class AtsType(StrEnum):
     # domain (e.g. jobs.halan.com), jobs server-rendered as plain
     # /position/{slug}/ anchors on the board root.
     ZENATS = "zenats"
+    # Talemetry (Cornerstone) — a career-site CMS white-labeled onto each
+    # customer's own domain (e.g. careers.progressive.com), applies via
+    # apply.talemetry.com. Some tenants front every path with a WAF that
+    # blocks plain httpx entirely (verified live: Progressive returns 403
+    # even with a real browser User-Agent) — browser-render fallback only,
+    # same as Avature's delta.avature.net case.
+    TALEMETRY = "talemetry"
     # LINE's career site (careers.linecorp.com) — a Gatsby/Strapi static
     # site with the whole job catalog inline in its own page-data.json, no
     # separate API (see adapters/linecorp.py).

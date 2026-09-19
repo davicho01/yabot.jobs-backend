@@ -42,6 +42,7 @@ from app.services.adapters import (
     recruitee,
     stripe,
     successfactors,
+    talemetry,
     talentbrew,
     toss,
     walmart,
@@ -100,4 +101,5 @@ ADAPTERS: list[AtsAdapter] = [
     peopleadmin.ADAPTER,
     pinpoint.ADAPTER,
     zenats.ADAPTER,
+    talemetry.ADAPTER,
 ]
