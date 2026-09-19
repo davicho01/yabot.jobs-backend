@@ -100,6 +100,11 @@ class AtsType(StrEnum):
     # front every path with an AWS WAF JS challenge a plain httpx request
     # can't pass (see adapters/avature.py's browser-render fallback).
     AVATURE = "avature"
+    # Paradox ("Olivia" AI recruiting chatbot) — also hosts a plain
+    # server-rendered career-site CMS white-labeled onto each customer's
+    # own domain (e.g. careers.marriott.com), no shared host to detect
+    # statically.
+    PARADOX = "paradox"
 
 
 class CrawlSourceStatus(StrEnum):

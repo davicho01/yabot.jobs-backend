@@ -29,6 +29,7 @@ from app.services.adapters import (
     motion_recruitment,
     nlx,
     oracle_fusion,
+    paradox,
     paycor_recruiting,
     personio,
     phenom,
@@ -80,4 +81,5 @@ ADAPTERS: list[AtsAdapter] = [
     attrax.ADAPTER,
     phenom.ADAPTER,
     avature.ADAPTER,
+    paradox.ADAPTER,
 ]
