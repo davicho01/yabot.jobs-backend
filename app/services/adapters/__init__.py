@@ -9,6 +9,8 @@ from app.services.adapters import (
     amazon,
     apple,
     ashby,
+    attrax,
+    avature,
     bamboohr,
     breezyhr,
     clearcompany,
@@ -21,6 +23,7 @@ from app.services.adapters import (
     glidefast,
     google,
     greenhouse,
+    icims,
     jazzhr,
     lever,
     motion_recruitment,
@@ -28,6 +31,7 @@ from app.services.adapters import (
     oracle_fusion,
     paycor_recruiting,
     personio,
+    phenom,
     recruitee,
     stripe,
     successfactors,
@@ -56,6 +60,12 @@ ADAPTERS: list[AtsAdapter] = [
     fullstack.ADAPTER,
     motion_recruitment.ADAPTER,
     oracle_fusion.ADAPTER,
+    # Ahead of clinch: clinch's embedded_match fallback (any sitemap.xml
+    # with /jobs/ paths) false-positives on iCIMS/Jibe tenants whose own
+    # unrelated site sitemap happens to list /jobs/{id} detail pages
+    # (verified live: careers.mheducation.com) — icims's stricter
+    # jibecdn.com/.icims.com signature check should get first refusal.
+    icims.ADAPTER,
     clinch.ADAPTER,
     clearcompany.ADAPTER,
     echo_jobs.ADAPTER,
@@ -67,4 +77,7 @@ ADAPTERS: list[AtsAdapter] = [
     glidefast.ADAPTER,
     paycor_recruiting.ADAPTER,
     successfactors.ADAPTER,
+    attrax.ADAPTER,
+    phenom.ADAPTER,
+    avature.ADAPTER,
 ]

@@ -84,6 +84,22 @@ class AtsType(StrEnum):
     # by crawling a board (no ADAPTER.fetch_jobs) — see
     # app.services.adapters.stripe.
     STRIPE = "stripe"
+    # Attrax — a career-site CMS white-labeled onto each customer's own
+    # domain (e.g. careers.abbvie.com), no shared host to detect statically.
+    ATTRAX = "attrax"
+    # Phenom People — a career-site CMS white-labeled onto each customer's
+    # own domain (e.g. careers.gene.com), no shared host to detect
+    # statically; no usable public API found, discovered via SEO sitemap.
+    PHENOM = "phenom"
+    # iCIMS — two very different products under one brand: "classic"
+    # (server-rendered {tenant}.icims.com) and "Jibe/Attract" (a public JSON
+    # API, either on the tenant's own vanity domain or reached via a JS
+    # redirect off the bare .icims.com subdomain). See adapters/icims.py.
+    ICIMS = "icims"
+    # Avature — a multi-tenant ATS at {tenant}.avature.net; some tenants
+    # front every path with an AWS WAF JS challenge a plain httpx request
+    # can't pass (see adapters/avature.py's browser-render fallback).
+    AVATURE = "avature"
 
 
 class CrawlSourceStatus(StrEnum):
