@@ -158,6 +158,7 @@ class ExtractedJobFields:
     salary_max: int | None = None
     salary_currency: str | None = None
     posted_at: date | None = None
+    extracted_fields: dict[str, Any] | None = field(default=None)
 
 
 @dataclass

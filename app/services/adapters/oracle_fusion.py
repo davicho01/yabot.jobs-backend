@@ -246,7 +246,39 @@ def _posted_at_of(job_data: dict[str, Any]) -> date | None:
         return None
 
 
-def _description_of(job_data: dict[str, Any]) -> str | None:
+# Tenants configure their own extra requisition fields (Amex's include
+# "Salary Range" and "Career Area", verified live) as freeform Prompt/Value
+# pairs rather than fixed schema columns — Oracle's own UI renders them in
+# the page's "Job Info" panel. Keyed by prompt so a duplicate prompt (seen
+# on no tenant so far) just keeps the last value rather than erroring.
+def _flex_fields_of(job_data: dict[str, Any]) -> dict[str, str]:
+    entries = job_data.get("requisitionFlexFields")
+    if not isinstance(entries, list):
+        return {}
+    fields: dict[str, str] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        prompt, value = entry.get("Prompt"), entry.get("Value")
+        if isinstance(prompt, str) and prompt.strip() and isinstance(value, str) and value.strip():
+            fields[prompt.strip()] = value.strip()
+    return fields
+
+
+# No fixed field carries salary — when a tenant states one at all, it's
+# prose inside one of these flex fields (e.g. "$65,500 - $81,000 annually
+# + bonus + benefits"), so reuse the same prose parser job_scanner.py's
+# generic fallback uses rather than writing a second one.
+def _salary_of(flex_fields: dict[str, str]) -> tuple[int | None, int | None, str | None]:
+    for prompt, value in flex_fields.items():
+        if "salary" in prompt.lower() or "pay" in prompt.lower():
+            salary_min, salary_max, currency = base.salary_from_text(value)
+            if salary_min is not None:
+                return salary_min, salary_max, currency
+    return None, None, None
+
+
+def _description_of(job_data: dict[str, Any], flex_fields: dict[str, str]) -> str | None:
     sections = [job_data.get("ExternalDescriptionStr")]
     if job_data.get("ExternalResponsibilitiesStr"):
         sections.append("<h3>Responsibilities</h3>" + job_data["ExternalResponsibilitiesStr"])
@@ -254,6 +286,26 @@ def _description_of(job_data: dict[str, Any]) -> str | None:
         sections.append("<h3>Qualifications</h3>" + job_data["ExternalQualificationsStr"])
     if job_data.get("CorporateDescriptionStr"):
         sections.append("<h3>About Us</h3>" + job_data["CorporateDescriptionStr"])
+
+    # Category and the posting's application deadline are standard fields
+    # on every tenant (not flex fields) but, like the flex fields above,
+    # have nowhere else to go in ScanResult's fixed schema — Oracle's own
+    # "Job Info" panel shows both alongside the tenant-configured ones.
+    info: dict[str, str] = {}
+    category = job_data.get("Category")
+    if isinstance(category, str) and category.strip():
+        info["Job Category"] = category.strip()
+    apply_before = job_data.get("ExternalPostedEndDate")
+    if isinstance(apply_before, str):
+        try:
+            info["Apply Before"] = date.fromisoformat(apply_before[:10]).isoformat()
+        except ValueError:
+            pass
+    info.update(flex_fields)
+    if info:
+        items = "".join(f"<li><strong>{prompt}:</strong> {value}</li>" for prompt, value in info.items())
+        sections.append(f"<h3>Additional Information</h3><ul>{items}</ul>")
+
     html = "".join(s for s in sections if isinstance(s, str) and s.strip())
     return html_to_formatted_text(html) if html else None
 
@@ -263,13 +315,19 @@ def extract(url: str, _html: str) -> ExtractedJobFields | None:
     if job_data is None:
         return None
     title = job_data.get("Title")
+    flex_fields = _flex_fields_of(job_data)
+    salary_min, salary_max, salary_currency = _salary_of(flex_fields)
     return ExtractedJobFields(
         title=title if isinstance(title, str) else None,
-        description=_description_of(job_data),
+        description=_description_of(job_data, flex_fields),
         location=_location_of(job_data),
         workplace_type=_workplace_type_of(job_data),
         employment_type=_employment_type_of(job_data),
+        salary_min=salary_min,
+        salary_max=salary_max,
+        salary_currency=salary_currency,
         posted_at=_posted_at_of(job_data),
+        extracted_fields=flex_fields or None,
     )
 
 
@@ -286,7 +344,10 @@ def scan_job_url(url: str) -> ScanResult | None:
     description = (
         (fields.description if fields else None) or base.fallback_description(html) or base.og_description(html)
     )
-    salary_min, salary_max, salary_currency = base.salary_from_text(description)
+    if fields and fields.salary_min is not None:
+        salary_min, salary_max, salary_currency = fields.salary_min, fields.salary_max, fields.salary_currency
+    else:
+        salary_min, salary_max, salary_currency = base.salary_from_text(description)
     return ScanResult(
         success=True,
         title=(fields.title if fields else None) or base.og_title(html) or base.fallback_title(html),
@@ -299,6 +360,7 @@ def scan_job_url(url: str) -> ScanResult | None:
         salary_max=salary_max,
         salary_currency=salary_currency,
         posted_at=fields.posted_at if fields else None,
+        extracted_fields=fields.extracted_fields if fields else None,
         raw_html_excerpt=html[:20_000],
         full_html=html,
     )

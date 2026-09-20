@@ -82,6 +82,51 @@ def test_employment_type_of_unmapped_schedule_is_unknown():
     assert oracle_fusion._employment_type_of({"JobSchedule": "Contingent"}) == "unknown"
 
 
+def test_extract_pulls_salary_and_flex_fields_from_requisition_flex_fields(monkeypatch):
+    def fake_get(url, params, timeout):
+        return FakeResponse(json_data={"items": [{
+            "Title": "Team Leader",
+            "PrimaryLocation": "Seattle, WA, United States",
+            "Category": "Travel Services",
+            "ExternalPostedEndDate": "2026-09-26T04:00:00+00:00",
+            "ExternalDescriptionStr": "<p>Lead the lounge team.</p>",
+            "requisitionFlexFields": [
+                {"Prompt": "Salary Range", "Value": "$65,500 - $81,000 annually + bonus + benefits"},
+                {"Prompt": "Career Area", "Value": "Customer Service and Travel"},
+            ],
+        }]})
+
+    monkeypatch.setattr(oracle_fusion.httpx, "get", fake_get)
+    url = "https://example.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/12345"
+    result = oracle_fusion.extract(url, "<html></html>")
+    assert (result.salary_min, result.salary_max, result.salary_currency) == (65500, 81000, "USD")
+    assert result.extracted_fields == {
+        "Salary Range": "$65,500 - $81,000 annually + bonus + benefits",
+        "Career Area": "Customer Service and Travel",
+    }
+    assert "Salary Range" in result.description
+    assert "Career Area" in result.description
+    assert "Job Category" in result.description
+    assert "Travel Services" in result.description
+    assert "Apply Before" in result.description
+    assert "2026-09-26" in result.description
+
+
+def test_flex_fields_of_ignores_malformed_entries():
+    job_data = {"requisitionFlexFields": [
+        {"Prompt": "  Career Area  ", "Value": "  Engineering  "},
+        {"Prompt": "", "Value": "ignored"},
+        {"Prompt": "No Value"},
+        "not-a-dict",
+    ]}
+    assert oracle_fusion._flex_fields_of(job_data) == {"Career Area": "Engineering"}
+
+
+def test_salary_of_returns_none_without_a_salary_looking_prompt():
+    flex_fields = {"Career Area": "Engineering"}
+    assert oracle_fusion._salary_of(flex_fields) == (None, None, None)
+
+
 def test_resolve_vanity_domain_follows_redirect_and_reads_embedded_host(monkeypatch):
     # Amex-shaped: careers.<company>.com/en/sites/{site}/jobs/preview/{id}
     # redirects to its own .../job/{id} page, which embeds the real
