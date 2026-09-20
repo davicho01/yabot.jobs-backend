@@ -22,6 +22,7 @@ from app.db.session import SessionLocal
 from app.models.crawl_source import CrawlSource
 from app.models.enums import CrawlSourceStatus
 from app.services.crawl_queue import enqueue_crawl, ensure_topic_and_subscription
+from app.services.jobs import wake_sources_with_pending_scans
 
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -41,6 +42,17 @@ def main() -> None:
                 logger.info("Enqueued crawl for %s (%s: %s)", source.name, source.ats_type, source.board_url)
             except Exception:
                 logger.exception("Failed to enqueue crawl for %s; skipping.", source.name)
+
+        # Safety net for per-source scan throttling: a crawl wakes its own
+        # scan lanes, but a lost wake-up or a lane that died mid-drain would
+        # otherwise strand PENDING URLs until that source next discovers
+        # something new. Also drains anything left over from before
+        # throttling shipped.
+        try:
+            woken = wake_sources_with_pending_scans(db)
+            logger.info("Woke scan lanes for %d source(s) with pending URLs.", woken)
+        except Exception:
+            logger.exception("Sweep for pending scans failed.")
     finally:
         db.close()
 

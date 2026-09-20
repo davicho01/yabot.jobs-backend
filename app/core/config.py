@@ -46,6 +46,17 @@ class Settings(BaseSettings):
     pubsub_crawl_topic_id: str = "crawl-source-requests"
     pubsub_crawl_subscription_id: str = "crawl-source-requests-worker"
 
+    # Per-source scan throttling (see app.services.scan_claims and
+    # app.services.jobs.run_source_lane). A lane pauses this long after each
+    # page fetch so a source never sees back-to-back requests, stops taking
+    # new work after the deadline (re-queueing itself so other sources get
+    # the instance), and a claim older than the TTL is treated as abandoned
+    # by a crashed lane — keep it above the scan function's 540s timeout so
+    # a live scan is never mistaken for a dead one.
+    scan_min_interval_seconds: float = 1.0
+    scan_lane_deadline_seconds: float = 240.0
+    scan_claim_ttl_seconds: float = 600.0
+
     # S3-compatible object storage for uploaded resumes / generated tailored
     # resume files. Point resume_storage_endpoint_url at a local MinIO (see
     # docker-compose.yml) for dev, or leave it unset to use real AWS S3.

@@ -5,9 +5,12 @@ for each, lists every current job URL for that company's board (via the
 ATS's own public API — see app.services.ats_adapters) and hands each one to
 the normal get_or_create_job_posting flow, passing crawl_source_id so it
 skips board (re-)registration — that only happens for genuinely
-user-submitted URLs, see get_or_create_job_posting. Genuinely new URLs get
-queued onto the *existing* job-scan topic and picked up by worker.py;
-already-known ones are a no-op.
+user-submitted URLs, see get_or_create_job_posting. Genuinely new URLs are
+left PENDING, and once the whole board has been recorded this worker wakes
+that source's throttled scan lanes on the *existing* job-scan topic (see
+app.services.scan_claims / worker.py) — never one message per URL, so a site
+is only ever fetched from CrawlSource.max_concurrent_scans pages at a time.
+Already-known URLs are a no-op.
 
 Run multiple instances of this process to crawl many companies in parallel —
 it's a normal Pub/Sub pull subscription, so messages are split across
@@ -36,7 +39,9 @@ from app.db.session import SessionLocal
 from app.models.crawl_source import CrawlSource
 from app.services.ats_adapters import list_job_urls
 from app.services.crawl_queue import ensure_topic_and_subscription, subscriber_client, subscription_path
+from app.services.job_queue import enqueue_source_scan
 from app.services.jobs import get_or_create_job_posting
+from app.services.scan_claims import has_unclaimed_pending
 
 logging.basicConfig(level=logging.INFO)
 # httpx logs the full request URL (including query params) at INFO level —
@@ -64,10 +69,19 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
         source.last_crawled_at = datetime.now(timezone.utc)
         return
 
+    # Read up front: get_or_create_job_posting commits per URL, and the
+    # rollback in the failure path below expires every loaded attribute.
+    source_id, source_name, lanes = source.id, source.name, source.max_concurrent_scans
+
     failed = 0
     for url in urls:
         try:
-            get_or_create_job_posting(db, url, submitted_by_user_id=None, crawl_source_id=source.id)
+            # enqueue=False: new URLs stay PENDING and are scanned by this
+            # source's throttled lanes, woken once below — not by up to 500
+            # independent messages that any worker could grab at the same time.
+            get_or_create_job_posting(
+                db, url, submitted_by_user_id=None, crawl_source_id=source_id, enqueue=False
+            )
         except Exception as exc:
             # One bad URL (malformed link, a transient publish failure, ...)
             # used to propagate out of this function and skip the
@@ -79,11 +93,31 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
             # keep going.
             db.rollback()
             failed += 1
-            logger.warning("Failed to process discovered URL %s for %s: %s", url, source.name, exc)
+            logger.warning("Failed to process discovered URL %s for %s: %s", url, source_name, exc)
 
+    source = db.get(CrawlSource, source_id)
+    if source is None:  # deleted while this crawl was running
+        return
     source.last_crawled_at = datetime.now(timezone.utc)
     source.last_error = f"{failed} of {len(urls)} discovered URL(s) failed to process." if failed else None
-    logger.info("Crawled %s: %d job URL(s) discovered (%d failed).", source.name, len(urls), failed)
+    db.commit()  # stats persisted before waking lanes (has_unclaimed_pending ends its transaction)
+    logger.info("Crawled %s: %d job URL(s) discovered (%d failed).", source_name, len(urls), failed)
+
+    _wake_source_lanes(db, source_id, source_name, lanes)
+
+
+def _wake_source_lanes(db: Session, source_id: uuid.UUID, source_name: str, lanes: int) -> None:
+    """Start up to `lanes` throttled scan lanes for this source if it has
+    anything left to scan. A publish failure is logged, not raised: the URLs
+    are already safely PENDING, and crawl_dispatcher's periodic sweep wakes
+    any source that still has pending work — nacking here would just re-crawl
+    the whole board for nothing."""
+    try:
+        if has_unclaimed_pending(db, source_id):
+            enqueue_source_scan(source_id, lanes=lanes)
+            logger.info("Woke %d scan lane(s) for %s.", lanes, source_name)
+    except Exception:
+        logger.exception("Failed to wake scan lanes for %s; the dispatcher sweep will retry.", source_name)
 
 
 def _handle_message(message: pubsub_v1.subscriber.message.Message) -> None:

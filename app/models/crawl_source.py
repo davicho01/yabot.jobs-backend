@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, String, Text
+from sqlalchemy import CheckConstraint, DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 from app.models.enums import CrawlSourceStatus
 from app.models.mixins import TimestampMixin, UUIDPrimaryKeyMixin
+
+DEFAULT_MAX_CONCURRENT_SCANS = 3
+MIN_CONCURRENT_SCANS = 1
+MAX_CONCURRENT_SCANS = 5
 
 
 class CrawlSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -37,7 +41,13 @@ class CrawlSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """
 
     __tablename__ = "crawl_sources"
-    __table_args__ = (Index("uq_crawl_sources_board_url", "board_url", unique=True),)
+    __table_args__ = (
+        Index("uq_crawl_sources_board_url", "board_url", unique=True),
+        CheckConstraint(
+            f"max_concurrent_scans BETWEEN {MIN_CONCURRENT_SCANS} AND {MAX_CONCURRENT_SCANS}",
+            name="max_concurrent_scans_range",
+        ),
+    )
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     ats_type: Mapped[str | None] = mapped_column(String(20))
@@ -45,6 +55,15 @@ class CrawlSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(20), default=CrawlSourceStatus.ACTIVE, nullable=False)
     last_crawled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
+    # Politeness cap: how many of this source's job pages may be fetched at
+    # the same time (see app.services.scan_claims). Lower it for a site that
+    # is sensitive to load, raise it (max 5) for one that can take more.
+    max_concurrent_scans: Mapped[int] = mapped_column(
+        Integer,
+        default=DEFAULT_MAX_CONCURRENT_SCANS,
+        server_default=str(DEFAULT_MAX_CONCURRENT_SCANS),
+        nullable=False,
+    )
 
     def __repr__(self) -> str:
         return f"<CrawlSource name={self.name!r} ats_type={self.ats_type!r} board_url={self.board_url!r} status={self.status!r}>"

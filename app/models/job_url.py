@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -27,6 +27,16 @@ class JobPostingUrl(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """
 
     __tablename__ = "job_posting_urls"
+    __table_args__ = (
+        # Serves app.services.scan_claims: "how many of this source's pending
+        # rows are currently claimed?" and "next unclaimed pending row".
+        Index(
+            "ix_job_posting_urls_source_pending",
+            "crawl_source_id",
+            "scan_claimed_at",
+            postgresql_where=text("scan_status = 'pending'"),
+        ),
+    )
 
     # Original URL as submitted, kept for display/debugging.
     url: Mapped[str] = mapped_column(Text, nullable=False)
@@ -43,6 +53,10 @@ class JobPostingUrl(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     scan_error: Mapped[str | None] = mapped_column(Text)
     last_scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set while a source lane is fetching this URL (scan_status stays
+    # "pending" until it finishes). A claim older than the TTL is treated as
+    # abandoned by a crashed lane — see app.services.scan_claims.
+    scan_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Attribution only ("who first brought this URL in") — not ownership.
     # The URL and its scraped postings are shared app-wide.

@@ -6,6 +6,12 @@ immediately (see app.api.routes.jobs); this process consumes those requests
 and does the actual fetch/extract/store work, which can take well over a
 minute per URL (page fetch + optional browser-render fallback + LLM extraction).
 
+Two kinds of message arrive on the topic (see app.services.jobs.parse_scan_message):
+a per-URL request for a user-submitted URL, scanned directly; and a per-source
+wake-up, which starts a "lane" that scans that crawl source's pending URLs one
+at a time, at most CrawlSource.max_concurrent_scans across all lanes, so no
+site is overwhelmed (see app.services.scan_claims).
+
 Local dev: point at the Pub/Sub emulator (see docker-compose.yml) by setting
 PUBSUB_EMULATOR_HOST=localhost:8085 before running this. Production: point at
 a real GCP project via GCP_PROJECT_ID + GOOGLE_APPLICATION_CREDENTIALS (or
@@ -15,16 +21,14 @@ Usage: python worker.py
 """
 
 import base64
-import json
 import logging
-import uuid
 
 from google.cloud import pubsub_v1
 
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.services.job_queue import ensure_topic_and_subscription, subscriber_client, subscription_path
-from app.services.jobs import process_scan_job
+from app.services.jobs import parse_scan_message, process_scan_message
 
 logging.basicConfig(level=logging.INFO)
 # httpx logs the full request URL at INFO level on every call — noisy given
@@ -41,23 +45,22 @@ _MAX_CONCURRENT_MESSAGES = 10
 def _handle_message(message: pubsub_v1.subscriber.message.Message) -> None:
     logger.info("Received message %s (%d bytes)", message.message_id, len(message.data))
     try:
-        payload = json.loads(message.data.decode("utf-8"))
-        url_id = uuid.UUID(payload["url_id"])
-    except (json.JSONDecodeError, KeyError, ValueError) as exc:
+        kind, target_id = parse_scan_message(message.data)
+    except ValueError as exc:
         logger.error("Malformed scan message %s, dropping: %s", message.message_id, exc)
         message.ack()  # not retryable — the payload will never become valid
         return
 
-    logger.info("Processing scan job for url_id=%s (message %s)", url_id, message.message_id)
+    logger.info("Processing scan message %s=%s (message %s)", kind, target_id, message.message_id)
     db = SessionLocal()
     try:
-        process_scan_job(db, url_id)
+        process_scan_message(db, kind, target_id)
         db.commit()
         message.ack()
-        logger.info("Finished scan job for url_id=%s (message %s)", url_id, message.message_id)
+        logger.info("Finished scan message %s=%s (message %s)", kind, target_id, message.message_id)
     except Exception:
         db.rollback()
-        logger.exception("Scan job for url_id=%s failed unexpectedly; will retry.", url_id)
+        logger.exception("Scan message %s=%s failed unexpectedly; will retry.", kind, target_id)
         message.nack()
     finally:
         db.close()
@@ -99,21 +102,20 @@ def handle_scan_request(event, context) -> None:
     """
     data = base64.b64decode(event["data"])
     try:
-        payload = json.loads(data.decode("utf-8"))
-        url_id = uuid.UUID(payload["url_id"])
-    except (json.JSONDecodeError, KeyError, ValueError) as exc:
+        kind, target_id = parse_scan_message(data)
+    except ValueError as exc:
         logger.error("Malformed scan message, dropping: %s", exc)
         return  # not retryable — returning normally acks the message
 
-    logger.info("Processing scan job for url_id=%s", url_id)
+    logger.info("Processing scan message %s=%s", kind, target_id)
     db = SessionLocal()
     try:
-        process_scan_job(db, url_id)
+        process_scan_message(db, kind, target_id)
         db.commit()
-        logger.info("Finished scan job for url_id=%s", url_id)
+        logger.info("Finished scan message %s=%s", kind, target_id)
     except Exception:
         db.rollback()
-        logger.exception("Scan job for url_id=%s failed unexpectedly; will retry.", url_id)
+        logger.exception("Scan message %s=%s failed unexpectedly; will retry.", kind, target_id)
         raise  # re-raise so the Pub/Sub trigger retries the event
     finally:
         db.close()

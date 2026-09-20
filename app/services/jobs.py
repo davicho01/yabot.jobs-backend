@@ -1,4 +1,6 @@
+import json
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -12,9 +14,10 @@ from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
 from app.services.crawl_sources import register_discovered_board
 from app.services.job_llm_extractor import LlmExtraction, extract_with_llm, html_to_text
-from app.services.job_queue import enqueue_scan
+from app.services.job_queue import enqueue_scan, enqueue_source_scan
 from app.services.job_scanner import ScanResult, domain_of, normalize_url, scan_job_url, url_hash
 from app.services.llm_client import LlmError
+from app.services.scan_claims import claim_next_url, has_unclaimed_pending, sources_with_pending_scans
 from app.schemas.job import JobDetailRead
 
 logger = logging.getLogger("app.jobs")
@@ -30,6 +33,7 @@ def get_or_create_job_posting(
     raw_url: str,
     submitted_by_user_id: uuid.UUID | None,
     crawl_source_id: uuid.UUID | None = None,
+    enqueue: bool = True,
 ) -> tuple[JobPosting, JobPostingUrl]:
     """Resolve a submitted URL to a (shared, app-wide) JobPosting.
 
@@ -40,6 +44,12 @@ def get_or_create_job_posting(
     fetching a page plus an LLM call can take well over a minute, far too
     long to hold open inside a request. Callers distinguish "queued" from
     "actually scanned" via posting.extraction_status, not via None.
+
+    enqueue=False leaves the new row PENDING without publishing a per-URL
+    scan message. The crawl worker uses it: a crawl-sourced URL is scanned by
+    that source's throttled lanes (see run_source_lane), which the crawler
+    wakes once after it has recorded every URL, instead of publishing
+    hundreds of independent messages at once.
     """
     normalized = normalize_url(raw_url)
     hashed = url_hash(normalized)
@@ -67,7 +77,8 @@ def get_or_create_job_posting(
         # emulator's low latency; see requeue_pending_scans.py for the
         # blunter recovery this replaces for the common case).
         db.commit()
-        enqueue_scan(url_row.id)
+        if enqueue:
+            enqueue_scan(url_row.id)
         return posting, url_row
 
     posting = db.scalar(select(JobPosting).where(JobPosting.url_id == url_row.id))
@@ -154,13 +165,125 @@ def process_scan_job(db: Session, url_id: uuid.UUID) -> None:
         if source is not None:
             url_row.crawl_source_id = source.id
 
-    result = scan_job_url(url_row.url)
+    _apply_scan_result(db, url_row, scan_job_url(url_row.url))
+
+
+def _apply_scan_result(db: Session, url_row: JobPostingUrl, result: ScanResult) -> None:
     now = datetime.now(timezone.utc)
     url_row.scan_status = ScanStatus.SUCCESS if result.success else ScanStatus.FAILED
     url_row.scan_error = result.error
     url_row.last_scanned_at = now
+    url_row.scan_claimed_at = None
     _upsert_posting(db, url_row, result, now)
     db.flush()
+
+
+def run_source_lane(db: Session, source_id: uuid.UUID) -> int:
+    """Worker-side entry point for a "drain this source" wake-up: scan the
+    source's pending URLs one at a time until none are left, this source is
+    at its concurrency cap, or the lane's time budget is spent. Returns how
+    many URLs this lane scanned.
+
+    Several lanes may run for the same source at once (one per wake-up); the
+    cap on how many actually fetch concurrently is enforced by
+    claim_next_url, so a lane that finds the source already full just exits.
+    Each URL is claimed (and the claim committed) *before* the fetch, and
+    its result stored after — no transaction is open during the network
+    call, so a slow site doesn't pin a DB connection or a row lock.
+
+    A pause of scan_min_interval_seconds follows every fetch so a lane never
+    sends a source back-to-back requests. When the time budget runs out with
+    work left, the lane publishes a fresh wake-up and exits, letting other
+    sources have the instance instead of one big board monopolising it.
+    """
+    deadline = time.monotonic() + settings.scan_lane_deadline_seconds
+    scanned = 0
+
+    while True:
+        claimed = claim_next_url(db, source_id)
+        if claimed is None:
+            break
+
+        try:
+            result = scan_job_url(claimed.url)
+        except Exception as exc:
+            # One page that blows up must not stall the rest of the source
+            # (or, left PENDING, be reclaimed and blow up again after the
+            # TTL forever). Record it like any other failed scan — it can be
+            # retried from the admin rescan.
+            logger.exception("Scan of %s (url_id=%s) raised; marking failed.", claimed.url, claimed.id)
+            result = ScanResult(success=False, error=f"Scan raised {type(exc).__name__}: {exc}")
+
+        url_row = db.get(JobPostingUrl, claimed.id, with_for_update=True)
+        # Already finished by someone else (a stale-claim reclaim racing a
+        # slow lane, say) — keep that result rather than overwrite it.
+        if url_row is not None and url_row.scan_status == ScanStatus.PENDING:
+            _apply_scan_result(db, url_row, result)
+        db.commit()
+        scanned += 1
+
+        if time.monotonic() >= deadline:
+            if has_unclaimed_pending(db, source_id):
+                enqueue_source_scan(source_id)
+            break
+        time.sleep(settings.scan_min_interval_seconds)
+
+    logger.info("Lane for source_id=%s scanned %d URL(s).", source_id, scanned)
+    return scanned
+
+
+def wake_sources_with_pending_scans(db: Session) -> int:
+    """Safety-net sweep: publish wake-ups (one per allowed lane) for every
+    source that still has PENDING URLs, so work whose original wake-up was
+    lost, whose lane died mid-drain, or that was stranded by the old
+    per-URL queue doesn't sit forever. Sources already at their cap just
+    have the extra lanes exit immediately. Returns how many sources were
+    woken; a failure for one source is logged and skipped.
+    """
+    woken = 0
+    for source_id, lanes in sources_with_pending_scans(db):
+        try:
+            enqueue_source_scan(source_id, lanes=lanes)
+            woken += 1
+        except Exception:
+            logger.exception("Failed to wake scan lanes for source_id=%s; skipping.", source_id)
+    return woken
+
+
+def parse_scan_message(data: bytes) -> tuple[str, uuid.UUID]:
+    """Decode a job-scan-requests payload into ("source", source_id) — a
+    wake-up asking for a source's lane — or ("url", url_id), the original
+    one-message-per-URL form (still published for user submissions, and
+    possibly still sitting in the queue for crawl-sourced URLs from before
+    per-source throttling). Raises ValueError if it's neither.
+    """
+    try:
+        payload = json.loads(data.decode("utf-8"))
+        if "source_id" in payload:
+            return "source", uuid.UUID(payload["source_id"])
+        return "url", uuid.UUID(payload["url_id"])
+    except (KeyError, TypeError, AttributeError) as exc:
+        raise ValueError(f"unrecognised scan message: {exc!r}") from exc
+
+
+def process_scan_message(db: Session, kind: str, target_id: uuid.UUID) -> None:
+    """Route a parsed scan message (see parse_scan_message).
+
+    A per-URL message for a crawl-sourced URL is treated as a wake-up for
+    that URL's source rather than scanned directly, so any such messages
+    already queued when throttling shipped drain through the per-source cap
+    too. Only URLs with no source (user submissions) are scanned on their
+    own, unthrottled — that's low-volume, interactive traffic.
+    """
+    if kind == "url":
+        source_id = db.scalar(select(JobPostingUrl.crawl_source_id).where(JobPostingUrl.id == target_id))
+        db.rollback()  # read-only lookup; don't hold a connection open
+        if source_id is None:
+            process_scan_job(db, target_id)
+            return
+        target_id = source_id
+
+    run_source_lane(db, target_id)
 
 
 def rescan_job_url(db: Session, url_row: JobPostingUrl) -> JobPostingUrl:

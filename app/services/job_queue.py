@@ -76,6 +76,21 @@ def enqueue_scan(url_id: uuid.UUID) -> None:
     future.result(timeout=10)
 
 
+def enqueue_source_scan(source_id: uuid.UUID, lanes: int = 1) -> None:
+    """Publish `lanes` wake-ups asking the scan worker to drain a
+    CrawlSource's pending URLs (see app.services.jobs.run_source_lane).
+
+    Each message starts at most one lane, and a lane only proceeds while the
+    source is under its max_concurrent_scans cap (enforced in Postgres, see
+    app.services.scan_claims) — so publishing more wake-ups than the cap, or
+    duplicates, is harmless: the extras find nothing to claim and exit.
+    """
+    payload = json.dumps({"source_id": str(source_id)}).encode("utf-8")
+    futures = [_get_publisher().publish(_topic_path(), data=payload) for _ in range(lanes)]
+    for future in futures:
+        future.result(timeout=10)
+
+
 def subscription_path() -> str:
     return _subscription_path()
 

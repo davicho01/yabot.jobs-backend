@@ -14,7 +14,7 @@ from app.schemas.crawl_source import CrawlSourceCreate, CrawlSourceRead, CrawlSo
 from app.services import admin as admin_service
 from app.services.ats_adapters import detect_ats_source, detect_embedded_ats_source
 from app.services.crawl_queue import enqueue_crawl, ensure_topic_and_subscription
-from app.services.job_queue import enqueue_scan
+from app.services.job_queue import enqueue_source_scan
 from app.services.job_queue import ensure_topic_and_subscription as ensure_scan_topic_and_subscription
 
 router = APIRouter(prefix="/admin/crawl-sources", tags=["admin"], dependencies=[Depends(get_current_admin_user)])
@@ -117,10 +117,11 @@ def rescan_crawl_source(source_id: uuid.UUID, db: Session = Depends(get_db)) -> 
     scanned postings pick up the fix immediately instead of only refreshing
     the next time each one happens to be re-crawled.
 
-    Resets each row to PENDING before publishing: process_scan_job (the
-    same handler a fresh submission's scan request hits) no-ops on a
-    non-PENDING url_row, so leaving scan_status at SUCCESS/FAILED would make
-    the worker just skip every message this enqueues.
+    Resets each row to PENDING before publishing: a scan lane only claims
+    PENDING rows, so leaving scan_status at SUCCESS/FAILED would make it
+    find nothing to do. The response's `queued` is the number of URLs reset;
+    they're worked through at the source's max_concurrent_scans pace, not
+    all at once.
     """
     source = db.get(CrawlSource, source_id)
     if source is None:
@@ -133,11 +134,13 @@ def rescan_crawl_source(source_id: uuid.UUID, db: Session = Depends(get_db)) -> 
     for url_row in url_rows:
         url_row.scan_status = ScanStatus.PENDING
         url_row.scan_error = None
+        url_row.scan_claimed_at = None
     db.commit()  # committed, not just flushed — the worker reads url_row on a separate connection
 
+    # One wake-up per allowed lane, not one message per URL: the source's
+    # lanes work through the rows at its max_concurrent_scans pace.
     ensure_scan_topic_and_subscription()
-    for url_row in url_rows:
-        enqueue_scan(url_row.id)
+    enqueue_source_scan(source_id, lanes=source.max_concurrent_scans)
 
     return {"queued": len(url_rows)}
 
