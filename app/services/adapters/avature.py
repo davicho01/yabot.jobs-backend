@@ -3,13 +3,23 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from app.models.enums import AtsType
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry
+from app.models.enums import AtsType, EmploymentType, WorkplaceType
+from app.services.adapters import base
+from app.services.adapters.base import (
+    DEFAULT_MAX_JOBS_PER_CRAWL,
+    TIMEOUT,
+    AtsAdapter,
+    ExtractedJobFields,
+    ScanResult,
+    get_with_retry,
+)
+from app.services.adapters.text import clean_text, html_to_formatted_text
 from app.services.browser_fetch import fetch_rendered_page
 
 _AVATURE_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _AVATURE_URL_RE = re.compile(r"([a-zA-Z0-9-]+\.avature\.net)", re.IGNORECASE)
 _JOB_LINK_RE = re.compile(r'href="(https?://[^"?]+/careers/JobDetail/[^"?]+)', re.IGNORECASE)
+_JOB_DETAIL_URL_RE = re.compile(r"/careers/JobDetail/", re.IGNORECASE)
 _DEFAULT_PAGE_SIZE = 6  # observed tenant-configured default (verified: Synopsys)
 # Some tenants white-label Avature entirely onto their own domain with no
 # *.avature.net hop anywhere in the page (verified live: careers.lululemon.com)
@@ -19,6 +29,24 @@ _DEFAULT_PAGE_SIZE = 6  # observed tenant-configured default (verified: Synopsys
 # collide with another platform, and the existing /careers/JobDetail/
 # path + SearchJobs pagination works unmodified on the company's own host.
 _AVATURE_META_SIGNATURE = 'name="avature.portal'
+
+# Avature's own schema.org JobPosting JSON-LD only carries the page's first
+# content section (verified live: delta.avature.net) - "description" cuts
+# off right after the Overview/Responsibilities section, silently dropping
+# Benefits, Minimum Qualifications, and Preferred Qualifications entirely,
+# and jobLocation's address is emitted empty (addressLocality: ""). The real
+# content for both lives only in the rendered page's own template, not in
+# any structured field: each section is a separate
+# <article class="article--details"> under .description-ajax, with an
+# <h2-4 class="article__header__text__title"> heading, and the location
+# sits in a `<i class="fa fa-globe">` + `<strong>` pair in the page header.
+# Parsed from the raw HTML by tag shape (verified live) rather than a full
+# HTML parser, consistent with every other adapter in this file.
+_AVATURE_ARTICLE_RE = re.compile(r"<article[^>]*\barticle--details\b[^>]*>(.*?)</article>", re.IGNORECASE | re.DOTALL)
+_AVATURE_HEADING_RE = re.compile(r"<h[2-4][^>]*>(.*?)</h[2-4]>", re.IGNORECASE | re.DOTALL)
+_AVATURE_LOCATION_RE = re.compile(
+    r'<i[^>]*\bfa-globe\b[^>]*>.*?<strong>(.*?)</strong>', re.IGNORECASE | re.DOTALL
+)
 
 
 def _match(url: str) -> str | None:
@@ -95,6 +123,69 @@ def _fetch_jobs(host: str) -> list[str]:
     return urls[:_AVATURE_MAX_JOBS]
 
 
+def extract(html: str) -> ExtractedJobFields:
+    """Pull location and the *complete* description straight from the
+    rendered page's own template - see the module comment on
+    _AVATURE_ARTICLE_RE for why Avature's JSON-LD can't be trusted for
+    either field.
+    """
+    location_match = _AVATURE_LOCATION_RE.search(html)
+    location = clean_text(location_match.group(1)) if location_match else None
+
+    sections = []
+    for article_html in _AVATURE_ARTICLE_RE.findall(html):
+        heading_match = _AVATURE_HEADING_RE.search(article_html)
+        if heading_match is None:
+            continue  # the location/department/date/ref# header has no heading - not a content section
+        heading = clean_text(heading_match.group(1))
+        body = html_to_formatted_text(article_html[heading_match.end() :])
+        sections.append(f"## {heading}\n\n{body}" if body else f"## {heading}")
+
+    return ExtractedJobFields(location=location, description="\n\n".join(sections) or None)
+
+
+def scan_job_url(url: str) -> ScanResult | None:
+    if not _JOB_DETAIL_URL_RE.search(url):
+        return None
+    html = _fetch_page_html(url)
+    if html is None:
+        return ScanResult(success=False, error=f"Failed to fetch {url}: direct fetch and browser render both failed")
+    if _AVATURE_META_SIGNATURE not in html:
+        return None  # URL path shape was a coincidence; not actually Avature.
+
+    job_postings = base.extract_json_ld_postings(html)
+    job_ld = job_postings[0] if job_postings else None
+    fields = extract(html)
+
+    title = (job_ld.get("title") if job_ld else None) or base.og_title(html) or base.fallback_title(html)
+    hiring_org = job_ld.get("hiringOrganization") if job_ld else None
+    company_name = clean_text(hiring_org.get("name")) if isinstance(hiring_org, dict) else base.og_site_name(html)
+    description = fields.description or base.fallback_description(html) or base.og_description(html)
+
+    salary_min, salary_max, salary_currency = base.job_ld_salary(job_ld) if job_ld else (None, None, None)
+    if salary_min is None and salary_max is None:
+        text_min, text_max, text_currency = base.salary_from_text(description)
+        if text_min is not None:
+            salary_min, salary_max = text_min, text_max
+            salary_currency = text_currency or salary_currency
+
+    return ScanResult(
+        success=True,
+        title=clean_text(title),
+        description=description,
+        company_name=company_name,
+        location=fields.location,
+        workplace_type=WorkplaceType.UNKNOWN,
+        employment_type=base.job_ld_employment_type(job_ld) if job_ld else EmploymentType.UNKNOWN,
+        salary_min=salary_min,
+        salary_max=salary_max,
+        salary_currency=salary_currency,
+        posted_at=base.job_ld_posted_at(job_ld) if job_ld else None,
+        raw_html_excerpt=html[:20_000],
+        full_html=html,
+    )
+
+
 # No to_board_url — Avature has no single shared host to canonicalize to
 # beyond the tenant subdomain already in the submitted URL; board_url is
 # stored verbatim, same reasoning as every other white-label-style adapter
@@ -105,4 +196,5 @@ ADAPTER = AtsAdapter(
     fetch_jobs=_fetch_jobs,
     board_key=_board_key,
     embedded_match=_detect_embedded,
+    scan_job_url=scan_job_url,
 )
