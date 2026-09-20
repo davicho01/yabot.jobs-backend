@@ -1,0 +1,129 @@
+"""Individual-location handling for postings that list several locations.
+
+`JobPosting.location` is a single display string; when a posting lists more
+than one location the adapters join them with "; " (and the odd source packs
+them straight into og:description with "|"). `JobPosting.locations` is the
+list parsed back out of that string at scan time (see _upsert_posting), and
+is what location filtering and the search-box suggestions match against — so
+picking "Seattle, WA" finds every posting that lists it, wherever in a long
+multi-location string it sits.
+"""
+
+import re
+import time
+from collections.abc import Sequence
+
+from sqlalchemy import ColumnElement, func, select
+from sqlalchemy.orm import Session
+
+from app.models.job_posting import JobPosting
+
+# ";" is what adapters join locations with. "|" is used both as a
+# place|workplace-tag delimiter ("Arizona | Remote") and, by some sources, as
+# a location separator ("Remote-Friendly | San Francisco, CA | Washington,
+# DC") — splitting on it and then dropping the bare tag chunks handles both.
+_SEPARATOR_RE = re.compile(r"[;|]")
+
+# A chunk that is only a workplace-type label, not a place ("Remote",
+# "Hybrid", "Remote-Friendly (Travel-Required)"). "Remote - USA" or "Remote,
+# United States" are *not* bare tags and are kept.
+_BARE_TAG_RE = re.compile(r"^(remote|hybrid|on-?site|in-?office|remote-friendly)( \(.*\))?$", re.IGNORECASE | re.DOTALL)
+
+# Adapters cap `location` at the column length and end it with "..." — the
+# last chunk of such a string is a cut-off fragment, not a real place.
+_TRUNCATION_MARKER = "..."
+
+# Scraped text is untrusted — a page listing thousands of places (or one
+# enormous one) shouldn't bloat the row or the in-memory suggestion cache.
+_MAX_ENTRIES = 100
+_MAX_ENTRY_LENGTH = 255
+
+
+def split_locations(raw: str | None) -> list[str]:
+    """The individual locations in a posting's `location` string, in order,
+    de-duplicated case-insensitively.
+
+    Migration a4c9e2d7b1f6 backfills existing rows with a frozen SQL copy of
+    these rules — if they change here, new scans and old rows will disagree
+    until a follow-up migration re-derives the column.
+    """
+    if not raw:
+        return []
+    seen: set[str] = set()
+    locations: list[str] = []
+    for chunk in _SEPARATOR_RE.split(raw):
+        entry = chunk.strip()
+        if not entry or _BARE_TAG_RE.match(entry) or entry.endswith(_TRUNCATION_MARKER):
+            continue
+        key = entry.lower()
+        if key not in seen:
+            seen.add(key)
+            locations.append(entry[:_MAX_ENTRY_LENGTH])
+            if len(locations) == _MAX_ENTRIES:
+                break
+    return locations
+
+
+def location_matches(pattern: str) -> ColumnElement[bool]:
+    """WHERE-clause expression: true when any of the posting's individual
+    locations matches the (already %-wrapped) ILIKE `pattern`. Correlates to
+    JobPosting in the enclosing query.
+    """
+    entry = func.jsonb_array_elements_text(JobPosting.locations).column_valued("entry")
+    return select(entry).where(entry.ilike(pattern)).correlate(JobPosting).exists()
+
+
+def rank_locations(counts: Sequence[tuple[str, int]], q: str | None, limit: int) -> list[str]:
+    """Locations to suggest for the text typed so far: ones that start with
+    it first, then ones that merely contain it; within each group, most
+    postings first (`counts` is already ordered that way).
+    """
+    needle = (q or "").strip().lower()
+    if not needle:
+        return [name for name, _ in counts[:limit]]
+    starts_with: list[str] = []
+    contains: list[str] = []
+    for name, _ in counts:
+        lowered = name.lower()
+        if lowered.startswith(needle):
+            starts_with.append(name)
+        elif needle in lowered:
+            contains.append(name)
+    return (starts_with + contains)[:limit]
+
+
+# The distinct-location set changes slowly, and the aggregate over every
+# posting is far too heavy to run per keystroke on the small Cloud SQL
+# instance — so each API process keeps one copy for a few minutes and filters
+# it in memory. New locations from fresh scans show up after the TTL.
+_COUNTS_TTL_SECONDS = 600
+_COUNTS_MAX_ENTRIES = 5000
+_counts_cache: tuple[float, list[tuple[str, int]]] | None = None
+
+
+def clear_location_cache() -> None:
+    global _counts_cache
+    _counts_cache = None
+
+
+def _location_counts(db: Session) -> list[tuple[str, int]]:
+    global _counts_cache
+    now = time.monotonic()
+    if _counts_cache is not None and now - _counts_cache[0] < _COUNTS_TTL_SECONDS:
+        return _counts_cache[1]
+
+    entry = func.jsonb_array_elements_text(JobPosting.locations).column_valued("entry")
+    posting_count = func.count(JobPosting.id.distinct())
+    stmt = (
+        select(entry, posting_count)
+        .group_by(entry)
+        .order_by(posting_count.desc(), entry)
+        .limit(_COUNTS_MAX_ENTRIES)
+    )
+    counts = [(name, count) for name, count in db.execute(stmt).all()]
+    _counts_cache = (now, counts)
+    return counts
+
+
+def location_suggestions(db: Session, q: str | None, limit: int) -> list[str]:
+    return rank_locations(_location_counts(db), q, limit)

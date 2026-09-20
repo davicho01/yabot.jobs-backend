@@ -94,7 +94,7 @@ def _association_values(html: str, kind: str) -> list[str]:
 
 
 def _location_of(html: str) -> str | None:
-    location = ", ".join(_association_values(html, "location"))
+    location = "; ".join(_association_values(html, "location"))
     if location and len(location) > MAX_LOCATION_LENGTH:
         location = location[: MAX_LOCATION_LENGTH - 3] + "..."
     return location or None

@@ -51,7 +51,7 @@ def test_extract_fetches_requisition_details_and_maps_fields(monkeypatch):
     url = "https://example.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/12345"
     result = oracle_fusion.extract(url, "<html></html>")
     assert result.title == "Solutions Engineer"
-    assert result.location == "Austin, TX, Remote, US"
+    assert result.location == "Austin, TX; Remote, US"
     assert result.workplace_type == "remote"
     assert result.employment_type == "full_time"
     assert result.posted_at.isoformat() == "2026-02-10"

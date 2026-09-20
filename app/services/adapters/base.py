@@ -465,7 +465,7 @@ def parse_og_description(og_description_text: str) -> tuple[str | None, str]:
     parsed = [_parse_location_workplace_segment(s) for s in segments]
 
     locations = list(dict.fromkeys(loc for loc, _ in parsed if loc))  # dedupe, keep order
-    location = ", ".join(locations) or None
+    location = "; ".join(locations) or None
     if location and len(location) > _MAX_LOCATION_LENGTH:
         location = location[: _MAX_LOCATION_LENGTH - 3] + "..."
 
@@ -517,9 +517,20 @@ def extract_json_ld_postings(html: str) -> list[dict[str, Any]]:
 
 
 def job_ld_location(job_ld: dict[str, Any]) -> str | None:
+    """Every place in the posting's schema.org `jobLocation` (a single Place
+    or a list of them), each as "City, Region, Country", joined with "; " —
+    the separator downstream code splits multi-location postings on (see
+    app.services.job_locations). Capped to the location column's width."""
     job_location = job_ld.get("jobLocation")
-    if isinstance(job_location, list):
-        job_location = job_location[0] if job_location else None
+    places = job_location if isinstance(job_location, list) else [job_location]
+    texts = list(dict.fromkeys(t for t in (_job_ld_place_text(p) for p in places) if t))
+    location = "; ".join(texts) or None
+    if location and len(location) > _MAX_LOCATION_LENGTH:
+        location = location[: _MAX_LOCATION_LENGTH - 3] + "..."
+    return location
+
+
+def _job_ld_place_text(job_location: Any) -> str | None:
     if not isinstance(job_location, dict):
         return None
     address = job_location.get("address")

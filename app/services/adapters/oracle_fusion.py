@@ -216,7 +216,7 @@ def _location_of(job_data: dict[str, Any]) -> str | None:
     for loc in job_data.get("secondaryLocations") or []:
         if isinstance(loc, dict):
             names.append(loc.get("Name"))
-    location = ", ".join(dict.fromkeys(n for n in names if isinstance(n, str) and n.strip())) or None
+    location = "; ".join(dict.fromkeys(n for n in names if isinstance(n, str) and n.strip())) or None
     if location and len(location) > MAX_LOCATION_LENGTH:
         location = location[: MAX_LOCATION_LENGTH - 3] + "..."
     return location

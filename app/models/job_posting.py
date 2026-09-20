@@ -39,6 +39,11 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
     title: Mapped[str | None] = mapped_column(String(255))
     company_name: Mapped[str | None] = mapped_column(String(255))
     location: Mapped[str | None] = mapped_column(String(255))
+    # The individual locations parsed out of `location` (which adapters join
+    # with "; " when a posting lists several) — what location filtering and
+    # suggestions actually match against. Kept in sync by _upsert_posting via
+    # app.services.job_locations.split_locations; see that module for the rules.
+    locations: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     workplace_type: Mapped[str] = mapped_column(String(20), default=WorkplaceType.UNKNOWN, nullable=False)
     employment_type: Mapped[str] = mapped_column(String(20), default=EmploymentType.UNKNOWN, nullable=False)
 

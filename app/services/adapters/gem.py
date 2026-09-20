@@ -127,7 +127,7 @@ def _location_of(job: dict[str, Any]) -> str | None:
     if not isinstance(locations, list):
         return None
     names = [loc.get("name") for loc in locations if isinstance(loc, dict)]
-    location = ", ".join(dict.fromkeys(n for n in names if isinstance(n, str) and n.strip())) or None
+    location = "; ".join(dict.fromkeys(n for n in names if isinstance(n, str) and n.strip())) or None
     if location and len(location) > MAX_LOCATION_LENGTH:
         location = location[: MAX_LOCATION_LENGTH - 3] + "..."
     return location

@@ -11,6 +11,7 @@ from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
 from app.models.user import User
 from app.schemas.job import JobDetailRead, JobListRead, JobUrlSubmit
+from app.services.job_locations import location_matches, location_suggestions
 from app.services.jobs import ensure_user_applicant, get_or_create_job_posting, rescan_job_url, to_job_detail
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -56,7 +57,7 @@ def list_job_urls(
         if q:
             stmt = stmt.where(JobPosting.title.ilike(f"%{q}%"))
         if location:
-            stmt = stmt.where(JobPosting.location.ilike(f"%{location}%"))
+            stmt = stmt.where(location_matches(f"%{location}%"))
         if company:
             stmt = stmt.where(JobPosting.company_name.ilike(f"%{company}%"))
         if posted_within_days:
@@ -74,15 +75,15 @@ def list_job_urls(
 # Registered before /{url_id} so "locations" isn't swallowed by that route's
 # uuid.UUID path param (which would 422 on non-UUID path segments).
 @router.get("/locations", response_model=list[str])
-def list_job_locations(db: Session = Depends(get_db)) -> list[str]:
-    stmt = (
-        select(JobPosting.location)
-        .where(JobPosting.location.is_not(None))
-        .distinct()
-        .order_by(JobPosting.location)
-        .limit(200)
-    )
-    return list(db.scalars(stmt).all())
+def list_job_locations(
+    q: str | None = None,
+    limit: int = Query(200, ge=1, le=500),
+    db: Session = Depends(get_db),
+) -> list[str]:
+    """Individual locations across all postings (a posting listing several
+    contributes each one), most-used first. With `q`, only ones containing it,
+    those starting with it ranked first — meant to back a typeahead."""
+    return location_suggestions(db, q, limit)
 
 
 @router.get("/{url_id}", response_model=JobDetailRead)
