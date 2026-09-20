@@ -80,3 +80,76 @@ def test_workplace_type_of_unset_code_is_unknown():
 
 def test_employment_type_of_unmapped_schedule_is_unknown():
     assert oracle_fusion._employment_type_of({"JobSchedule": "Contingent"}) == "unknown"
+
+
+def test_resolve_vanity_domain_follows_redirect_and_reads_embedded_host(monkeypatch):
+    # Amex-shaped: careers.<company>.com/en/sites/{site}/jobs/preview/{id}
+    # redirects to its own .../job/{id} page, which embeds the real
+    # oraclecloud.com API host in a <base> tag.
+    url = "https://careers.example.com/en/sites/CX_1/jobs/preview/26009316"
+
+    def fake_get(requested_url, timeout, follow_redirects):
+        assert requested_url == url
+        assert follow_redirects is True
+        return FakeResponse(text='<html data-apibaseurl="https://egug.fa.us2.oraclecloud.com:443" '
+                                  'data-sitenumber="CX_1"></html>')
+
+    monkeypatch.setattr(oracle_fusion.httpx, "get", fake_get)
+    assert oracle_fusion._resolve(url) == ("egug.fa.us2.oraclecloud.com", "CX_1", "26009316")
+
+
+def test_resolve_vanity_domain_served_directly_no_redirect(monkeypatch):
+    # TI-shaped: careers.<company>.com/en/sites/{site}/job/{id} serves the
+    # SPA shell (with the embedded API host) directly, no redirect involved.
+    url = "https://careers.example.com/en/sites/CX/job/25009893"
+
+    monkeypatch.setattr(
+        oracle_fusion.httpx,
+        "get",
+        lambda *a, **k: FakeResponse(
+            text='<html data-apibaseurl="https://edbz.fa.us2.oraclecloud.com:443" data-sitenumber="CX"></html>'
+        ),
+    )
+    assert oracle_fusion._resolve(url) == ("edbz.fa.us2.oraclecloud.com", "CX", "25009893")
+
+
+def test_resolve_vanity_domain_returns_none_without_embedded_host(monkeypatch):
+    url = "https://careers.example.com/en/sites/CX_1/job/1"
+    monkeypatch.setattr(oracle_fusion.httpx, "get", lambda *a, **k: FakeResponse(text="<html></html>"))
+    assert oracle_fusion._resolve(url) is None
+
+
+def test_resolve_non_oracle_url_skips_network_entirely(monkeypatch):
+    def unexpected(*a, **k):
+        raise AssertionError("Unexpected network request")
+
+    monkeypatch.setattr(oracle_fusion.httpx, "get", unexpected)
+    assert oracle_fusion._resolve("https://example.com/jobs/1") is None
+
+
+def test_scan_job_url_claims_vanity_domain_job_url(monkeypatch):
+    url = "https://careers.example.com/en/sites/CX_1/jobs/preview/26009316"
+
+    monkeypatch.setattr(
+        oracle_fusion,
+        "_resolve",
+        lambda u: ("egug.fa.us2.oraclecloud.com", "CX_1", "26009316"),
+    )
+    monkeypatch.setattr(
+        oracle_fusion,
+        "_fetch_job_data",
+        lambda u: {
+            "Title": "Team Leader",
+            "PrimaryLocation": "Seattle, WA, United States",
+            "JobSchedule": "Full time",
+            "ExternalDescriptionStr": "<p>Lead the lounge team.</p>",
+        },
+    )
+    monkeypatch.setattr(oracle_fusion.base, "fetch_html", lambda u: type("P", (), {"text": "<html></html>"})())
+
+    result = oracle_fusion.scan_job_url(url)
+    assert result is not None
+    assert result.title == "Team Leader"
+    assert result.location == "Seattle, WA, United States"
+    assert result.employment_type == "full_time"
+    assert "Lead the lounge team." in result.description

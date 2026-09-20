@@ -131,6 +131,45 @@ _JOB_URL_RE = re.compile(
 )
 _DETAIL_URL = "https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails"
 
+# Some tenants' job-posting links (as opposed to the board root _detect_embedded
+# handles above) also live on a vanity domain instead of *.oraclecloud.com, so
+# _JOB_URL_RE alone misses them even though the site number and job id are
+# sitting right there in the path — verified live against American Express
+# (careers.americanexpress.com/en/sites/CX_1/jobs/preview/{id}, one redirect
+# hop from the canonical .../job/{id} page) and Texas Instruments
+# (careers.ti.com/en/sites/CX/job/{id}, served directly, no redirect). Host-
+# agnostic on purpose so it catches both the "job" and "jobs/preview" path
+# shapes seen in the wild.
+_JOB_PATH_RE = re.compile(r"/sites/([^/]+)/jobs?(?:/preview)?/(\d+)(?:/|$|\?)", re.IGNORECASE)
+
+
+def _resolve(url: str) -> tuple[str, str, str] | None:
+    """(host, site_number, job_id) needed for the requisition-details REST
+    call. Direct oraclecloud.com job URLs carry all three already. A vanity-
+    domain job URL doesn't carry the host, but does carry the site number
+    and job id (_JOB_PATH_RE) — the host is recovered with the same one-page
+    fetch/parse _detect_embedded above uses for board-level detection: follow
+    redirects (Amex's preview link hops to its own canonical job page) and
+    read the real API host out of the page's own <base> tag.
+    """
+    direct = _JOB_URL_RE.search(url)
+    if direct:
+        return direct.groups()
+    path_match = _JOB_PATH_RE.search(url)
+    if not path_match:
+        return None
+    site_number, job_id = path_match.groups()
+    try:
+        response = httpx.get(url, timeout=TIMEOUT, follow_redirects=True)
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return None
+    host_match = _EMBED_APIBASEURL_RE.search(response.text)
+    if not host_match:
+        return None
+    return host_match.group(1), site_number, job_id
+
+
 # JobSchedule is a free-text label ("Full time"/"Part time"), not a fixed
 # enum — only these two values have been observed on a real tenant, and
 # it's often unset entirely, so anything else falls back to UNKNOWN like
@@ -151,10 +190,10 @@ _WORKPLACE_TYPE_MAP = {
 
 
 def _fetch_job_data(url: str) -> dict[str, Any] | None:
-    match = _JOB_URL_RE.search(url)
-    if match is None:
+    resolved = _resolve(url)
+    if resolved is None:
         return None
-    host, site_number, job_id = match.groups()
+    host, site_number, job_id = resolved
     try:
         response = httpx.get(
             _DETAIL_URL.format(host=host),
@@ -235,7 +274,7 @@ def extract(url: str, _html: str) -> ExtractedJobFields | None:
 
 
 def scan_job_url(url: str) -> ScanResult | None:
-    if not _JOB_URL_RE.search(url):
+    if not (_JOB_URL_RE.search(url) or _JOB_PATH_RE.search(url)):
         return None
     try:
         page = base.fetch_html(url)
