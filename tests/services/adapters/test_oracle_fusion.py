@@ -134,6 +134,28 @@ def test_salary_of_returns_none_without_a_salary_looking_prompt():
     assert oracle_fusion._salary_of(flex_fields) == (None, None, None)
 
 
+def test_description_includes_organization_description_benefits_and_eeo_text(monkeypatch):
+    # Verified live on Amex: OrganizationDescriptionStr is a *separate*
+    # field from CorporateDescriptionStr, carrying the entire benefits
+    # bullet list plus EEOC/Amex Flex/"Know Your Rights" boilerplate the
+    # original posting shows right after "About Us" — dropped entirely
+    # before this was wired in, since only CorporateDescriptionStr was read.
+    def fake_get(url, params, timeout):
+        return FakeResponse(json_data={"items": [{
+            "Title": "Team Leader",
+            "ExternalDescriptionStr": "<p>Lead the team.</p>",
+            "CorporateDescriptionStr": "<p>Our culture is great.</p>",
+            "OrganizationDescriptionStr": "<ul><li>Competitive base salaries</li></ul><div>Equal opportunity employer.</div>",
+        }]})
+
+    monkeypatch.setattr(oracle_fusion.httpx, "get", fake_get)
+    url = "https://example.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/12345"
+    result = oracle_fusion.extract(url, "<html></html>")
+    assert "Our culture is great." in result.description
+    assert "Competitive base salaries" in result.description
+    assert "Equal opportunity employer." in result.description
+
+
 def test_resolve_vanity_domain_follows_redirect_and_reads_embedded_host(monkeypatch):
     # Amex-shaped: careers.<company>.com/en/sites/{site}/jobs/preview/{id}
     # redirects to its own .../job/{id} page, which embeds the real

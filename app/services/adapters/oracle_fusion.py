@@ -288,8 +288,20 @@ def _description_of(job_data: dict[str, Any], flex_fields: dict[str, str]) -> st
         sections.append("<h3>Responsibilities</h3>" + job_data["ExternalResponsibilitiesStr"])
     if job_data.get("ExternalQualificationsStr"):
         sections.append("<h3>Qualifications</h3>" + job_data["ExternalQualificationsStr"])
-    if job_data.get("CorporateDescriptionStr"):
-        sections.append("<h3>About Us</h3>" + job_data["CorporateDescriptionStr"])
+    # CorporateDescriptionStr ("our culture is built on...") and
+    # OrganizationDescriptionStr (benefits list, EEO statement, and other
+    # standard legal boilerplate) are two separate fields that render back
+    # to back with no heading between them on the page itself — verified
+    # live on Amex, where OrganizationDescriptionStr alone carries the
+    # entire benefits bullet list plus the EEOC/Amex Flex/"Know Your
+    # Rights" paragraphs the original posting shows below "About Us".
+    about_us = "".join(
+        s
+        for s in (job_data.get("CorporateDescriptionStr"), job_data.get("OrganizationDescriptionStr"))
+        if isinstance(s, str) and s.strip()
+    )
+    if about_us:
+        sections.append("<h3>About Us</h3>" + about_us)
 
     # Category and the posting's application deadline are standard fields
     # on every tenant (not flex fields) but, like the flex fields above,
