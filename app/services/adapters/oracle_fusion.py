@@ -222,6 +222,31 @@ def _location_of(job_data: dict[str, Any]) -> str | None:
     return location
 
 
+# The street-address-level "Locations" line Oracle's own "Job Info" panel
+# shows (e.g. "Seatac International Airport, Seattle, WA, 98158, US") is
+# richer than PrimaryLocation above (which ScanResult.location deliberately
+# stays at city/state/country for — that's what location-based search/
+# filtering already keys off, see app.api.routes.jobs.list_job_locations,
+# and changing its granularity would ripple into that). This is purely
+# supplementary display text for the "Additional Information" section, not
+# a replacement for the structured location field.
+def _work_location_text_of(job_data: dict[str, Any]) -> str | None:
+    work_locations = job_data.get("workLocation")
+    if not isinstance(work_locations, list) or not work_locations:
+        return None
+    loc = work_locations[0]
+    if not isinstance(loc, dict):
+        return None
+    parts = [loc.get(k) for k in ("AddressLine1", "TownOrCity", "Region2", "PostalCode", "Country")]
+    text = ", ".join(p.strip() for p in parts if isinstance(p, str) and p.strip())
+    if not text:
+        return None
+    workplace_type = job_data.get("WorkplaceType")
+    if isinstance(workplace_type, str) and workplace_type.strip().lower() not in ("on-site", "onsite", "on site"):
+        text += f" ({workplace_type.strip()})"
+    return text
+
+
 def _employment_type_of(job_data: dict[str, Any]) -> str:
     schedule = job_data.get("JobSchedule")
     if isinstance(schedule, str):
@@ -303,20 +328,34 @@ def _description_of(job_data: dict[str, Any], flex_fields: dict[str, str]) -> st
     if about_us:
         sections.append("<h3>About Us</h3>" + about_us)
 
-    # Category and the posting's application deadline are standard fields
-    # on every tenant (not flex fields) but, like the flex fields above,
-    # have nowhere else to go in ScanResult's fixed schema — Oracle's own
-    # "Job Info" panel shows both alongside the tenant-configured ones.
+    # These standard fields (not flex fields) have nowhere else to go in
+    # ScanResult's fixed schema, but Oracle's own "Job Info" panel shows
+    # every one of them — order matches that panel's own field order.
     info: dict[str, str] = {}
+    req_id = job_data.get("Id")
+    if isinstance(req_id, (str, int)) and str(req_id).strip():
+        info["Job Identification"] = str(req_id).strip()
     category = job_data.get("Category")
     if isinstance(category, str) and category.strip():
         info["Job Category"] = category.strip()
+    posted = job_data.get("ExternalPostedStartDate")
+    if isinstance(posted, str):
+        try:
+            info["Posting Date"] = date.fromisoformat(posted[:10]).isoformat()
+        except ValueError:
+            pass
     apply_before = job_data.get("ExternalPostedEndDate")
     if isinstance(apply_before, str):
         try:
             info["Apply Before"] = date.fromisoformat(apply_before[:10]).isoformat()
         except ValueError:
             pass
+    schedule = job_data.get("JobSchedule")
+    if isinstance(schedule, str) and schedule.strip():
+        info["Job Schedule"] = schedule.strip()
+    work_location_text = _work_location_text_of(job_data)
+    if work_location_text:
+        info["Locations"] = work_location_text
     info.update(flex_fields)
     if info:
         items = "".join(f"<li><strong>{prompt}:</strong> {value}</li>" for prompt, value in info.items())
