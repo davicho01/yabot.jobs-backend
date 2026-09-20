@@ -96,18 +96,52 @@ def test_scan_job_url_rejects_non_job_detail_urls():
 
 
 def test_scan_job_url_returns_none_when_signature_missing(monkeypatch):
-    monkeypatch.setattr(avature, "_fetch_page_html", lambda _url: "<html>not avature</html>")
+    monkeypatch.setattr(avature, "_fetch_job_detail_html", lambda _url: "<html>not avature</html>")
     assert avature.scan_job_url(URL) is None
 
 
 def test_scan_job_url_reports_failure_when_fetch_fails(monkeypatch):
-    monkeypatch.setattr(avature, "_fetch_page_html", lambda _url: None)
+    monkeypatch.setattr(avature, "_fetch_job_detail_html", lambda _url: None)
     result = avature.scan_job_url(URL)
     assert result.success is False
 
 
+def test_job_detail_fetch_waits_for_the_description_to_actually_render(monkeypatch):
+    """Regression: postings with an extra "Internal Movement Eligibility"
+    banner (frontline/operational roles) consistently came back with a real
+    description but a missing location, while postings without that banner
+    (corporate roles) consistently got both - a rendering-timing race, not a
+    markup difference, since the same globe-icon + <strong> structure exists
+    in both once fully rendered. wait_for_selector must close that race for
+    job-detail fetches specifically.
+    """
+    seen = {}
+
+    def fake_get_with_retry(_url, **_kw):
+        raise avature.httpx.HTTPError("blocked")
+
+    def fake_fetch_rendered_page(url, *, wait_for_selector=None):
+        seen["url"] = url
+        seen["wait_for_selector"] = wait_for_selector
+        return _FakeRendered(_page())
+
+    monkeypatch.setattr(avature, "get_with_retry", fake_get_with_retry)
+    monkeypatch.setattr(avature, "fetch_rendered_page", fake_fetch_rendered_page)
+
+    html = avature._fetch_job_detail_html(URL)
+
+    assert html == _page()
+    assert seen["wait_for_selector"] == ".description-ajax article"
+
+
+class _FakeRendered:
+    def __init__(self, html):
+        self.html = html
+        self.url = URL
+
+
 def test_scan_job_url_uses_json_ld_for_title_but_dom_for_description_and_location(monkeypatch):
-    monkeypatch.setattr(avature, "_fetch_page_html", lambda _url: _page())
+    monkeypatch.setattr(avature, "_fetch_job_detail_html", lambda _url: _page())
 
     result = avature.scan_job_url(URL)
 

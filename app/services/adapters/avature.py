@@ -65,7 +65,7 @@ def _board_key(url: str) -> str | None:
     return urlsplit(url).netloc or None
 
 
-def _fetch_page_html(url: str) -> str | None:
+def _fetch_page_html(url: str, *, wait_for_selector: str | None = None) -> str | None:
     try:
         response = get_with_retry(url, timeout=TIMEOUT, follow_redirects=True)
         response.raise_for_status()
@@ -81,8 +81,25 @@ def _fetch_page_html(url: str) -> str | None:
     # render is the only way to get past it at all here, not just a
     # nicer-to-have fallback for an occasional blocked page (verified: other
     # tenants like synopsys.avature.net need no browser at all).
-    rendered = fetch_rendered_page(url)
+    rendered = fetch_rendered_page(url, wait_for_selector=wait_for_selector)
     return rendered.html if rendered else None
+
+
+def _fetch_job_detail_html(url: str) -> str | None:
+    # A job-detail page's own content (the location header + every
+    # description section) renders in after the initial page load, on its
+    # own timeline distinct from the rest of the page - verified live on
+    # delta.avature.net: postings with an extra "Internal Movement
+    # Eligibility" banner (frontline/operational roles - Ticket/Gate Agent,
+    # etc.) consistently came back with a real description but a *missing*
+    # location, while postings without that banner (corporate roles)
+    # consistently got both - a snapshot-timing race, not a markup
+    # difference, since the same globe-icon + <strong> structure is present
+    # in both once fully rendered. wait_for_selector blocks the render until
+    # that content genuinely exists, closing the race - only for job-detail
+    # fetches, since .description-ajax never appears on the board root or
+    # SearchJobs listing pages _fetch_page_html also serves.
+    return _fetch_page_html(url, wait_for_selector=".description-ajax article")
 
 
 def _resolve_careers_url(host: str) -> str | None:
@@ -147,7 +164,7 @@ def extract(html: str) -> ExtractedJobFields:
 def scan_job_url(url: str) -> ScanResult | None:
     if not _JOB_DETAIL_URL_RE.search(url):
         return None
-    html = _fetch_page_html(url)
+    html = _fetch_job_detail_html(url)
     if html is None:
         return ScanResult(success=False, error=f"Failed to fetch {url}: direct fetch and browser render both failed")
     if _AVATURE_META_SIGNATURE not in html:
