@@ -13,7 +13,7 @@ import re
 import time
 from collections.abc import Sequence
 
-from sqlalchemy import ColumnElement, func, select
+from sqlalchemy import ColumnElement, and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.job_posting import JobPosting
@@ -21,13 +21,11 @@ from app.models.job_posting import JobPosting
 # ";" is what adapters join locations with. "|" is used both as a
 # place|workplace-tag delimiter ("Arizona | Remote") and, by some sources, as
 # a location separator ("Remote-Friendly | San Francisco, CA | Washington,
-# DC") — splitting on it and then dropping the bare tag chunks handles both.
+# DC"), so it splits too. Tag chunks like "Remote" are deliberately *kept* as
+# entries of their own rather than dropped: people type "remote" into the
+# location box, and the old substring filter matched it wherever it appeared in
+# the string — dropping tags made ~15% of those postings unfindable.
 _SEPARATOR_RE = re.compile(r"[;|]")
-
-# A chunk that is only a workplace-type label, not a place ("Remote",
-# "Hybrid", "Remote-Friendly (Travel-Required)"). "Remote - USA" or "Remote,
-# United States" are *not* bare tags and are kept.
-_BARE_TAG_RE = re.compile(r"^(remote|hybrid|on-?site|in-?office|remote-friendly)( \(.*\))?$", re.IGNORECASE | re.DOTALL)
 
 # Adapters cap `location` at the column length and end it with "..." — the
 # last chunk of such a string is a cut-off fragment, not a real place.
@@ -43,9 +41,9 @@ def split_locations(raw: str | None) -> list[str]:
     """The individual locations in a posting's `location` string, in order,
     de-duplicated case-insensitively.
 
-    Migration a4c9e2d7b1f6 backfills existing rows with a frozen SQL copy of
-    these rules — if they change here, new scans and old rows will disagree
-    until a follow-up migration re-derives the column.
+    Migrations hold frozen SQL copies of these rules to backfill existing rows
+    (latest: c8e5b3a91d27) — if they change here, new scans and old rows will
+    disagree until a follow-up migration re-derives the column.
     """
     if not raw:
         return []
@@ -53,7 +51,7 @@ def split_locations(raw: str | None) -> list[str]:
     locations: list[str] = []
     for chunk in _SEPARATOR_RE.split(raw):
         entry = chunk.strip()
-        if not entry or _BARE_TAG_RE.match(entry) or entry.endswith(_TRUNCATION_MARKER):
+        if not entry or entry.endswith(_TRUNCATION_MARKER):
             continue
         key = entry.lower()
         if key not in seen:
@@ -64,13 +62,27 @@ def split_locations(raw: str | None) -> list[str]:
     return locations
 
 
+_LOCATION_COLUMN_LENGTH = JobPosting.location.type.length
+
+
 def location_matches(pattern: str) -> ColumnElement[bool]:
     """WHERE-clause expression: true when any of the posting's individual
     locations matches the (already %-wrapped) ILIKE `pattern`. Correlates to
     JobPosting in the enclosing query.
+
+    The cheap ILIKE on the display column comes first because it discards
+    nearly every row before the per-row array unnest runs (on ~155k postings
+    the unnest alone roughly doubled a zero-hit search). It never drops a real
+    match: each entry is a substring of `location`, except when that string
+    was cut off at the column width — hence the second branch.
     """
     entry = func.jsonb_array_elements_text(JobPosting.locations).column_valued("entry")
-    return select(entry).where(entry.ilike(pattern)).correlate(JobPosting).exists()
+    entry_matches = select(entry).where(entry.ilike(pattern)).correlate(JobPosting).exists()
+    display_may_match = or_(
+        JobPosting.location.ilike(pattern),
+        func.char_length(JobPosting.location) >= _LOCATION_COLUMN_LENGTH,
+    )
+    return and_(display_may_match, entry_matches)
 
 
 def rank_locations(counts: Sequence[tuple[str, int]], q: str | None, limit: int) -> list[str]:

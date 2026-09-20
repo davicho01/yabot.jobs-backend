@@ -30,14 +30,28 @@ def test_split_locations_splits_on_semicolons_in_order():
     assert split_locations("Austin, TX; Boston, MA; Seattle, WA") == ["Austin, TX", "Boston, MA", "Seattle, WA"]
 
 
-def test_split_locations_drops_workplace_tags_after_a_pipe():
-    # og:description style: "<place> | <workplace type>", chained with ";".
-    assert split_locations("Arizona | Remote; Florida | Remote; Utah | Hybrid") == ["Arizona", "Florida", "Utah"]
+def test_split_locations_keeps_workplace_tags_as_entries_of_their_own():
+    # og:description style: "<place> | <workplace type>", chained with ";". The
+    # tag stays searchable (people type "remote" as a location) and is
+    # de-duplicated across the chunks that repeat it.
+    assert split_locations("Arizona | Remote; Florida | Remote; Utah | Hybrid") == [
+        "Arizona",
+        "Remote",
+        "Florida",
+        "Utah",
+        "Hybrid",
+    ]
+
+
+def test_split_locations_of_a_bare_tag_location_is_that_tag():
+    # A posting whose whole location is "Remote" must stay findable by "remote".
+    assert split_locations("Remote") == ["Remote"]
+    assert split_locations("Remote ") == ["Remote"]
 
 
 def test_split_locations_treats_pipe_as_a_separator_between_places_too():
     raw = "Remote-Friendly (Travel-Required) | San Francisco, CA | Washington, DC"
-    assert split_locations(raw) == ["San Francisco, CA", "Washington, DC"]
+    assert split_locations(raw) == ["Remote-Friendly (Travel-Required)", "San Francisco, CA", "Washington, DC"]
 
 
 def test_split_locations_keeps_remote_entries_that_name_a_place():
@@ -57,7 +71,12 @@ def test_split_locations_real_world_messy_string():
         "New York City, NY; Remote-Friendly (Travel-Required) | San Francisco, CA | Washington, DC; "
         "San Francisco, CA | New York City, NY"
     )
-    assert split_locations(raw) == ["New York City, NY", "San Francisco, CA", "Washington, DC"]
+    assert split_locations(raw) == [
+        "New York City, NY",
+        "Remote-Friendly (Travel-Required)",
+        "San Francisco, CA",
+        "Washington, DC",
+    ]
 
 
 def test_split_locations_drops_a_truncated_last_fragment():
@@ -141,7 +160,7 @@ def test_upsert_stores_the_individual_locations(scan_db, make_source, make_url):
     scan_db.commit()
 
     assert posting.location == "Austin, TX; Boston, MA | Hybrid; Seattle, WA"
-    assert posting.locations == ["Austin, TX", "Boston, MA", "Seattle, WA"]
+    assert posting.locations == ["Austin, TX", "Boston, MA", "Hybrid", "Seattle, WA"]
 
 
 def test_upsert_without_a_location_stores_an_empty_list(scan_db, make_source, make_url):
@@ -213,3 +232,7 @@ def test_location_matches_compiles_to_a_correlated_exists_over_the_locations_arr
     assert "EXISTS (SELECT entry FROM jsonb_array_elements_text(job_postings.locations) AS entry" in sql
     assert "entry ILIKE" in sql
     assert sql.count("FROM job_postings") == 1
+    # ...and the cheap display-column ILIKE comes first, so the array unnest only
+    # runs on rows that could match (or whose display string was truncated).
+    assert sql.index("job_postings.location ILIKE") < sql.index("EXISTS (SELECT entry")
+    assert "char_length(job_postings.location) >=" in sql  # the width is a bound parameter
