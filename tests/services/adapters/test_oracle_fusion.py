@@ -78,6 +78,13 @@ def test_workplace_type_of_unset_code_is_unknown():
     assert oracle_fusion._workplace_type_of({"WorkplaceTypeCode": ""}) == "unknown"
 
 
+def test_workplace_type_of_handles_ora_prefixed_codes():
+    # Verified live on American Express: ORA_HYBRID / ORA_ON_SITE.
+    assert oracle_fusion._workplace_type_of({"WorkplaceTypeCode": "ORA_HYBRID"}) == "hybrid"
+    assert oracle_fusion._workplace_type_of({"WorkplaceTypeCode": "ORA_ON_SITE"}) == "onsite"
+    assert oracle_fusion._workplace_type_of({"WorkplaceTypeCode": "ORA_REMOTE"}) == "remote"
+
+
 def test_employment_type_of_unmapped_schedule_is_unknown():
     assert oracle_fusion._employment_type_of({"JobSchedule": "Contingent"}) == "unknown"
 

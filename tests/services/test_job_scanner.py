@@ -55,6 +55,28 @@ def test_salary_from_text_none_without_currency_signal():
     assert _salary_from_text("We need 8-10 years of experience") == (None, None, None)
 
 
+def test_salary_from_text_parses_range_without_thousands_separator():
+    # The Oracle Fusion/American Express bug: "$103750 - $174750" has no
+    # thousands-grouping comma at all (unlike the k-suffix case above, which
+    # at least dashes immediately after the first number). Before the fix,
+    # the comma-grouped amount pattern accepted just the first 3 digits of
+    # each number as a complete match, and the search resumed past the
+    # (correctly rejected) non-dash tail landing on the trailing digits of
+    # each number instead — silently returning (174, 750) rather than
+    # (103750, 174750).
+    assert _salary_from_text("$103750 - $174750 annually + bonus + benefits") == (103750, 174750, "USD")
+
+
+def test_salary_from_text_still_rejects_level_band_digit_as_range_start():
+    # Regression guard for the NVIDIA/Workday bug the comma-grouping
+    # requirement was originally added for: a bare digit inside "Level 5,
+    # and 272,000 USD..." must not be treated as a range's minimum just
+    # because the new \d+ fallback alternative also accepts single digits.
+    assert _salary_from_text(
+        "224,000 - 356,500 USD for Level 5, and 272,000 - 431,250 USD for Level 6"
+    ) == (224000, 431250, "USD")
+
+
 def test_scan_job_url_dispatches_to_the_matching_adapter(monkeypatch):
     # Amazon's own scan_job_url always sets company_name="Amazon" — if
     # dispatch instead fell through to the generic default scanner, this

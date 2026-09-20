@@ -643,15 +643,27 @@ _CURRENCY_CODES = "USD|CAD|AUD|NZD|GBP|EUR|CHF|JPY|INR"
 _SALARY_RANGE_RE = re.compile(
     rf"""
     (?:(?P<cur1>{_CURRENCY_CODES})\s*)?(?P<sym1>[\$£€])?\s*
-    (?P<min>\d{{1,3}}(?:,\d{{3}})*(?:\.\d+)?)(?P<min_k>[kK])?
+    (?<!\d)(?P<min>\d{{1,3}}(?:,\d{{3}})*(?:\.\d+)?|\d+(?:\.\d+)?)(?!\d)(?P<min_k>[kK])?
     \s*(?:(?P<cur1b>{_CURRENCY_CODES})\s*)?
     \s*(?:-|–|—|\bto\b|\band\b)\s*
     (?:(?P<cur2>{_CURRENCY_CODES})\s*)?(?P<sym2>[\$£€])?\s*
-    (?P<max>\d{{1,3}}(?:,\d{{3}})*(?:\.\d+)?)(?P<max_k>[kK])?
+    (?<!\d)(?P<max>\d{{1,3}}(?:,\d{{3}})*(?:\.\d+)?|\d+(?:\.\d+)?)(?!\d)(?P<max_k>[kK])?
     (?:\s*(?P<cur3>{_CURRENCY_CODES}))?
     """,
     re.IGNORECASE | re.VERBOSE,
 )
+# The comma-grouped alternative above is tried first so "120,000" still
+# consumes as one number; the bare \d+ fallback only kicks in (via
+# backtracking, once the comma-grouped alternative's shorter partial match
+# fails to find the range separator immediately after) for amounts with no
+# thousands-separator at all, e.g. Oracle Fusion/Amex's "$103750 - $174750"
+# — verified live, previously silently mis-parsed as (174, 750) because the
+# comma-grouped pattern alone accepted just the first 3 digits ("103") as a
+# complete match, and moving the search past the (correctly rejected)
+# non-dash tail let it latch onto the trailing "750"/"174" of each number
+# instead. The (?<!\d) lookbehind on both amount groups is what closes that
+# hole: it stops either alternative from starting mid-digit-run, so a
+# uncomma'd number can now only be matched as a whole from its true start.
 # Some listings (e.g. amazon.jobs, verified live) state pay as a single
 # figure rather than a range, e.g. "Austin, TX, USA - 116,100.00 USD
 # Annually" — same currency-code-before-or-after-the-amount shape as the

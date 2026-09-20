@@ -232,7 +232,11 @@ def _employment_type_of(job_data: dict[str, Any]) -> str:
 def _workplace_type_of(job_data: dict[str, Any]) -> str:
     code = job_data.get("WorkplaceTypeCode")
     if isinstance(code, str) and code:
-        return _WORKPLACE_TYPE_MAP.get(code.upper(), WorkplaceType.UNKNOWN)
+        # Verified live on American Express: this tenant's codes carry an
+        # "ORA_" prefix (ORA_HYBRID, ORA_ON_SITE) the original mapping,
+        # written before any tenant had WorkplaceTypeCode set at all,
+        # didn't anticipate.
+        return _WORKPLACE_TYPE_MAP.get(code.upper().removeprefix("ORA_"), WorkplaceType.UNKNOWN)
     return WorkplaceType.UNKNOWN
 
 
