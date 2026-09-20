@@ -18,14 +18,14 @@ import logging
 
 from sqlalchemy import select
 
+from app.core.log_config import configure_logging
 from app.db.session import SessionLocal
 from app.models.crawl_source import CrawlSource
 from app.models.enums import CrawlSourceStatus
 from app.services.crawl_queue import enqueue_crawl, ensure_topic_and_subscription
 from app.services.jobs import wake_sources_with_pending_scans
 
-logging.basicConfig(level=logging.INFO)
-logging.getLogger("httpx").setLevel(logging.WARNING)
+configure_logging()
 logger = logging.getLogger("app.crawl_dispatcher")
 
 

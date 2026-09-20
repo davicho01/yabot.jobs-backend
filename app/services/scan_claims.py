@@ -18,6 +18,7 @@ doesn't change. A claim older than the TTL belongs to a lane that died
 mid-scan and is up for grabs again.
 """
 
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -29,6 +30,8 @@ from app.core.config import settings
 from app.models.crawl_source import CrawlSource
 from app.models.enums import ScanStatus
 from app.models.job_url import JobPostingUrl
+
+logger = logging.getLogger("app.scan_claims")
 
 
 @dataclass(frozen=True)
@@ -77,7 +80,9 @@ def claim_next_url(db: Session, source_id: uuid.UUID, now: datetime | None = Non
         )
     )
     if in_flight >= source.max_concurrent_scans:
+        cap = source.max_concurrent_scans
         db.rollback()
+        logger.info("Source %s is at its cap (%d/%d scans in flight); not claiming.", source_id, in_flight, cap)
         return None
 
     url_row = db.scalar(

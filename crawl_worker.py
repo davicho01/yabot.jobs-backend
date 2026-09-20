@@ -35,6 +35,7 @@ from google.cloud import pubsub_v1
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.log_config import configure_logging
 from app.db.session import SessionLocal
 from app.models.crawl_source import CrawlSource
 from app.services.ats_adapters import list_job_urls
@@ -43,10 +44,7 @@ from app.services.job_queue import enqueue_source_scan
 from app.services.jobs import get_or_create_job_posting
 from app.services.scan_claims import has_unclaimed_pending
 
-logging.basicConfig(level=logging.INFO)
-# httpx logs the full request URL (including query params) at INFO level —
-# harmless here (ATS APIs need no key), but kept consistent with worker.py.
-logging.getLogger("httpx").setLevel(logging.WARNING)
+configure_logging()
 logger = logging.getLogger("app.crawl_worker")
 
 # Bounds how many sources this process crawls concurrently.

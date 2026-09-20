@@ -26,14 +26,12 @@ import logging
 from google.cloud import pubsub_v1
 
 from app.core.config import settings
+from app.core.log_config import configure_logging
 from app.db.session import SessionLocal
 from app.services.job_queue import ensure_topic_and_subscription, subscriber_client, subscription_path
 from app.services.jobs import parse_scan_message, process_scan_message
 
-logging.basicConfig(level=logging.INFO)
-# httpx logs the full request URL at INFO level on every call — noisy given
-# how many fetches one scan makes (job page, ATS APIs, browser_fetch_service).
-logging.getLogger("httpx").setLevel(logging.WARNING)
+configure_logging()
 logger = logging.getLogger("app.worker")
 
 # Bounds how many scans (each doing network I/O + possibly an LLM call) this

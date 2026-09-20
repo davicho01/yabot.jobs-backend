@@ -211,12 +211,14 @@ def run_source_lane(db: Session, source_id: uuid.UUID) -> int:
     """
     deadline = time.monotonic() + settings.scan_lane_deadline_seconds
     scanned = 0
+    logger.info("Lane started for source_id=%s.", source_id)
 
     while True:
         claimed = claim_next_url(db, source_id)
         if claimed is None:
             break
 
+        fetch_started = time.monotonic()
         try:
             result = scan_job_url(claimed.url)
         except Exception as exc:
@@ -246,6 +248,13 @@ def run_source_lane(db: Session, source_id: uuid.UUID) -> int:
             logger.exception("Storing the scan of %s (url_id=%s) failed; marking failed.", claimed.url, claimed.id)
             _mark_store_failed(db, claimed.id, exc)
         scanned += 1
+        logger.info(
+            "Scanned url_id=%s source_id=%s success=%s in %.1fs.",
+            claimed.id,
+            source_id,
+            result.success,
+            time.monotonic() - fetch_started,
+        )
 
         if time.monotonic() >= deadline:
             if has_unclaimed_pending(db, source_id):
@@ -253,7 +262,7 @@ def run_source_lane(db: Session, source_id: uuid.UUID) -> int:
             break
         time.sleep(settings.scan_min_interval_seconds)
 
-    logger.info("Lane for source_id=%s scanned %d URL(s).", source_id, scanned)
+    logger.info("Lane for source_id=%s finished after scanning %d URL(s).", source_id, scanned)
     return scanned
 
 
