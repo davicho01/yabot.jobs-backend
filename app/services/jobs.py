@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -171,7 +172,7 @@ def process_scan_job(db: Session, url_id: uuid.UUID) -> None:
 def _apply_scan_result(db: Session, url_row: JobPostingUrl, result: ScanResult) -> None:
     now = datetime.now(timezone.utc)
     url_row.scan_status = ScanStatus.SUCCESS if result.success else ScanStatus.FAILED
-    url_row.scan_error = result.error
+    url_row.scan_error = _strip_nul(result.error)
     url_row.last_scanned_at = now
     url_row.scan_claimed_at = None
     _upsert_posting(db, url_row, result, now)
@@ -214,12 +215,24 @@ def run_source_lane(db: Session, source_id: uuid.UUID) -> int:
             logger.exception("Scan of %s (url_id=%s) raised; marking failed.", claimed.url, claimed.id)
             result = ScanResult(success=False, error=f"Scan raised {type(exc).__name__}: {exc}")
 
-        url_row = db.get(JobPostingUrl, claimed.id, with_for_update=True)
-        # Already finished by someone else (a stale-claim reclaim racing a
-        # slow lane, say) — keep that result rather than overwrite it.
-        if url_row is not None and url_row.scan_status == ScanStatus.PENDING:
-            _apply_scan_result(db, url_row, result)
-        db.commit()
+        try:
+            url_row = db.get(JobPostingUrl, claimed.id, with_for_update=True)
+            # Already finished by someone else (a stale-claim reclaim racing a
+            # slow lane, say) — keep that result rather than overwrite it.
+            if url_row is not None and url_row.scan_status == ScanStatus.PENDING:
+                _apply_scan_result(db, url_row, result)
+            db.commit()
+        except (OperationalError, InterfaceError):
+            # The database itself is unreachable/unhealthy — not this URL's
+            # fault. Let the message be redelivered rather than blaming the URL.
+            db.rollback()
+            raise
+        except Exception as exc:
+            # Storing this page's result failed (data the columns can't hold,
+            # say). Left alone the row would stay claimed, get reclaimed after
+            # the TTL, and fail the same way forever, killing a lane each time.
+            logger.exception("Storing the scan of %s (url_id=%s) failed; marking failed.", claimed.url, claimed.id)
+            _mark_store_failed(db, claimed.id, exc)
         scanned += 1
 
         if time.monotonic() >= deadline:
@@ -248,6 +261,28 @@ def wake_sources_with_pending_scans(db: Session) -> int:
         except Exception:
             logger.exception("Failed to wake scan lanes for source_id=%s; skipping.", source_id)
     return woken
+
+
+def _mark_store_failed(db: Session, url_id: uuid.UUID, exc: Exception) -> None:
+    """Record that a page was fetched but its result couldn't be stored, in a
+    fresh transaction (the failed one is rolled back first), releasing the
+    claim so the URL doesn't hold one of its source's concurrency slots."""
+    db.rollback()
+    url_row = db.get(JobPostingUrl, url_id, with_for_update=True)
+    if url_row is None or url_row.scan_status != ScanStatus.PENDING:
+        db.rollback()
+        return
+    # First line only — a DB error's message embeds the whole failed statement.
+    message = str(getattr(exc, "orig", None) or exc)
+    detail = (message.splitlines() or [""])[0][:300]
+    url_row.scan_status = ScanStatus.FAILED
+    url_row.scan_error = _strip_nul(f"Storing the scan result failed ({type(exc).__name__}): {detail}")
+    url_row.last_scanned_at = datetime.now(timezone.utc)
+    url_row.scan_claimed_at = None
+    posting = db.scalar(select(JobPosting).where(JobPosting.url_id == url_id))
+    if posting is not None:
+        posting.extraction_status = ScanStatus.FAILED
+    db.commit()
 
 
 def parse_scan_message(data: bytes) -> tuple[str, uuid.UUID]:
@@ -312,6 +347,32 @@ def rescan_job_url(db: Session, url_row: JobPostingUrl) -> JobPostingUrl:
     return url_row
 
 
+# Must match the String(n) lengths on JobPosting (app/models/job_posting.py).
+_TITLE_MAX = 255
+_COMPANY_NAME_MAX = 255
+_LOCATION_MAX = 255
+_SALARY_CURRENCY_MAX = 3
+
+
+def _strip_nul(value):
+    """Remove NUL characters from a string, or from every string inside a
+    (nested) dict/list — Postgres can't store \\u0000 in text or JSONB."""
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, dict):
+        return {_strip_nul(k): _strip_nul(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_strip_nul(v) for v in value]
+    return value
+
+
+def _fit(value: str | None, max_length: int) -> str | None:
+    """NUL-stripped and truncated to a varchar(max_length) column."""
+    if value is None:
+        return None
+    return _strip_nul(value)[:max_length]
+
+
 def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now: datetime) -> JobPosting:
     """Create or update the single JobPosting row for this URL (url_id is
     unique — one row per URL, updated in place on each scan/rescan, rather
@@ -327,17 +388,23 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
         posting = JobPosting(url_id=url_row.id)
         db.add(posting)
 
-    posting.title = fields["title"]
-    posting.company_name = fields["company_name"]
-    posting.location = fields["location"]
+    # Scraped text is untrusted: a stray NUL byte (Postgres rejects it in
+    # text *and* JSONB) or a title longer than its varchar column makes the
+    # whole UPDATE fail — and since the failing message is retried, one such
+    # page used to be re-scanned forever. Clean it on the way in instead.
+    posting.title = _fit(fields["title"], _TITLE_MAX)
+    posting.company_name = _fit(fields["company_name"], _COMPANY_NAME_MAX)
+    posting.location = _fit(fields["location"], _LOCATION_MAX)
     posting.workplace_type = fields["workplace_type"]
     posting.employment_type = fields["employment_type"]
     posting.salary_min = fields["salary_min"]
     posting.salary_max = fields["salary_max"]
-    posting.salary_currency = fields["salary_currency"]
-    posting.description = result.description
-    posting.extracted_fields = _merge_extracted_fields(result, llm_extraction)
-    posting.raw_source = {"html_excerpt": result.raw_html_excerpt} if result.raw_html_excerpt else None
+    posting.salary_currency = _fit(fields["salary_currency"], _SALARY_CURRENCY_MAX)
+    posting.description = _strip_nul(result.description)
+    posting.extracted_fields = _strip_nul(_merge_extracted_fields(result, llm_extraction))
+    posting.raw_source = (
+        {"html_excerpt": _strip_nul(result.raw_html_excerpt)} if result.raw_html_excerpt else None
+    )
     posting.posted_at = fields["posted_at"]
     posting.scanned_at = now
     posting.extraction_status = ScanStatus.SUCCESS if result.success else ScanStatus.FAILED

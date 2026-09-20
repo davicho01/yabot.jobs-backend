@@ -12,11 +12,22 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.models as m
 from app.db.base import Base
 from app.models.enums import ScanStatus
+
+
+
+@compiles(JSONB, "sqlite")
+def _jsonb_as_json_on_sqlite(_type, _compiler, **_kw):
+    # Lets JobPosting's table exist under SQLite so the real _upsert_posting
+    # can run in these tests; only the column type differs, not the values.
+    return "JSON"
+
 
 NOW = datetime(2026, 9, 19, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -29,7 +40,7 @@ def now() -> datetime:
 @pytest.fixture
 def scan_db() -> Session:
     engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine, tables=[m.CrawlSource.__table__, m.JobPostingUrl.__table__])
+    Base.metadata.create_all(engine, tables=[m.CrawlSource.__table__, m.JobPostingUrl.__table__, m.JobPosting.__table__])
     session = sessionmaker(bind=engine, autoflush=False)()
     yield session
     session.close()
