@@ -17,6 +17,7 @@ from sqlalchemy import ColumnElement, and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.job_posting import JobPosting
+from app.services import geo
 
 # ";" is what adapters join locations with. "|" is used both as a
 # place|workplace-tag delimiter ("Arizona | Remote") and, by some sources, as
@@ -114,8 +115,9 @@ _counts_cache: tuple[float, list[tuple[str, int]]] | None = None
 
 
 def clear_location_cache() -> None:
-    global _counts_cache
+    global _counts_cache, _metro_counts_cache
     _counts_cache = None
+    _metro_counts_cache = None
 
 
 def _location_counts(db: Session) -> list[tuple[str, int]]:
@@ -137,5 +139,59 @@ def _location_counts(db: Session) -> list[tuple[str, int]]:
     return counts
 
 
-def location_suggestions(db: Session, q: str | None, limit: int) -> list[str]:
-    return rank_locations(_location_counts(db), q, limit)
+def location_suggestions(db: Session, q: str | None, limit: int, *, unresolved_only: bool = False) -> list[str]:
+    """`unresolved_only` drops entries that resolve to a metro area — for a
+    search box that already suggests the areas, they'd just be the same place
+    spelled a dozen ways ("Salt Lake City, UT, US", "…, Utah", …)."""
+    counts = _location_counts(db)
+    if unresolved_only:
+        counts = [(name, n) for name, n in counts if geo.resolve_metro(name) is None]
+    return rank_locations(counts, q, limit)
+
+
+_metro_counts_cache: tuple[float, dict[str, int]] | None = None
+
+
+def _metro_counts(db: Session) -> dict[str, int]:
+    """{CBSA code: posting count}, most postings first, cached like the
+    location counts above."""
+    global _metro_counts_cache
+    now = time.monotonic()
+    if _metro_counts_cache is not None and now - _metro_counts_cache[0] < _COUNTS_TTL_SECONDS:
+        return _metro_counts_cache[1]
+
+    code = func.jsonb_array_elements_text(JobPosting.metros).column_valued("code")
+    posting_count = func.count(JobPosting.id.distinct())
+    stmt = select(code, posting_count).group_by(code).order_by(posting_count.desc(), code)
+    counts = {c: n for c, n in db.execute(stmt).all()}
+    _metro_counts_cache = (now, counts)
+    return counts
+
+
+def rank_metros(counts: dict[str, int], q: str | None, limit: int) -> list[tuple[geo.Metro, int]]:
+    """Metro areas matching what was typed: ones whose name starts with it first
+    ("salt" -> Salt Lake City), then ones containing it anywhere in the official
+    title ("fort worth" -> Dallas-Fort Worth-Arlington); within each, the most
+    postings first. `counts` is already ordered most-postings-first."""
+    needle = geo.search_key(q or "")
+    starts_with: list[tuple[geo.Metro, int]] = []
+    contains: list[tuple[geo.Metro, int]] = []
+    for code, count in counts.items():
+        metro = geo.metro_by_code(code)
+        if metro is None:
+            continue
+        if not needle or geo.search_key(metro.name).startswith(needle):
+            starts_with.append((metro, count))
+        elif needle in geo.search_key(metro.title):
+            contains.append((metro, count))
+    return (starts_with + contains)[:limit]
+
+
+def metro_suggestions(
+    db: Session, q: str | None, limit: int, *, slug: str | None = None
+) -> list[tuple[geo.Metro, int]]:
+    counts = _metro_counts(db)
+    if slug is not None:
+        metro = geo.metro_by_slug(slug)
+        return [(metro, counts.get(metro.code, 0))] if metro else []
+    return rank_metros(counts, q, limit)

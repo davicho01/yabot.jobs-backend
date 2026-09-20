@@ -4,7 +4,7 @@ import uuid
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -27,6 +27,11 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
     """
 
     __tablename__ = "job_postings"
+    __table_args__ = (
+        # Serves the metro-area filter (`metros @> '["41620"]'`) — see
+        # app.api.routes.jobs.list_job_urls.
+        Index("ix_job_postings_metros", "metros", postgresql_using="gin", postgresql_ops={"metros": "jsonb_path_ops"}),
+    )
 
     url_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -44,6 +49,12 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
     # suggestions actually match against. Kept in sync by _upsert_posting via
     # app.services.job_locations.split_locations; see that module for the rules.
     locations: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    # Census metro/micro area (CBSA) codes those locations fall in, so postings
+    # can be searched by area ("Salt Lake City") however the place was spelled.
+    # Derived from `locations` by app.services.geo.resolve_metros in
+    # _upsert_posting; entries it can't place (states, "Remote", non-US,
+    # facility names) simply contribute nothing.
+    metros: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     workplace_type: Mapped[str] = mapped_column(String(20), default=WorkplaceType.UNKNOWN, nullable=False)
     employment_type: Mapped[str] = mapped_column(String(20), default=EmploymentType.UNKNOWN, nullable=False)
 

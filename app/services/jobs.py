@@ -15,6 +15,7 @@ from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
 from app.services.crawl_sources import register_discovered_board
 from app.services.job_llm_extractor import LlmExtraction, extract_with_llm, html_to_text
+from app.services.geo import resolve_metros
 from app.services.job_locations import split_locations
 from app.services.job_queue import enqueue_scan, enqueue_source_scan
 from app.services.job_scanner import ScanResult, domain_of, normalize_url, scan_job_url, url_hash
@@ -421,6 +422,7 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
     # list of locations isn't cut off partway for sources that don't
     # pre-truncate. (NUL-stripped for the same reason as everything else.)
     posting.locations = split_locations(_strip_nul(fields["location"]) if fields["location"] else None)
+    posting.metros = resolve_metros(posting.locations)
     posting.workplace_type = fields["workplace_type"]
     posting.employment_type = fields["employment_type"]
     posting.salary_min = fields["salary_min"]
