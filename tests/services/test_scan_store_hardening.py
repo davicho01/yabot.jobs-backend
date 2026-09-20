@@ -68,6 +68,38 @@ def test_upsert_stores_hostile_page_content_cleanly(scan_db, make_source, make_u
     assert "이" in posting.raw_source["html_excerpt"]  # real non-ASCII text is untouched
 
 
+def test_apply_scan_result_keeps_good_data_on_a_later_failed_rescan(scan_db, make_source, make_url):
+    """A re-crawl or admin rescan hitting a transient block (WAF challenge,
+    timeout, ...) must not wipe out a posting that already has real data
+    from a previous successful scan - same protection rescan_job_url
+    already gives the single-URL path.
+    """
+    url_row = make_url(make_source())
+    jobs._apply_scan_result(scan_db, url_row, ScanResult(success=True, title="Real Title", location="Atlanta, GA"))
+    scan_db.commit()
+
+    jobs._apply_scan_result(scan_db, url_row, ScanResult(success=False, error="blocked"))
+    scan_db.commit()
+
+    posting = scan_db.query(JobPosting).filter_by(url_id=url_row.id).one()
+    assert posting.title == "Real Title"
+    assert posting.location == "Atlanta, GA"
+    assert posting.extraction_status == ScanStatus.SUCCESS  # last-good status, not clobbered
+    assert scan_db.get(JobPostingUrl, url_row.id).scan_status == ScanStatus.FAILED  # fresh attempt still recorded
+
+
+def test_apply_scan_result_marks_a_never_successful_posting_failed(scan_db, make_source, make_url):
+    url_row = make_url(make_source())
+    _shell_posting(scan_db, url_row)
+
+    jobs._apply_scan_result(scan_db, url_row, ScanResult(success=False, error="blocked"))
+    scan_db.commit()
+
+    posting = scan_db.query(JobPosting).filter_by(url_id=url_row.id).one()
+    assert posting.extraction_status == ScanStatus.FAILED
+    assert posting.title is None
+
+
 @pytest.fixture
 def lane_env(monkeypatch):
     monkeypatch.setattr(jobs, "scan_job_url", lambda url: ScanResult(success=True, title="ok"))

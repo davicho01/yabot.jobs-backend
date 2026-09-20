@@ -175,7 +175,19 @@ def _apply_scan_result(db: Session, url_row: JobPostingUrl, result: ScanResult) 
     url_row.scan_error = _strip_nul(result.error)
     url_row.last_scanned_at = now
     url_row.scan_claimed_at = None
-    _upsert_posting(db, url_row, result, now)
+    if result.success:
+        _upsert_posting(db, url_row, result, now)
+    else:
+        # A failed re-scan (transient WAF block, timeout, ...) must not
+        # clobber a posting that already has good data from a previous
+        # successful scan - same reasoning rescan_job_url already applies.
+        # Only flip a posting that's never actually succeeded to FAILED, so
+        # it's still visibly not-pending rather than stuck PENDING forever
+        # with no url_row left in PENDING to ever re-trigger it.
+        posting = db.scalar(select(JobPosting).where(JobPosting.url_id == url_row.id))
+        if posting is not None and posting.extraction_status != ScanStatus.SUCCESS:
+            posting.extraction_status = ScanStatus.FAILED
+            posting.scanned_at = now
     db.flush()
 
 
