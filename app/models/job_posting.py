@@ -57,6 +57,12 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
     # _upsert_posting; entries it can't place ("Remote", non-US, facility names)
     # contribute nothing. (Named `metros` from before states were added.)
     metros: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    # [lat, lon] of each location entry that names a known city — what a "within N
+    # miles of <city>" search measures against (metros are too coarse: Ogden-Clearfield
+    # runs from Farmington to 43 miles north). Derived from `locations` by
+    # app.services.geo.resolve_places in _upsert_posting; entries with no city (a state,
+    # "Remote", a facility, non-US) contribute nothing.
+    places: Mapped[list[list[float]]] = mapped_column(JSONB, nullable=False, default=list)
     workplace_type: Mapped[str] = mapped_column(String(20), default=WorkplaceType.UNKNOWN, nullable=False)
     employment_type: Mapped[str] = mapped_column(String(20), default=EmploymentType.UNKNOWN, nullable=False)
 

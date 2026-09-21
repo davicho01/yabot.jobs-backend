@@ -155,17 +155,35 @@ def test_upsert_stores_decoded_text_and_places_split_correctly(scan_db, make_sou
     assert posting.metros == ["12420", "TX"]
 
 
-def test_a_location_search_compiles_to_the_text_match_or_indexable_area_checks():
-    from sqlalchemy import or_
+def test_a_city_search_compiles_to_an_indexed_state_prefilter_then_distance_and_bands():
+    from sqlalchemy import true
 
-    from app.services.job_locations import location_matches
+    from app.models import JobPostingUrl
+    from app.services.job_locations import radius_search
 
-    areas = geo.search_areas("Bountiful, Utah")
-    stmt = select(JobPosting.id).where(
-        or_(location_matches("%Bountiful, Utah%"), *[JobPosting.metros.contains([code]) for code in areas])
+    place = geo.search_place("West Bountiful, Utah")
+    nearest, near, band = radius_search(place, 25)
+    stmt = (
+        select(JobPostingUrl.id)
+        .join(JobPosting, JobPosting.url_id == JobPostingUrl.id)
+        .join(nearest, true())
+        .where(near)
+        .order_by(band, JobPostingUrl.created_at.desc())
     )
 
     sql = " ".join(str(stmt.compile(dialect=postgresql.dialect())).split())
 
-    assert sql.count("job_postings.metros @>") == len(areas) >= 3
-    assert " OR " in sql
+    assert "job_postings.metros @>" in sql  # the GIN-served narrowing to the states around the place
+    assert "JOIN LATERAL" in sql and "jsonb_array_elements(job_postings.places)" in sql
+    assert "asin(" in sql and "nearest.miles <=" in sql  # haversine, cut at the radius
+    assert "ORDER BY CASE WHEN" in sql and sql.index("ORDER BY CASE") < sql.index("job_posting_urls.created_at DESC")
+
+
+def test_upsert_stores_the_coordinates_of_every_city_a_posting_lists(scan_db, make_source, make_url):
+    result = ScanResult(success=True, title="Engineer", location="West Bountiful, UT; Utah | Remote; London, UK")
+
+    posting = jobs._upsert_posting(scan_db, make_url(make_source()), result, datetime.now(timezone.utc))
+    scan_db.commit()
+
+    place = geo.search_place("West Bountiful, Utah")
+    assert posting.places == [[place.lat, place.lon]]  # the state, the tag and the foreign city add none

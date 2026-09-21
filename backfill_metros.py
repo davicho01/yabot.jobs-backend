@@ -2,6 +2,8 @@
 
   - JobPosting.metros — the metro/micro areas and states a posting's `locations`
     fall in (app.services.geo.resolve_area_codes).
+  - JobPosting.places — the [lat, lon] of each city those locations name
+    (app.services.geo.resolve_places), what "within N miles of <city>" searches measure.
   - JobPosting.workplace_type — what the location text says about remote / hybrid /
     on-site, reconciled with what the adapter recorded (app.services.workplace).
   - JobPosting.title / company_name / location — HTML entities decoded
@@ -9,7 +11,7 @@
     was done on the way in, and JobPosting.locations re-split from the decoded
     location ("Tacoma &amp; Gordon" used to be cut in two at the ";").
 
-All three are set going forward by _upsert_posting on every scan; this brings existing
+All of these are set going forward by _upsert_posting on every scan; this brings existing
 rows in line, and can be re-run whenever the resolver rules or the bundled data
 under app/data/geo/ change (deploys don't touch existing rows). The resolver is
 pure lookups against bundled data — no network calls — so it's safe and fast over
@@ -40,7 +42,7 @@ from sqlalchemy import bindparam, select, update
 
 from app.db.session import SessionLocal
 from app.models.job_posting import JobPosting
-from app.services.geo import resolve_area_codes
+from app.services.geo import resolve_area_codes, resolve_places
 from app.services.job_locations import split_locations
 from app.services.jobs import decode_entities
 from app.services.workplace import infer_workplace_type, reconcile_workplace_type
@@ -76,13 +78,14 @@ def main() -> None:
             location=bindparam("new_location"),
             locations=bindparam("new_locations"),
             metros=bindparam("new_metros"),
+            places=bindparam("new_places"),
             workplace_type=bindparam("new_workplace_type"),
         )
     )
 
     db = SessionLocal()
     try:
-        seen = areas_changed = locations_repaired = text_decoded = with_area = 0
+        seen = areas_changed = places_changed = locations_repaired = text_decoded = with_area = with_places = 0
         workplace_transitions: collections.Counter[str] = collections.Counter()
         last_id = None
         while args.limit is None or seen < args.limit:
@@ -93,6 +96,7 @@ def main() -> None:
                 JobPosting.location,
                 JobPosting.locations,
                 JobPosting.metros,
+                JobPosting.places,
                 JobPosting.workplace_type,
             ).order_by(JobPosting.id)
             if last_id is not None:
@@ -126,6 +130,10 @@ def main() -> None:
                 with_area += bool(areas)
                 areas_changed += areas != row.metros
 
+                places = resolve_places(locations)
+                with_places += bool(places)
+                places_changed += places != row.places
+
                 workplace = row.workplace_type
                 if not args.skip_workplace:
                     workplace = reconcile_workplace_type(row.workplace_type, infer_workplace_type(locations))
@@ -136,6 +144,7 @@ def main() -> None:
                     (title, company_name, location) != (row.title, row.company_name, row.location)
                     or locations != row.locations
                     or areas != row.metros
+                    or places != row.places
                     or workplace != row.workplace_type
                 ):
                     updates.append(
@@ -146,6 +155,7 @@ def main() -> None:
                             "new_location": location,
                             "new_locations": locations,
                             "new_metros": areas,
+                            "new_places": places,
                             "new_workplace_type": str(workplace),
                         }
                     )
@@ -164,6 +174,7 @@ def main() -> None:
 
         verb = "would change (dry-run, nothing written)" if args.dry_run else "changed"
         logger.info("Done. %d postings; areas %s on %d; %d have at least one area.", seen, verb, areas_changed, with_area)
+        logger.info("Places %s on %d; %d have at least one city with coordinates.", verb, places_changed, with_places)
         logger.info("Title/company/location text had HTML entities decoded on %d postings.", text_decoded)
         logger.info("Location entries re-split on %d postings.", locations_repaired)
         if args.skip_workplace:

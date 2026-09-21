@@ -2,7 +2,7 @@ import uuid
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import false, func, or_, select
+from sqlalchemy import false, func, or_, select, true
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
@@ -10,9 +10,9 @@ from app.models.enums import ScanStatus, WorkplaceType
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
 from app.models.user import User
-from app.schemas.job import JobDetailRead, JobListRead, JobUrlSubmit, MetroRead
+from app.schemas.job import JobDetailRead, JobListRead, JobUrlSubmit, MetroRead, SearchAreaRead
 from app.services import geo
-from app.services.job_locations import location_matches, location_suggestions, metro_suggestions
+from app.services.job_locations import location_matches, location_suggestions, metro_suggestions, radius_search
 from app.services.jobs import ensure_user_applicant, get_or_create_job_posting, rescan_job_url, to_job_detail
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -46,6 +46,7 @@ def list_job_urls(
     q: str | None = None,
     location: str | None = None,
     metro: str | None = None,
+    radius: int = Query(geo.RADIUS_MILES, ge=5, le=100),
     company: str | None = None,
     posted_within_days: int | None = Query(None, ge=1),
     workplace_type: WorkplaceType | None = None,
@@ -54,18 +55,27 @@ def list_job_urls(
     db: Session = Depends(get_db),
 ) -> JobListRead:
     stmt = select(JobPostingUrl)
+    order = [JobPostingUrl.created_at.desc()]
+    search_area: SearchAreaRead | None = None
     if q or location or metro or company or posted_within_days or workplace_type:
         stmt = stmt.join(JobPosting, JobPosting.url_id == JobPostingUrl.id).distinct()
         if q:
             stmt = stmt.where(JobPosting.title.ilike(f"%{q}%"))
         if location:
-            # Text that names a place we know (a city, a state, "United States")
-            # also finds postings filed under the areas it covers — a city
-            # reaches its metro area and the ones within RADIUS_MILES — however
-            # they spelled it; anything else is a plain text match.
-            conditions = [location_matches(f"%{location}%")]
-            conditions += [JobPosting.metros.contains([code]) for code in geo.search_areas(location) or []]
-            stmt = stmt.where(or_(*conditions))
+            place = geo.search_place(location)
+            if place is not None:
+                # A city: postings with a place within `radius` miles of it, the
+                # city's own first, then nearer before farther (see radius_search).
+                nearest, near, band = radius_search(place, radius)
+                stmt = stmt.join(nearest, true()).where(near).add_columns(band.label("distance_band"))
+                order = [band, JobPostingUrl.created_at.desc()]
+                search_area = SearchAreaRead(label=geo.place_label(place), radius_miles=radius)
+            else:
+                # A state or "United States" also finds postings filed under it
+                # however they spelled the place; anything else is a plain text match.
+                conditions = [location_matches(f"%{location}%")]
+                conditions += [JobPosting.metros.contains([code]) for code in geo.search_areas(location) or []]
+                stmt = stmt.where(or_(*conditions))
         if metro:
             metro_area = geo.metro_by_slug(metro)
             # An unknown slug matches nothing (rather than erroring): a stale
@@ -80,9 +90,15 @@ def list_job_urls(
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
 
-    stmt = stmt.order_by(JobPostingUrl.created_at.desc()).limit(page_size).offset((page - 1) * page_size)
+    stmt = stmt.order_by(*order).limit(page_size).offset((page - 1) * page_size)
     url_rows = db.scalars(stmt).all()
-    return JobListRead(items=[to_job_detail(row) for row in url_rows], total=total, page=page, page_size=page_size)
+    return JobListRead(
+        items=[to_job_detail(row) for row in url_rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+        search_area=search_area,
+    )
 
 
 # Registered before /{url_id} so "locations" isn't swallowed by that route's

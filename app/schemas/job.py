@@ -60,8 +60,16 @@ class JobDetailRead(BaseModel):
     posting: JobPostingRead | None
 
 
+class SearchAreaRead(BaseModel):
+    """What a city search covered: the city and how far around it was looked."""
+
+    label: str  # "West Bountiful, Utah"
+    radius_miles: int
+
+
 class JobListRead(BaseModel):
     items: list[JobDetailRead]
     total: int
     page: int
     page_size: int
+    search_area: SearchAreaRead | None = None  # set when the location search was a city, searched by distance

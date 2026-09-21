@@ -16,7 +16,7 @@ from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
 from app.services.crawl_sources import register_discovered_board
 from app.services.job_llm_extractor import LlmExtraction, extract_with_llm, html_to_text
-from app.services.geo import resolve_area_codes
+from app.services.geo import resolve_area_codes, resolve_places
 from app.services.job_locations import split_locations
 from app.services.workplace import infer_workplace_type, reconcile_workplace_type
 from app.services.job_queue import enqueue_scan, enqueue_source_scan
@@ -442,6 +442,7 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
     # pre-truncate. (NUL-stripped for the same reason as everything else.)
     posting.locations = split_locations(_strip_nul(location) if location else None)
     posting.metros = resolve_area_codes(posting.locations)
+    posting.places = resolve_places(posting.locations)
     # What the location text states ("Remote - US", "… HQ") beats an adapter's default
     # guess that a plain place means on-site — see app.services.workplace.
     posting.workplace_type = reconcile_workplace_type(fields["workplace_type"], infer_workplace_type(posting.locations))

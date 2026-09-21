@@ -14,7 +14,7 @@ import re
 import time
 from collections.abc import Sequence
 
-from sqlalchemy import ColumnElement, and_, func, or_, select
+from sqlalchemy import ColumnElement, Float, FromClause, and_, case, cast, func, literal_column, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.job_posting import JobPosting
@@ -88,6 +88,52 @@ def location_matches(pattern: str) -> ColumnElement[bool]:
         func.char_length(JobPosting.location) >= _LOCATION_COLUMN_LENGTH,
     )
     return and_(display_may_match, entry_matches)
+
+
+# A city search lists the searched place's own postings first, then those within
+# 5 miles, within 15, and the rest out to the search radius; newest first inside
+# each band. Coordinates are exact per place, so "the same place" is any distance
+# under half a mile.
+SAME_PLACE_MILES = 0.5
+NEAR_MILES = 5
+NEARBY_MILES = 15
+
+
+def radius_search(
+    place: geo.Place, radius: float
+) -> tuple[FromClause, ColumnElement[bool], ColumnElement[int]]:
+    """A "within `radius` miles of `place`" search over JobPosting:
+    (nearest, where, band). Join `nearest` (a lateral subquery giving each posting's
+    distance in `miles` to its closest place) on true(), filter with `where`, and
+    order by `band` then recency. Correlates to JobPosting.
+
+    `where` narrows with the indexed `metros` column first — a posting with a
+    resolved place always carries its state code — so distances are only measured
+    for the few thousand postings in the states around the place. Haversine in
+    plain SQL (Postgres' built-in trig, no extension); `least(1, ...)` guards
+    the asin against rounding just past 1.
+    """
+    def sql(name: str, *args):
+        return getattr(func, name)(*args, type_=Float)  # typed, so "/ 2" stays float division
+
+    point = func.jsonb_array_elements(JobPosting.places).column_valued("point")
+    lat = cast(point.op("->>")(literal_column("0")), Float)
+    lon = cast(point.op("->>")(literal_column("1")), Float)
+    half_chord = sql("power", sql("sin", sql("radians", lat - place.lat) / 2), 2) + (
+        sql("cos", sql("radians", place.lat))
+        * sql("cos", sql("radians", lat))
+        * sql("power", sql("sin", sql("radians", lon - place.lon) / 2), 2)
+    )
+    miles = 2 * geo.EARTH_RADIUS_MILES * sql("asin", sql("least", 1.0, sql("sqrt", half_chord)))
+    nearest = select(sql("min", miles).label("miles")).correlate(JobPosting).lateral("nearest")
+    in_states = or_(*[JobPosting.metros.contains([state]) for state in geo.nearby_state_codes(place, radius)])
+    band = case(
+        (nearest.c.miles < SAME_PLACE_MILES, 0),
+        (nearest.c.miles <= NEAR_MILES, 1),
+        (nearest.c.miles <= NEARBY_MILES, 2),
+        else_=3,
+    )
+    return nearest, and_(in_states, nearest.c.miles <= radius), band
 
 
 def rank_locations(counts: Sequence[tuple[str, int]], q: str | None, limit: int) -> list[str]:

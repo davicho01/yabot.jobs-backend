@@ -350,38 +350,48 @@ def test_a_us_city_and_state_is_unaffected_by_the_country_code_guard():
 # ------------------------------------------------------------- radius search
 
 
-def test_a_city_search_covers_the_areas_within_25_miles_plus_its_own():
-    bountiful = resolve_entry("Bountiful, Utah, United States")
-    assert (bountiful.geo, bountiful.place.name, bountiful.metro.name) == ("city", "Bountiful", "Ogden, UT")
+def test_a_city_search_is_by_distance_from_the_city_itself():
+    place = geo.search_place("West Bountiful, Utah")
 
-    codes = geo.search_areas("Bountiful, Utah")
-
-    assert codes[0] == bountiful.metro.code  # its own area first, then by distance
-    assert {"36260", SLC} <= set(codes)  # Ogden (its own) and Salt Lake City, 10 miles south
-    assert "39340" not in codes  # Provo is ~40 miles away
-
-
-def test_the_radius_reaches_across_state_lines():
-    # Kansas City, MO sits on the state line: the Kansas side is well inside 25 miles.
-    codes = geo.search_areas("Kansas City, Missouri")
-
-    assert "28140" in codes  # Kansas City, MO-KS metro
-    assert all(geo.metro_by_code(code).kind != "state" for code in codes)
+    assert (place.name, place.state) == ("West Bountiful", "UT")
+    assert geo.place_label(place) == "West Bountiful, Utah"
+    # A city is searched by distance, not by the metro area it happens to be in
+    # (Ogden-Clearfield runs 43 miles north to Brigham City).
+    assert geo.search_areas("West Bountiful, Utah") is None
+    for text in ("Utah", "Utah, United States", "Canada", "Remote", "Salt", "Cleveland Clinic Main Campus"):
+        assert geo.search_place(text) is None
 
 
 def test_a_state_or_the_united_states_searches_states_and_other_text_is_a_plain_search():
     assert geo.search_areas("Utah, United States") == ["UT"]
     assert geo.search_areas("Utah") == ["UT"]
     assert len(geo.search_areas("United States")) == 52  # 50 states + DC + Puerto Rico
+    assert geo.search_areas("Bay Area") == ["41860"]  # an area alias: a metro with no single city
     for text in ("Canada", "Remote", "Salt", "Cleveland Clinic Main Campus", "Toronto, Ontario, Canada"):
         assert geo.search_areas(text) is None
 
 
-def test_nearby_area_codes_honours_the_distance():
-    place = resolve_entry("Bountiful, Utah").place
+def test_nearby_state_codes_are_the_states_within_range_own_state_first():
+    bountiful = geo.search_place("Bountiful, Utah")
+    assert geo.nearby_state_codes(bountiful, 25) == ("UT",)
 
-    assert set(geo.nearby_area_codes(place, 5)) == {"36260"}  # Bountiful itself; Salt Lake City proper is 10 miles off
-    assert "39340" in geo.nearby_area_codes(place, 60)
+    # Kansas City, MO sits on the state line: the Kansas side is well inside 25 miles.
+    kansas_city = geo.search_place("Kansas City, Missouri")
+    assert geo.nearby_state_codes(kansas_city, 25)[0] == "MO"
+    assert "KS" in geo.nearby_state_codes(kansas_city, 25)
+
+
+def test_resolve_places_gives_coordinates_only_for_entries_that_name_a_city():
+    points = geo.resolve_places(
+        ["West Bountiful, UT", "West Bountiful, Utah, US", "Salt Lake City, UT", "Remote", "Utah", "London, UK",
+         "Cleveland Clinic Main Campus"]
+    )
+
+    west_bountiful = geo.search_place("West Bountiful, Utah")
+    salt_lake = geo.search_place("Salt Lake City, UT")
+    # two spellings of one city are one point; a state, "Remote", a foreign city and a facility add none
+    assert points == [[west_bountiful.lat, west_bountiful.lon], [salt_lake.lat, salt_lake.lon]]
+    assert geo.resolve_places([]) == []
 
 
 # ------------------------------------------------------------ place suggestions
