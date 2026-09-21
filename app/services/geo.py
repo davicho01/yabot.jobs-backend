@@ -217,7 +217,10 @@ class _Geo:
                     float(row["lat"]), float(row["lon"]),
                 )
                 primary_keys = {_city_key(row["name"]), _city_key(row["ascii"])}
-                alias_keys = {_city_key(a) for a in row["aliases"].split("|") if a} - primary_keys
+                # An alternate name that is a generic word ("North" for North Salt Lake,
+                # "Center" for Tallmadge) would send any "North Campus" or "Main Street"
+                # to that town — see _GENERIC_WORDS.
+                alias_keys = {_city_key(a) for a in row["aliases"].split("|") if a} - primary_keys - _GENERIC_WORDS
                 for key in primary_keys:
                     self.places_in_state.setdefault((place.state, key), []).append(place)
                 for key in alias_keys:

@@ -421,3 +421,14 @@ def test_place_suggestions_with_nothing_typed_lead_with_the_united_states_then_b
     assert suggestions[0] == "United States"
     assert suggestions[1] == "New York City, New York, United States"
     assert len(suggestions) == 4
+
+
+def test_a_generic_word_alternate_name_does_not_pull_text_into_a_town():
+    # GeoNames lists "North" as an alternate name of North Salt Lake, so anything that
+    # reduced to "north" used to land there.
+    for entry in ("North Campus, United States of America", "North Skull Valley, UT, USA, United States of America"):
+        resolution = resolve_entry(entry)
+        assert resolution.metro is None and resolution.place is None, entry
+    # the town itself, and a state-only reading of the second entry, still work
+    assert resolve_entry("North Salt Lake, UT").place.name == "North Salt Lake"
+    assert resolve_entry("North Skull Valley, UT, USA, United States of America").state.name == "Utah"
