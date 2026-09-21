@@ -11,6 +11,7 @@ from app.models import JobPosting
 from app.services import geo, job_locations, jobs
 from app.services.adapters.base import ScanResult
 from app.services.job_locations import location_suggestions, rank_metros
+from app.services.jobs import decode_entities
 
 SLC, PROVO, NYC, SF = "41620", "39340", "35620", "41860"
 
@@ -135,3 +136,31 @@ def test_rank_metros_suggests_states_alongside_metro_areas():
     assert [(m.name, m.kind) for m, _ in rank_metros(counts, "utah", 5)] == [("Utah", "state")]
     assert [m.name for m, _ in rank_metros(counts, "new york", 5)] == ["New York, NY", "New York"]
     assert [m.name for m, _ in rank_metros(counts, "salt", 5)] == ["Salt Lake City, UT"]
+
+
+def test_decode_entities():
+    assert decode_entities("Sales &amp; Marketing") == "Sales & Marketing"
+    assert decode_entities("United States &gt; California : Remote") == "United States > California : Remote"
+    assert decode_entities("Tom&#39;s &amp;amp; Jerry") == "Tom's & Jerry"  # double-encoded too
+    assert decode_entities("Plain text, 5 > 3") == "Plain text, 5 > 3"
+    assert decode_entities(None) is None
+    assert decode_entities("") == ""
+
+
+def test_upsert_stores_decoded_text_and_places_split_correctly(scan_db, make_source, make_url):
+    result = ScanResult(
+        success=True,
+        title="Sales &amp; Marketing Lead",
+        company_name="Bob Office &amp; Warehouse",
+        location="1403 - Tacoma &amp; Gordon, Canada; Austin, TX",
+    )
+
+    posting = jobs._upsert_posting(scan_db, make_url(make_source()), result, datetime.now(timezone.utc))
+    scan_db.commit()
+
+    assert posting.title == "Sales & Marketing Lead"
+    assert posting.company_name == "Bob Office & Warehouse"
+    assert posting.location == "1403 - Tacoma & Gordon, Canada; Austin, TX"
+    assert posting.locations == ["1403 - Tacoma & Gordon, Canada", "Austin, TX"]
+    # Only Austin counts: the Canadian entry no longer leaves a "Tacoma" fragment that files it under Washington.
+    assert posting.metros == ["12420", "TX"]

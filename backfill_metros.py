@@ -4,8 +4,10 @@
     fall in (app.services.geo.resolve_area_codes).
   - JobPosting.workplace_type — what the location text says about remote / hybrid /
     on-site, reconciled with what the adapter recorded (app.services.workplace).
-  - JobPosting.locations — re-split from `location` for postings whose text carries
-    HTML entities ("Tacoma &amp; Gordon"), which used to be cut in two at the ";".
+  - JobPosting.title / company_name / location — HTML entities decoded
+    ("Sales &amp; Marketing" -> "Sales & Marketing") for postings scanned before that
+    was done on the way in, and JobPosting.locations re-split from the decoded
+    location ("Tacoma &amp; Gordon" used to be cut in two at the ";").
 
 All three are set going forward by _upsert_posting on every scan; this brings existing
 rows in line, and can be re-run whenever the resolver rules or the bundled data
@@ -40,6 +42,7 @@ from app.db.session import SessionLocal
 from app.models.job_posting import JobPosting
 from app.services.geo import resolve_area_codes
 from app.services.job_locations import split_locations
+from app.services.jobs import decode_entities
 from app.services.workplace import infer_workplace_type, reconcile_workplace_type
 
 logging.basicConfig(level=logging.INFO)
@@ -68,6 +71,9 @@ def main() -> None:
         update(table)
         .where(table.c.id == bindparam("posting_id"))
         .values(
+            title=bindparam("new_title"),
+            company_name=bindparam("new_company_name"),
+            location=bindparam("new_location"),
             locations=bindparam("new_locations"),
             metros=bindparam("new_metros"),
             workplace_type=bindparam("new_workplace_type"),
@@ -76,12 +82,14 @@ def main() -> None:
 
     db = SessionLocal()
     try:
-        seen = areas_changed = locations_repaired = with_area = 0
+        seen = areas_changed = locations_repaired = text_decoded = with_area = 0
         workplace_transitions: collections.Counter[str] = collections.Counter()
         last_id = None
         while args.limit is None or seen < args.limit:
             query = select(
                 JobPosting.id,
+                JobPosting.title,
+                JobPosting.company_name,
                 JobPosting.location,
                 JobPosting.locations,
                 JobPosting.metros,
@@ -96,11 +104,22 @@ def main() -> None:
 
             updates = []
             for row in rows:
+                title, company_name, location = (
+                    decode_entities(row.title) if row.title and _HTML_ENTITY_RE.search(row.title) else row.title,
+                    decode_entities(row.company_name)
+                    if row.company_name and _HTML_ENTITY_RE.search(row.company_name)
+                    else row.company_name,
+                    decode_entities(row.location)
+                    if row.location and _HTML_ENTITY_RE.search(row.location)
+                    else row.location,
+                )
+                text_decoded += (title, company_name, location) != (row.title, row.company_name, row.location)
+
                 locations = row.locations
-                if row.location and _HTML_ENTITY_RE.search(row.location):
+                if location != row.location:
                     # Split before entities were decoded: "Tacoma &amp; Gordon" became
-                    # two bogus entries at the ";" — re-split from the display string.
-                    locations = split_locations(row.location)
+                    # two bogus entries at the ";" — re-split from the decoded text.
+                    locations = split_locations(location)
                 locations_repaired += locations != row.locations
 
                 areas = resolve_area_codes(locations)
@@ -113,10 +132,18 @@ def main() -> None:
                 if workplace != row.workplace_type:
                     workplace_transitions[f"{row.workplace_type} -> {workplace}"] += 1
 
-                if locations != row.locations or areas != row.metros or workplace != row.workplace_type:
+                if (
+                    (title, company_name, location) != (row.title, row.company_name, row.location)
+                    or locations != row.locations
+                    or areas != row.metros
+                    or workplace != row.workplace_type
+                ):
                     updates.append(
                         {
                             "posting_id": row.id,
+                            "new_title": title,
+                            "new_company_name": company_name,
+                            "new_location": location,
                             "new_locations": locations,
                             "new_metros": areas,
                             "new_workplace_type": str(workplace),
@@ -137,7 +164,8 @@ def main() -> None:
 
         verb = "would change (dry-run, nothing written)" if args.dry_run else "changed"
         logger.info("Done. %d postings; areas %s on %d; %d have at least one area.", seen, verb, areas_changed, with_area)
-        logger.info("Entries re-split (HTML entities in the location text) on %d postings.", locations_repaired)
+        logger.info("Title/company/location text had HTML entities decoded on %d postings.", text_decoded)
+        logger.info("Location entries re-split on %d postings.", locations_repaired)
         if args.skip_workplace:
             logger.info("Work type left alone (--skip-workplace).")
         else:

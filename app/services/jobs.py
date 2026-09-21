@@ -1,3 +1,4 @@
+import html
 import json
 import logging
 import time
@@ -390,6 +391,21 @@ def _strip_nul(value):
     return value
 
 
+def decode_entities(value: str | None) -> str | None:
+    """HTML entities decoded ("Sales &amp; Marketing" -> "Sales & Marketing").
+    Scraped titles, companies and locations often still carry them, which shows
+    up literally on the job card — and the ";" inside one ("&amp;") reads as a
+    separator between two places. Repeated for double-encoded text ("&amp;amp;")."""
+    if value is None:
+        return None
+    for _ in range(3):
+        decoded = html.unescape(value)
+        if decoded == value:
+            break
+        value = decoded
+    return value
+
+
 def _fit(value: str | None, max_length: int) -> str | None:
     """NUL-stripped and truncated to a varchar(max_length) column."""
     if value is None:
@@ -416,13 +432,15 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
     # text *and* JSONB) or a title longer than its varchar column makes the
     # whole UPDATE fail — and since the failing message is retried, one such
     # page used to be re-scanned forever. Clean it on the way in instead.
-    posting.title = _fit(fields["title"], _TITLE_MAX)
-    posting.company_name = _fit(fields["company_name"], _COMPANY_NAME_MAX)
-    posting.location = _fit(fields["location"], _LOCATION_MAX)
+    # Entities are decoded first, so what's stored (and shown) is real text.
+    location = decode_entities(fields["location"])
+    posting.title = _fit(decode_entities(fields["title"]), _TITLE_MAX)
+    posting.company_name = _fit(decode_entities(fields["company_name"]), _COMPANY_NAME_MAX)
+    posting.location = _fit(location, _LOCATION_MAX)
     # From the full string, not the 255-char display value above, so a long
     # list of locations isn't cut off partway for sources that don't
     # pre-truncate. (NUL-stripped for the same reason as everything else.)
-    posting.locations = split_locations(_strip_nul(fields["location"]) if fields["location"] else None)
+    posting.locations = split_locations(_strip_nul(location) if location else None)
     posting.metros = resolve_area_codes(posting.locations)
     # What the location text states ("Remote - US", "… HQ") beats an adapter's default
     # guess that a plain place means on-site — see app.services.workplace.
