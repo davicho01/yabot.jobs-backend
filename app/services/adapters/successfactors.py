@@ -26,7 +26,14 @@ _JOB_LINK_RE = re.compile(r'href="(/job/[^"]+/\d+/)"')
 # which element wraps it.
 _TITLE_RE = re.compile(r'itemprop="title"[^>]*>([^<]*)', re.IGNORECASE)
 _DATE_POSTED_RE = re.compile(r'itemprop="datePosted" content="([^"]*)"', re.IGNORECASE)
-_ADDRESS_PART_RE = re.compile(r'itemprop="(addressLocality|addressRegion|addressCountry)" content="([^"]*)"')
+_ADDRESS_PART_RE = re.compile(
+    r'itemprop="(addressLocality|addressRegion|addressCountry|streetAddress)" content="([^"]*)"'
+)
+# Present on every tenant's job detail page (verified live across five: Lincoln
+# Financial, Erie Insurance, Paramount, PACCAR, Farmers Insurance) but never
+# extracted — every SuccessFactors-sourced posting in prod has a null
+# company_name as a result.
+_COMPANY_NAME_RE = re.compile(r'itemprop="hiringOrganization" content="([^"]*)"', re.IGNORECASE)
 _DESCRIPTION_RE = re.compile(r'itemprop="description"[^>]*>(.*?)<p class="job-location">', re.IGNORECASE | re.DOTALL)
 _JOB_PATH_SIGNATURE = "/job/"
 
@@ -72,7 +79,18 @@ def _location_of(html: str) -> str | None:
     parts = dict(_ADDRESS_PART_RE.findall(html))
     bits = (parts.get("addressLocality"), parts.get("addressRegion"), parts.get("addressCountry"))
     location = ", ".join(p.strip() for p in bits if p and p.strip())
-    return location or None
+    if location:
+        return location
+    # Some tenants leave locality/region/country empty on certain postings
+    # (nationwide/remote-eligible roles, verified live on Farmers Insurance)
+    # and put the only location hint in streetAddress instead (e.g. "US").
+    street = parts.get("streetAddress")
+    return street.strip() if street and street.strip() else None
+
+
+def _company_name_of(html: str) -> str | None:
+    match = _COMPANY_NAME_RE.search(html)
+    return clean_text(match.group(1)) if match else None
 
 
 def _posted_at_of(html: str) -> date | None:
@@ -103,6 +121,7 @@ def scan_job_url(url: str) -> ScanResult | None:
         success=True,
         title=clean_text(title_match.group(1)) if title_match else base.fallback_title(html),
         description=html_to_formatted_text(description_match.group(1)) if description_match else None,
+        company_name=_company_name_of(html),
         location=_location_of(html),
         posted_at=_posted_at_of(html),
         raw_html_excerpt=html[:20_000],

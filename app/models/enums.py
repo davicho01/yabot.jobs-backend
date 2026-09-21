@@ -150,6 +150,18 @@ class AtsType(StrEnum):
     # job-groups API mirrors the same Greenhouse job data instead (see
     # adapters/toss.py).
     TOSS = "toss"
+    # Cornerstone OnDemand (CSOD) — a multi-tenant ATS at {corp}.csod.com,
+    # distinct from Talemetry above (also a Cornerstone product, but
+    # white-labeled onto each customer's own domain instead). One corp
+    # tenant hosts several independent per-country/brand "career sites"
+    # (see adapters/csod.py), each its own board.
+    CSOD = "csod"
+    # HiringRoom — a Latin American multi-tenant ATS at
+    # {tenant}.hiringroom.com (see adapters/hiringroom.py).
+    HIRINGROOM = "hiringroom"
+    # Oracle Taleo — a multi-tenant ATS at {tenant}.taleo.net, one tenant
+    # hosting several independent "career sections" (see adapters/taleo.py).
+    TALEO = "taleo"
 
 
 class CrawlSourceStatus(StrEnum):
