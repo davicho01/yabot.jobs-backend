@@ -125,8 +125,14 @@ def _fetch_jobs(board_key: str) -> list[str]:
 # primary location, job schedule, and the complete description/
 # responsibilities/qualifications HTML the og:description preview is
 # truncated from.
+# The job-id segment is usually pure numeric (verified across most
+# tenants: AF Group, DC Water, Southern Company, Sinclair, ...) but not
+# always — Bloomingdale's/bluemercury's tenant uses "REQ_810563"-style ids
+# instead (verified live), which a \d+-only pattern missed entirely,
+# silently falling through to the generic scanner (no location at all)
+# for every one of their postings.
 _JOB_URL_RE = re.compile(
-    r"([a-zA-Z0-9.-]+\.oraclecloud\.com)/hcmUI/CandidateExperience/[a-z]{2}/sites/([^/]+)/job/(\d+)",
+    r"([a-zA-Z0-9.-]+\.oraclecloud\.com)/hcmUI/CandidateExperience/[a-z]{2}/sites/([^/]+)/job/([A-Za-z0-9_]+)",
     re.IGNORECASE,
 )
 _DETAIL_URL = "https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails"
@@ -140,7 +146,7 @@ _DETAIL_URL = "https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisi
 # (careers.ti.com/en/sites/CX/job/{id}, served directly, no redirect). Host-
 # agnostic on purpose so it catches both the "job" and "jobs/preview" path
 # shapes seen in the wild.
-_JOB_PATH_RE = re.compile(r"/sites/([^/]+)/jobs?(?:/preview)?/(\d+)(?:/|$|\?)", re.IGNORECASE)
+_JOB_PATH_RE = re.compile(r"/sites/([^/]+)/jobs?(?:/preview)?/([A-Za-z0-9_]+)(?:/|$|\?)", re.IGNORECASE)
 
 
 def _resolve(url: str) -> tuple[str, str, str] | None:
