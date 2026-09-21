@@ -1,3 +1,4 @@
+import concurrent.futures
 import re
 from urllib.parse import urlsplit
 
@@ -88,21 +89,49 @@ def _company_name_from_header(html: str) -> str | None:
     return clean_text(match.group(1)) if match else None
 
 
-# Some tenants (verified live: careers.lululemon.com) front every path with
-# a WAF that hangs a plain httpx request to a ReadTimeout - not a fast
-# reject like delta.avature.net's empty 202 - for any non-browser-looking
-# User-Agent, including our own bot UA (app.services.adapters.base's
-# "YabotJobsBot/1.0"), but responds instantly with the real content for a
-# genuine browser UA. Sending one here avoids paying for a browser render
-# (and the 30s timeout beforehand) on every single fetch for tenants like
-# this one - the render fallback stays in place below for tenants (like
-# delta) that block regardless of UA.
+# Some tenants (verified live: careers.lululemon.com, from a residential/
+# dev network) front every path with a WAF that hangs a plain httpx request
+# outright for any non-browser-looking User-Agent, including our own bot UA
+# (app.services.adapters.base's "YabotJobsBot/1.0") - not a fast reject like
+# delta.avature.net's empty 202 - but responds instantly with the real
+# content for a genuine browser UA. Sending one here avoids paying for a
+# browser render (and the timeout beforehand) on every single fetch for
+# tenants like this one - the render fallback stays in place below for
+# tenants (like delta) that block regardless of UA.
 _BROWSER_LIKE_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
     )
 }
+
+# The UA fix above only helps once a connection actually gets made - from
+# our GCP-hosted services specifically (verified live: careers.lululemon.com
+# hung the *entire* request past Cloud Run's own 300s platform ceiling, with
+# the browser-render fallback below never even invoked), the same request
+# that returns in under a second from a residential IP never completes at
+# all. That's consistent with a WAF silently black-holing traffic from
+# recognized cloud/datacenter ASNs, but could equally be Python's
+# socket.create_connection() - which get_with_retry ultimately calls -
+# blocking on DNS resolution before TIMEOUT's socket-level deadline ever
+# applies; either way, get_with_retry's own `timeout=TIMEOUT` isn't a
+# reliable bound in that environment. Running the call in a worker thread
+# and enforcing a hard wall-clock .result(timeout=...) bounds it regardless
+# of which layer is actually stuck. Python can't forcibly kill a blocked
+# thread, so a genuinely hung call leaks its thread for the life of the
+# container rather than the life of this one request - an acceptable
+# trade-off for a rare, tenant-specific pathological case, versus tying up
+# the whole request (and, unbounded, the container) for good.
+_HARD_TIMEOUT_BUFFER = 5.0
+
+
+def _get_with_hard_timeout(url: str, *, headers: dict[str, str]) -> httpx.Response:
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(get_with_retry, url, timeout=TIMEOUT, follow_redirects=True, headers=headers)
+    try:
+        return future.result(timeout=TIMEOUT + _HARD_TIMEOUT_BUFFER)
+    finally:
+        executor.shutdown(wait=False)
 
 
 def _match(url: str) -> str | None:
@@ -123,11 +152,11 @@ def _board_key(url: str) -> str | None:
 
 def _fetch_page_html(url: str, *, wait_for_selector: str | None = None) -> str | None:
     try:
-        response = get_with_retry(url, timeout=TIMEOUT, follow_redirects=True, headers=_BROWSER_LIKE_HEADERS)
+        response = _get_with_hard_timeout(url, headers=_BROWSER_LIKE_HEADERS)
         response.raise_for_status()
         if response.text.strip():
             return response.text
-    except httpx.HTTPError:
+    except (httpx.HTTPError, concurrent.futures.TimeoutError):
         pass
     # Some tenants (verified live: delta.avature.net) front every path —
     # including the plain /careers listing and even the RSS feed endpoint,
@@ -161,11 +190,11 @@ def _fetch_job_detail_html(url: str) -> str | None:
 def _resolve_careers_url(host: str) -> str | None:
     base_url = f"https://{host}/careers"
     try:
-        response = get_with_retry(base_url, timeout=TIMEOUT, follow_redirects=True, headers=_BROWSER_LIKE_HEADERS)
+        response = _get_with_hard_timeout(base_url, headers=_BROWSER_LIKE_HEADERS)
         response.raise_for_status()
         if response.text.strip():
             return str(response.url).split("?")[0].rstrip("/")
-    except httpx.HTTPError:
+    except (httpx.HTTPError, concurrent.futures.TimeoutError):
         pass
     rendered = fetch_rendered_page(base_url)
     if rendered is None:
