@@ -85,6 +85,16 @@ def test_split_locations_drops_a_truncated_last_fragment():
     assert split_locations("Austin, TX; Boston, MA; Seatt...") == ["Austin, TX", "Boston, MA"]
 
 
+def test_split_locations_decodes_html_entities_before_splitting():
+    # The ";" inside "&amp;" must not be read as a separator between two places.
+    assert split_locations("1403 - Tacoma &amp; Gordon, Canada") == ["1403 - Tacoma & Gordon, Canada"]
+    assert split_locations("Allergy &amp; Rheumatology - Linden Oaks; Austin, TX") == [
+        "Allergy & Rheumatology - Linden Oaks",
+        "Austin, TX",
+    ]
+    assert split_locations("Nashville&#39;s Music Row") == ["Nashville's Music Row"]
+
+
 def test_split_locations_caps_entry_count_and_length():
     many = "; ".join(f"City {i}, ST" for i in range(300))
     assert len(split_locations(many)) == 100

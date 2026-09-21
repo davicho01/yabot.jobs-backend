@@ -9,6 +9,7 @@ picking "Seattle, WA" finds every posting that lists it, wherever in a long
 multi-location string it sits.
 """
 
+import html
 import re
 import time
 from collections.abc import Sequence
@@ -48,6 +49,9 @@ def split_locations(raw: str | None) -> list[str]:
     """
     if not raw:
         return []
+    # Scraped text often still carries HTML entities ("Tacoma &amp; Gordon"), and
+    # the ";" inside one would otherwise split a single place in two.
+    raw = html.unescape(raw)
     seen: set[str] = set()
     locations: list[str] = []
     for chunk in _SEPARATOR_RE.split(raw):

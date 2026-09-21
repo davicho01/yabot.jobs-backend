@@ -4,8 +4,10 @@
     fall in (app.services.geo.resolve_area_codes).
   - JobPosting.workplace_type — what the location text says about remote / hybrid /
     on-site, reconciled with what the adapter recorded (app.services.workplace).
+  - JobPosting.locations — re-split from `location` for postings whose text carries
+    HTML entities ("Tacoma &amp; Gordon"), which used to be cut in two at the ";".
 
-Both are set going forward by _upsert_posting on every scan; this brings existing
+All three are set going forward by _upsert_posting on every scan; this brings existing
 rows in line, and can be re-run whenever the resolver rules or the bundled data
 under app/data/geo/ change (deploys don't touch existing rows). The resolver is
 pure lookups against bundled data — no network calls — so it's safe and fast over
@@ -30,16 +32,20 @@ On prod, run it from the deployed image as a one-off Cloud Run job execution
 import argparse
 import collections
 import logging
+import re
 
 from sqlalchemy import bindparam, select, update
 
 from app.db.session import SessionLocal
 from app.models.job_posting import JobPosting
 from app.services.geo import resolve_area_codes
+from app.services.job_locations import split_locations
 from app.services.workplace import infer_workplace_type, reconcile_workplace_type
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("app.backfill_metros")
+
+_HTML_ENTITY_RE = re.compile(r"&(?:#\d+|#x[0-9a-fA-F]+|[a-zA-Z]+);")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -56,24 +62,31 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
     table = JobPosting.__table__
-    # Core (table-level) UPDATEs: an ORM-enabled one with extra WHERE criteria
+    # Core (table-level) UPDATE: an ORM-enabled one with extra WHERE criteria
     # can't be used with executemany.
-    write_areas = update(table).where(table.c.id == bindparam("posting_id")).values(metros=bindparam("new_metros"))
-    write_both = (
+    write = (
         update(table)
         .where(table.c.id == bindparam("posting_id"))
-        .values(metros=bindparam("new_metros"), workplace_type=bindparam("new_workplace_type"))
+        .values(
+            locations=bindparam("new_locations"),
+            metros=bindparam("new_metros"),
+            workplace_type=bindparam("new_workplace_type"),
+        )
     )
 
     db = SessionLocal()
     try:
-        seen = areas_changed = with_area = 0
+        seen = areas_changed = locations_repaired = with_area = 0
         workplace_transitions: collections.Counter[str] = collections.Counter()
         last_id = None
         while args.limit is None or seen < args.limit:
-            query = select(JobPosting.id, JobPosting.locations, JobPosting.metros, JobPosting.workplace_type).order_by(
-                JobPosting.id
-            )
+            query = select(
+                JobPosting.id,
+                JobPosting.location,
+                JobPosting.locations,
+                JobPosting.metros,
+                JobPosting.workplace_type,
+            ).order_by(JobPosting.id)
             if last_id is not None:
                 query = query.where(JobPosting.id > last_id)
             batch_size = args.batch_size if args.limit is None else min(args.batch_size, args.limit - seen)
@@ -81,33 +94,40 @@ def main() -> None:
             if not rows:
                 break
 
-            area_updates, both_updates = [], []
+            updates = []
             for row in rows:
-                areas = resolve_area_codes(row.locations)
+                locations = row.locations
+                if row.location and _HTML_ENTITY_RE.search(row.location):
+                    # Split before entities were decoded: "Tacoma &amp; Gordon" became
+                    # two bogus entries at the ";" — re-split from the display string.
+                    locations = split_locations(row.location)
+                locations_repaired += locations != row.locations
+
+                areas = resolve_area_codes(locations)
                 with_area += bool(areas)
-                areas_differ = areas != row.metros
-                areas_changed += areas_differ
+                areas_changed += areas != row.metros
 
                 workplace = row.workplace_type
                 if not args.skip_workplace:
-                    workplace = reconcile_workplace_type(row.workplace_type, infer_workplace_type(row.locations))
+                    workplace = reconcile_workplace_type(row.workplace_type, infer_workplace_type(locations))
                 if workplace != row.workplace_type:
                     workplace_transitions[f"{row.workplace_type} -> {workplace}"] += 1
-                    both_updates.append(
-                        {"posting_id": row.id, "new_metros": areas, "new_workplace_type": str(workplace)}
+
+                if locations != row.locations or areas != row.metros or workplace != row.workplace_type:
+                    updates.append(
+                        {
+                            "posting_id": row.id,
+                            "new_locations": locations,
+                            "new_metros": areas,
+                            "new_workplace_type": str(workplace),
+                        }
                     )
-                elif areas_differ:
-                    area_updates.append({"posting_id": row.id, "new_metros": areas})
             seen += len(rows)
             last_id = rows[-1].id
 
-            if not args.dry_run:
-                if area_updates:
-                    db.execute(write_areas, area_updates)
-                if both_updates:
-                    db.execute(write_both, both_updates)
-                if area_updates or both_updates:
-                    db.commit()
+            if updates and not args.dry_run:
+                db.execute(write, updates)
+                db.commit()
             logger.info(
                 "%d postings seen, %d area changes, %d work-type changes so far",
                 seen,
@@ -117,6 +137,7 @@ def main() -> None:
 
         verb = "would change (dry-run, nothing written)" if args.dry_run else "changed"
         logger.info("Done. %d postings; areas %s on %d; %d have at least one area.", seen, verb, areas_changed, with_area)
+        logger.info("Entries re-split (HTML entities in the location text) on %d postings.", locations_repaired)
         if args.skip_workplace:
             logger.info("Work type left alone (--skip-workplace).")
         else:

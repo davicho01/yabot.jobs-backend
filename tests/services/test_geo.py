@@ -274,6 +274,7 @@ def test_a_city_in_a_metro_area_is_filed_under_the_metro_and_its_state():
         "Mexico",  # Mexico, MO
         "Mexico - Mexico City - Av. Insurgentes Sur 730 - Remote, Mexico",
         "Remote - Ontario",  # the province, not Ontario, California
+        "210 CITATION DRIVE,L4K 2V2,CONCORD,CA, Canada",  # "CA" is Canada's code here, not California's
         "CAN - Ontario - Toronto, Canada",  # Ontario, CA is a US city
         "AMER - Canada - Ontario - Toronto - University Ave, Canada",
         # "NE" here is a street direction, not Nebraska:
@@ -339,3 +340,8 @@ def test_remote_plus_a_bare_state_name_that_is_also_a_city_means_the_state():
     assert (remote.geo, remote.metro, remote.state.name, remote.workplace) == ("state", None, "New York", "remote")
     # ...while the city on its own is still the city.
     assert resolve_entry("New York, United States of America").metro.name == "New York, NY"
+
+
+def test_a_us_city_and_state_is_unaffected_by_the_country_code_guard():
+    assert resolve_entry("Concord, CA").state.name == "California"
+    assert resolve_entry("Concord, CA, United States").state.name == "California"

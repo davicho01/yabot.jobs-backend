@@ -459,13 +459,20 @@ def _resolve_text(text: str, us_hint: bool, foreign: bool = False) -> _Found | N
                 loose = whole
 
     if state is not None:
+
+        def other_country_named(city_token: str) -> bool:
+            # "Concord, CA, Canada": the entry names Canada, so "CA" is its country
+            # code, not California. (The city token itself may be a country-named US
+            # town — "Mexico, MO", "Lebanon, Ohio" — which is fine.)
+            return foreign and any(t in geo.foreign_countries and t != city_token for t in tokens)
+
         for token in whole:
             place = _place_in_state(state, token, ngrams=False)
-            if place is not None:
+            if place is not None and not other_country_named(token):
                 return _place_found(place)
         for token in loose:
             place = _place_in_state(state, token, ngrams=True)
-            if place is not None:
+            if place is not None and not other_country_named(token):
                 return _place_found(place)
         return None if foreign else _state_fallback(tokens, us_signal)
 
