@@ -48,6 +48,62 @@ _AVATURE_LOCATION_RE = re.compile(
     r'<i[^>]*\bfa-globe\b[^>]*>.*?<strong>(.*?)</strong>', re.IGNORECASE | re.DOTALL
 )
 
+# Other tenants (verified live: careers.lululemon.com) skip the globe-icon
+# header entirely and instead put location in the first article--details
+# block (the same heading-less one extract() already skips for description
+# purposes) as a set of labelled fields: `<span data-map="item-title">
+# <strong>Location:</strong></span><span data-map="item-value">Australia
+# </span>`, alongside sibling fields for State/Province/City and City. Build
+# "City, State, Country" from whichever of those three labels are present,
+# same comma-joined single-place shape as everywhere else in this codebase.
+_AVATURE_FIELD_RE = re.compile(
+    r'data-map="item-title"[^>]*>\s*<strong>\s*(.*?)\s*</strong>.*?data-map="item-value"[^>]*>(.*?)</span>',
+    re.IGNORECASE | re.DOTALL,
+)
+_AVATURE_LOCATION_FIELD_LABELS = ("City", "State/Province/City", "Location")
+
+
+def _location_from_fields(html: str) -> str | None:
+    fields: dict[str, str] = {}
+    for raw_label, raw_value in _AVATURE_FIELD_RE.findall(html):
+        label = clean_text(raw_label).rstrip(":")
+        value = clean_text(raw_value)
+        if label and value:
+            fields.setdefault(label, value)
+    parts = [fields[label] for label in _AVATURE_LOCATION_FIELD_LABELS if fields.get(label)]
+    deduped = list(dict.fromkeys(parts))
+    return ", ".join(deduped) if deduped else None
+
+
+# Neither JSON-LD hiringOrganization nor og:site_name are present at all on
+# this tenant's pages (verified live: careers.lululemon.com) - the only
+# company-name signal left is the plain `<h1>` Avature renders inside its
+# own header__logo link on every page (board and job-detail alike), shared
+# template markup rather than tenant-specific styling.
+_AVATURE_HEADER_LOGO_RE = re.compile(r'header__logo[^>]*>\s*<h1>\s*(.*?)\s*</h1>', re.IGNORECASE | re.DOTALL)
+
+
+def _company_name_from_header(html: str) -> str | None:
+    match = _AVATURE_HEADER_LOGO_RE.search(html)
+    return clean_text(match.group(1)) if match else None
+
+
+# Some tenants (verified live: careers.lululemon.com) front every path with
+# a WAF that hangs a plain httpx request to a ReadTimeout - not a fast
+# reject like delta.avature.net's empty 202 - for any non-browser-looking
+# User-Agent, including our own bot UA (app.services.adapters.base's
+# "YabotJobsBot/1.0"), but responds instantly with the real content for a
+# genuine browser UA. Sending one here avoids paying for a browser render
+# (and the 30s timeout beforehand) on every single fetch for tenants like
+# this one - the render fallback stays in place below for tenants (like
+# delta) that block regardless of UA.
+_BROWSER_LIKE_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+    )
+}
+
 
 def _match(url: str) -> str | None:
     match = _AVATURE_URL_RE.search(url)
@@ -67,7 +123,7 @@ def _board_key(url: str) -> str | None:
 
 def _fetch_page_html(url: str, *, wait_for_selector: str | None = None) -> str | None:
     try:
-        response = get_with_retry(url, timeout=TIMEOUT, follow_redirects=True)
+        response = get_with_retry(url, timeout=TIMEOUT, follow_redirects=True, headers=_BROWSER_LIKE_HEADERS)
         response.raise_for_status()
         if response.text.strip():
             return response.text
@@ -105,7 +161,7 @@ def _fetch_job_detail_html(url: str) -> str | None:
 def _resolve_careers_url(host: str) -> str | None:
     base_url = f"https://{host}/careers"
     try:
-        response = get_with_retry(base_url, timeout=TIMEOUT, follow_redirects=True)
+        response = get_with_retry(base_url, timeout=TIMEOUT, follow_redirects=True, headers=_BROWSER_LIKE_HEADERS)
         response.raise_for_status()
         if response.text.strip():
             return str(response.url).split("?")[0].rstrip("/")
@@ -147,7 +203,7 @@ def extract(html: str) -> ExtractedJobFields:
     either field.
     """
     location_match = _AVATURE_LOCATION_RE.search(html)
-    location = clean_text(location_match.group(1)) if location_match else None
+    location = clean_text(location_match.group(1)) if location_match else _location_from_fields(html)
 
     sections = []
     for article_html in _AVATURE_ARTICLE_RE.findall(html):
@@ -176,7 +232,11 @@ def scan_job_url(url: str) -> ScanResult | None:
 
     title = (job_ld.get("title") if job_ld else None) or base.og_title(html) or base.fallback_title(html)
     hiring_org = job_ld.get("hiringOrganization") if job_ld else None
-    company_name = clean_text(hiring_org.get("name")) if isinstance(hiring_org, dict) else base.og_site_name(html)
+    company_name = (
+        clean_text(hiring_org.get("name"))
+        if isinstance(hiring_org, dict)
+        else base.og_site_name(html) or _company_name_from_header(html)
+    )
     description = fields.description or base.fallback_description(html) or base.og_description(html)
 
     salary_min, salary_max, salary_currency = base.job_ld_salary(job_ld) if job_ld else (None, None, None)
