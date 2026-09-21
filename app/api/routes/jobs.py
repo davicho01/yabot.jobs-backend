@@ -62,8 +62,12 @@ def list_job_urls(
         if q:
             stmt = stmt.where(JobPosting.title.ilike(f"%{q}%"))
         if location:
-            place = geo.search_place(location)
-            if place is not None:
+            metro_area = geo.search_metro(location)
+            place = None if metro_area else geo.search_place(location)
+            if metro_area is not None:
+                # "Salt Lake City, Utah (metro area)": everything filed under that area.
+                stmt = stmt.where(JobPosting.metros.contains([metro_area.code]))
+            elif place is not None:
                 # A city: postings with a place within `radius` miles of it, the
                 # city's own first, then nearer before farther (see radius_search).
                 nearest, near, band = radius_search(place, radius)
@@ -119,9 +123,9 @@ def list_job_locations(
 @router.get("/places", response_model=list[str])
 def list_job_places(q: str | None = None, limit: int = Query(10, ge=1, le=50)) -> list[str]:
     """Places to suggest as the location search is typed: "City, State, United
-    States", "State, United States" or "United States". Searching one of them
-    (GET /jobs?location=<label>) covers the city and 25 miles around it, or the
-    whole state."""
+    States", "City, State (metro area)", "State, United States" or "United
+    States". Searching one of them (GET /jobs?location=<label>) covers the city
+    and the miles around it, the whole metro area, or the whole state."""
     return geo.place_suggestions(q, limit)
 
 

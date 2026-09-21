@@ -400,9 +400,10 @@ def test_resolve_places_gives_coordinates_only_for_entries_that_name_a_city():
 def test_place_suggestions_are_only_cities_states_and_the_united_states():
     for q in ("", "b", "salt", "cleveland", "utah", "new", "makiki", "fenway", "milford"):
         for label in geo.place_suggestions(q, 50):
-            assert label == "United States" or label.endswith(", United States"), label
+            assert label == "United States" or label.endswith((", United States", " (metro area)")), label
             assert not any(ch.isdigit() for ch in label) and " - " not in label, label
-            assert "/" not in label and "(" not in label, label  # GeoNames' composite district names
+            place = label.removesuffix(" (metro area)")
+            assert "/" not in place and "(" not in place, label  # GeoNames' composite district names
 
 
 def test_place_suggestions_rank_prefix_matches_first_states_before_cities():
@@ -432,3 +433,41 @@ def test_a_generic_word_alternate_name_does_not_pull_text_into_a_town():
     # the town itself, and a state-only reading of the second entry, still work
     assert resolve_entry("North Salt Lake, UT").place.name == "North Salt Lake"
     assert resolve_entry("North Skull Valley, UT, USA, United States of America").state.name == "Utah"
+
+
+# ------------------------------------------------------------------ metro-area search
+
+
+def test_a_metro_area_is_offered_right_after_its_principal_city():
+    assert geo.place_suggestions("salt lake", 3) == [
+        "Salt Lake City, Utah, United States",
+        "Salt Lake City, Utah (metro area)",
+        "South Salt Lake, Utah, United States",
+    ]
+    assert geo.place_suggestions("salt lake city metro", 3) == ["Salt Lake City, Utah (metro area)"]
+    assert geo.place_suggestions("salt lake city, ut", 2) == [
+        "Salt Lake City, Utah, United States",
+        "Salt Lake City, Utah (metro area)",
+    ]
+    # nothing typed: the big cities, not their metro areas
+    assert not any(label.endswith("(metro area)") for label in geo.place_suggestions("", 20))
+
+
+def test_metro_area_text_is_a_metro_search_and_the_city_alone_is_not():
+    metro = geo.search_metro("Salt Lake City, Utah (metro area)")
+
+    assert (metro.name, metro.kind) == ("Salt Lake City, UT", "metro")
+    assert geo.search_metro("salt lake city (Metro Area)") == metro  # forgiving about case and the state
+    assert geo.search_metro("West Bountiful, Utah (metro area)").name == "Ogden, UT"  # any city, not just a principal one
+    assert geo.search_metro("Salt Lake City, Utah") is None  # the city itself is a distance search
+    for text in ("Utah (metro area)", "Canada (metro area)", "Remote (metro area)"):
+        assert geo.search_metro(text) is None
+
+
+def test_every_metro_area_label_round_trips_to_its_own_area():
+    metros = [m for m in all_metros() if m.kind == "metro"]
+    labels = [geo.metro_area_label(m) for m in metros]
+
+    assert len(labels) == len(set(labels))  # no two areas share a label
+    assert all(geo.search_metro(label) == metro for label, metro in zip(labels, metros))
+    assert {e.label for e in geo._suggestions() if e.kind == "metro"} == set(labels)

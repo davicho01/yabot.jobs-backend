@@ -693,6 +693,42 @@ def _is_united_states(text: str) -> bool:
     return bool(parts) and all(part in _UNITED_STATES_NAMES for part in parts)
 
 
+_METRO_AREA_SUFFIX_RE = re.compile(r"\s*\(\s*metro(?:politan)?(?:\s+area)?\s*\)\s*$", re.IGNORECASE)
+
+
+def metro_area_label(metro: Metro) -> str:
+    """"Salt Lake City, Utah (metro area)" — how a Census metro area is offered next to
+    its principal city, so "Salt Lake City" (the city and what's around it) and "Salt
+    Lake City (metro area)" (everything in the area) can be told apart."""
+    city, _, abbr = metro.name.rpartition(", ")
+    return f"{city}, {_geo().states[abbr].name} (metro area)"
+
+
+@lru_cache(maxsize=1)
+def _metros_by_label() -> dict[str, Metro]:
+    return {
+        _normalize(metro_area_label(metro).removesuffix(" (metro area)")): metro
+        for metro in _geo().metro_by_code.values()
+        if metro.kind == "metro"
+    }
+
+
+def search_metro(text: str) -> Metro | None:
+    """The metro/micro area a location search names with "(metro area)" after a
+    place — "Salt Lake City, Utah (metro area)" — as opposed to the city itself,
+    which is searched by distance (search_place). Any city works, not just an
+    area's principal city: "West Bountiful, Utah (metro area)" is Ogden-Clearfield.
+    None without the suffix, or when the place isn't in an area."""
+    base = _METRO_AREA_SUFFIX_RE.sub("", text)
+    if base == text:
+        return None
+    exact = _metros_by_label().get(_normalize(base))
+    if exact is not None:
+        return exact
+    resolution = resolve_entry(base)
+    return resolution.metro if resolution.geo == "city" else None
+
+
 def search_place(text: str) -> Place | None:
     """The city a location search names, if it names one we know — searched by
     distance (see nearby_state_codes and job_locations.radius_filter) rather than
@@ -737,17 +773,23 @@ _NOT_A_CITY_NAME_RE = re.compile(r"\d| - |/|\(")
 @dataclass(frozen=True)
 class _Suggestion:
     label: str
+    kind: str  # "country" | "state" | "city" | "metro"
     keys: tuple[str, ...]  # normalized spellings a typed query is matched against
-    rank: tuple[int, int]  # (0 country / 1 state / 2 city, -population)
+    rank: tuple[int, int, int]  # (0 country / 1 state / 2 city or its metro, -population, 0 city / 1 metro)
 
 
 @lru_cache(maxsize=1)
 def _suggestions() -> tuple[_Suggestion, ...]:
     geo = _geo()
-    entries = [_Suggestion(_UNITED_STATES, (_normalize(_UNITED_STATES), "usa"), (0, 0))]
+    entries = [_Suggestion(_UNITED_STATES, "country", (_normalize(_UNITED_STATES), "usa"), (0, 0, 0))]
     for abbr, state in geo.states.items():
         entries.append(
-            _Suggestion(f"{state.name}, {_UNITED_STATES}", (_normalize(f"{state.name} {_UNITED_STATES}"), _normalize(abbr)), (1, 0))
+            _Suggestion(
+                f"{state.name}, {_UNITED_STATES}",
+                "state",
+                (_normalize(f"{state.name} {_UNITED_STATES}"), _normalize(abbr)),
+                (1, 0, 0),
+            )
         )
     biggest: dict[tuple[str, str], Place] = {}
     for place in geo.all_places:
@@ -761,8 +803,27 @@ def _suggestions() -> tuple[_Suggestion, ...]:
         entries.append(
             _Suggestion(
                 f"{place.name}, {state.name}, {_UNITED_STATES}",
+                "city",
                 (_normalize(f"{place.name} {state.name} {_UNITED_STATES}"), _normalize(f"{place.name} {place.state}")),
-                (2, -place.population),
+                (2, -place.population, 0),
+            )
+        )
+    # Each metro area right after its principal city, so the two are offered side by side.
+    for metro in geo.metro_by_code.values():
+        if metro.kind != "metro":
+            continue
+        city, _, abbr = metro.name.rpartition(", ")
+        principal = geo.places_in_state.get((abbr, _city_key(city)))
+        entries.append(
+            _Suggestion(
+                metro_area_label(metro),
+                "metro",
+                (
+                    _normalize(f"{city} {geo.states[abbr].name} metro area"),
+                    _normalize(f"{city} metro area"),
+                    _normalize(f"{city} {abbr}"),
+                ),
+                (2, -principal[0].population if principal else 0, 1),
             )
         )
     return tuple(sorted(entries, key=lambda e: e.rank))
@@ -777,7 +838,7 @@ def place_suggestions(q: str | None, limit: int) -> list[str]:
     needle = _normalize(q or "")
     entries = _suggestions()
     if not needle:
-        return [e.label for e in entries[:1] + tuple(e for e in entries if e.rank[0] == 2)][:limit]
+        return [e.label for e in entries[:1] + tuple(e for e in entries if e.kind == "city")][:limit]
     starts_with: list[str] = []
     contains: list[str] = []
     for entry in entries:
