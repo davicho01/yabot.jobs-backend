@@ -707,8 +707,10 @@ def search_areas(text: str) -> list[str] | None:
 
 _UNITED_STATES = "United States"
 # Smaller GeoNames "places" are neighbourhoods and districts ("Barracks Row"),
-# not somewhere people search for work.
+# not somewhere people search for work; so are the composite names GeoNames gives
+# them ("Makiki / Lower Punchbowl", "Fenway/Kenmore", "City of Milford (balance)").
 _SUGGESTION_MIN_POPULATION = 2500
+_NOT_A_CITY_NAME_RE = re.compile(r"\d| - |/|\(")
 
 
 @dataclass(frozen=True)
@@ -728,7 +730,7 @@ def _suggestions() -> tuple[_Suggestion, ...]:
         )
     biggest: dict[tuple[str, str], _Place] = {}
     for place in geo.all_places:
-        if place.population < _SUGGESTION_MIN_POPULATION or re.search(r"\d| - ", place.name):
+        if place.population < _SUGGESTION_MIN_POPULATION or _NOT_A_CITY_NAME_RE.search(place.name):
             continue
         key = (place.state, _normalize(place.name))
         if key not in biggest or place.population > biggest[key].population:

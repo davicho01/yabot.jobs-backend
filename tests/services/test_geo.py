@@ -388,10 +388,11 @@ def test_nearby_area_codes_honours_the_distance():
 
 
 def test_place_suggestions_are_only_cities_states_and_the_united_states():
-    for q in ("", "b", "salt", "cleveland", "utah", "new"):
+    for q in ("", "b", "salt", "cleveland", "utah", "new", "makiki", "fenway", "milford"):
         for label in geo.place_suggestions(q, 50):
             assert label == "United States" or label.endswith(", United States"), label
             assert not any(ch.isdigit() for ch in label) and " - " not in label, label
+            assert "/" not in label and "(" not in label, label  # GeoNames' composite district names
 
 
 def test_place_suggestions_rank_prefix_matches_first_states_before_cities():
