@@ -1,8 +1,22 @@
 import re
+from datetime import date
+from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+import httpx
+
 from app.models.enums import AtsType
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters import base
+from app.services.adapters.base import (
+    DEFAULT_MAX_JOBS_PER_CRAWL,
+    TIMEOUT,
+    AtsAdapter,
+    ExtractedJobFields,
+    ScanResult,
+    get_with_retry,
+    posting_date,
+)
+from app.services.browser_fetch import fetch_rendered_html
 
 _ADP_JOBS_URL = "https://workforcenow.adp.com/mascsr/default/careercenter/public/events/staffing/v1/job-requisitions"
 _ADP_JOB_URL = (
@@ -41,18 +55,24 @@ def _board_url(board_key: str) -> str:
     return f"https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid={cid}{cc_id_param}"
 
 
-def _fetch_jobs(board_key: str) -> list[str]:
-    # Free, public, unauthenticated API — no key required (the same feed
-    # ADP's own JS-rendered career-center page calls). Each requisition
-    # buries its externally-visible job id inside a generic key/value bag
-    # (customFieldGroup.stringFields) rather than a top-level field.
-    cid, cc_id = board_key.split("/")
-    cc_id_param = {"ccId": cc_id} if cc_id else {}
-    cc_id_url_param = f"&ccId={cc_id}" if cc_id else ""
+def _external_job_id(req: dict[str, Any]) -> str | None:
+    return next(
+        (
+            field["stringValue"]
+            for field in req.get("customFieldGroup", {}).get("stringFields", [])
+            if field.get("nameCode", {}).get("codeValue") == "ExternalJobID"
+        ),
+        None,
+    )
 
-    urls: list[str] = []
+
+def _search_requisitions(cid: str, cc_id: str | None) -> list[dict[str, Any]]:
+    # Free, public, unauthenticated API — no key required (the same feed
+    # ADP's own JS-rendered career-center page calls).
+    cc_id_param = {"ccId": cc_id} if cc_id else {}
+    requisitions: list[dict[str, Any]] = []
     skip = 0
-    while len(urls) < _ADP_MAX_JOBS:
+    while len(requisitions) < _ADP_MAX_JOBS:
         response = get_with_retry(
             _ADP_JOBS_URL,
             params={
@@ -66,25 +86,96 @@ def _fetch_jobs(board_key: str) -> list[str]:
             timeout=TIMEOUT,
         )
         response.raise_for_status()
-        requisitions = response.json().get("jobRequisitions", [])
-        if not requisitions:
+        batch = response.json().get("jobRequisitions", [])
+        if not batch:
             break
-        for req in requisitions:
-            job_id = next(
-                (
-                    field["stringValue"]
-                    for field in req.get("customFieldGroup", {}).get("stringFields", [])
-                    if field.get("nameCode", {}).get("codeValue") == "ExternalJobID"
-                ),
-                None,
-            )
-            if job_id:
-                urls.append(_ADP_JOB_URL.format(cid=cid, cc_id_param=cc_id_url_param, job_id=job_id))
-        if len(requisitions) < _ADP_PAGE_SIZE:
+        requisitions.extend(batch)
+        if len(batch) < _ADP_PAGE_SIZE:
             break
         skip += _ADP_PAGE_SIZE
+    return requisitions[:_ADP_MAX_JOBS]
 
+
+def _fetch_jobs(board_key: str) -> list[str]:
+    # Each requisition buries its externally-visible job id inside a
+    # generic key/value bag (customFieldGroup.stringFields) rather than a
+    # top-level field.
+    cid, cc_id = board_key.split("/")
+    cc_id_url_param = f"&ccId={cc_id}" if cc_id else ""
+    urls: list[str] = []
+    for req in _search_requisitions(cid, cc_id):
+        job_id = _external_job_id(req)
+        if job_id:
+            urls.append(_ADP_JOB_URL.format(cid=cid, cc_id_param=cc_id_url_param, job_id=job_id))
     return urls[:_ADP_MAX_JOBS]
+
+
+def _location_of(req: dict[str, Any]) -> str | None:
+    texts = list(
+        dict.fromkeys(
+            loc["nameCode"]["shortName"].strip()
+            for loc in req.get("requisitionLocations", [])
+            if isinstance(loc.get("nameCode"), dict) and loc["nameCode"].get("shortName")
+        )
+    )
+    return "; ".join(texts) or None
+
+
+def _posted_at_of(req: dict[str, Any]) -> date | None:
+    return posting_date(req.get("postDate"))
+
+
+def _fields_of(req: dict[str, Any]) -> ExtractedJobFields:
+    return ExtractedJobFields(
+        title=req.get("requisitionTitle"),
+        location=_location_of(req),
+        posted_at=_posted_at_of(req),
+    )
+
+
+def extract(cid: str, cc_id: str | None, job_id: str) -> ExtractedJobFields | None:
+    for req in _search_requisitions(cid, cc_id):
+        if _external_job_id(req) == job_id:
+            return _fields_of(req)
+    return None
+
+
+def scan_job_url(url: str) -> ScanResult | None:
+    board_key = _match(url)
+    if board_key is None:
+        return None
+    cid, cc_id = board_key.split("/")
+    job_id = parse_qs(urlsplit(url).query).get("jobId", [None])[0]
+    if not job_id:
+        return None
+
+    try:
+        fields = extract(cid, cc_id or None, job_id)
+    except httpx.HTTPError as exc:
+        return ScanResult(success=False, error=str(exc))
+    if fields is None:
+        return ScanResult(success=False, error="Requisition not found in this career center's current listings.")
+
+    # The job-requisitions API has no description field at all — the
+    # detail page itself is a JS-rendered SPA shell with no JSON-LD/OG
+    # description either (verified live: title is a static "Recruitment"
+    # placeholder, not the actual job title), so the description can only
+    # come from a real render.
+    description = None
+    html = fetch_rendered_html(url)
+    if html is not None:
+        description = base.fallback_description(html) or base.og_description(html)
+    salary_min, salary_max, salary_currency = base.salary_from_text(description)
+    return ScanResult(
+        success=True,
+        title=fields.title,
+        description=description,
+        location=fields.location,
+        posted_at=fields.posted_at,
+        salary_min=salary_min,
+        salary_max=salary_max,
+        salary_currency=salary_currency,
+    )
 
 
 ADAPTER = AtsAdapter(
@@ -92,4 +183,5 @@ ADAPTER = AtsAdapter(
     match=_match,
     fetch_jobs=_fetch_jobs,
     to_board_url=_board_url,
+    scan_job_url=scan_job_url,
 )

@@ -192,7 +192,11 @@ def scan_job_url(url: str) -> ScanResult | None:
         success=True,
         title=fields.title,
         description=fields.description,
-        company_name=corp,
+        # No real display-name field anywhere in the career-site API (the
+        # closest, careersites' "header", is just a logo image) — best
+        # effort from the corp slug, same tradeoff eightfold.py/gupy.py
+        # accept for platforms with no company-name source at all.
+        company_name=corp.replace("-", " ").title(),
         location=fields.location,
         salary_min=salary_min,
         salary_max=salary_max,

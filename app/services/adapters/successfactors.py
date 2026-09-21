@@ -112,10 +112,17 @@ def scan_job_url(url: str) -> ScanResult | None:
         return ScanResult(success=False, error=str(exc))
 
     html = page.text
-    if _SIGNATURE not in html.lower():
-        return None  # URL path shape was a coincidence; not actually SuccessFactors.
-
     title_match = _TITLE_RE.search(html)
+    if title_match is None:
+        # A bare "successfactors" text-substring check here false-positived
+        # on a real posting (Cargill, TalentBrew-templated) whose own
+        # description just happened to *mention* SuccessFactors — the role
+        # was for administering SF software, and its apply link pointed at
+        # a real SF instance, but the listing page itself wasn't SF's own
+        # template. itemprop="title" is the actual structural marker this
+        # extractor depends on, so require it directly rather than a
+        # substring that can appear in any page's prose/apply-link/keywords.
+        return None
     description_match = _DESCRIPTION_RE.search(html)
     return ScanResult(
         success=True,
