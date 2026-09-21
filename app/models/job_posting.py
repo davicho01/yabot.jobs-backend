@@ -49,11 +49,13 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
     # suggestions actually match against. Kept in sync by _upsert_posting via
     # app.services.job_locations.split_locations; see that module for the rules.
     locations: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
-    # Census metro/micro area (CBSA) codes those locations fall in, so postings
-    # can be searched by area ("Salt Lake City") however the place was spelled.
-    # Derived from `locations` by app.services.geo.resolve_metros in
-    # _upsert_posting; entries it can't place (states, "Remote", non-US,
-    # facility names) simply contribute nothing.
+    # Searchable areas those locations fall in, so postings can be found by area
+    # ("Salt Lake City", "Utah") however the place was spelled: Census metro/micro
+    # area codes (5 digits) and state codes ("UT"). A city in a metro area adds
+    # both its metro and its state; an entry with no city but a state adds just the
+    # state. Derived from `locations` by app.services.geo.resolve_area_codes in
+    # _upsert_posting; entries it can't place ("Remote", non-US, facility names)
+    # contribute nothing. (Named `metros` from before states were added.)
     metros: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     workplace_type: Mapped[str] = mapped_column(String(20), default=WorkplaceType.UNKNOWN, nullable=False)
     employment_type: Mapped[str] = mapped_column(String(20), default=EmploymentType.UNKNOWN, nullable=False)

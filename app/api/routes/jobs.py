@@ -103,11 +103,12 @@ def list_job_metros(
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> list[MetroRead]:
-    """Census metro/micro areas that have postings, most postings first. With
-    `q`, the ones matching it (name prefix first). With `slug`, just that area —
-    lets a page showing `?metro=<slug>` label it."""
+    """Areas that have postings — Census metro/micro areas and states — most
+    postings first. With `q`, the ones matching it (name prefix first). With
+    `slug`, just that area — lets a page showing `?metro=<slug>` label it. A
+    state's count includes every posting in it (metro areas included)."""
     return [
-        MetroRead(slug=metro.slug, name=metro.name, count=count)
+        MetroRead(slug=metro.slug, name=metro.name, kind=metro.kind, count=count)
         for metro, count in metro_suggestions(db, q, limit, slug=slug)
     ]
 

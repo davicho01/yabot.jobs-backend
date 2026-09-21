@@ -7,7 +7,7 @@ resolver hit while being tuned (see the comments)."""
 import pytest
 
 from app.services import geo
-from app.services.geo import all_metros, metro_by_code, metro_by_slug, resolve_metro, resolve_metros
+from app.services.geo import all_metros, metro_by_code, metro_by_slug, resolve_area_codes, resolve_entry, resolve_metro
 
 SLC = "41620"
 NYC = "35620"
@@ -108,13 +108,10 @@ def test_addresses_and_facility_text_around_a_city(entry, name):
         "Pune, MH, IN",
         "Amsterdam, NH, NL",
         "Springfield",  # too many of them to guess
-        "Utah",
         "United States",
         "US",
         "Remote - US",
-        "Remote, California, United States",
         "Hybrid",
-        "Delta, Utah",  # a real place, but its county is in no metro area
         "Cleveland Clinic Main Campus, United States of America",  # facility, no city
         "Penn State University Park, United States of America",  # must not read as University Park, TX
         "1 Medical Plaza Drive, United States of America",
@@ -180,6 +177,152 @@ def test_area_name_aliases_point_at_real_metros():
 def test_resolve_metros_dedupes_keeps_order_and_ignores_the_unresolvable():
     entries = ["San Francisco, CA", "Remote - US", "New York City, NY", "Palo Alto, CA", "Utah", "Sunnyvale, CA"]
 
-    assert resolve_metros(entries) == [_code("San Francisco, CA"), NYC, _code("Sunnyvale, CA")]
-    assert resolve_metros([]) == []
-    assert resolve_metros(["Utah", "Hybrid"]) == []
+    # Each city files the posting under its metro *and* its state; repeats collapse.
+    assert resolve_area_codes(entries) == ["41860", "CA", NYC, "NY", "41940", "UT"]
+    assert resolve_area_codes([]) == []
+    assert resolve_area_codes(["Remote - US", "Hybrid"]) == []
+
+
+@pytest.mark.parametrize(
+    "entry, name",
+    [
+        ("New York, NY or Remote", "New York, NY"),  # workplace words aren't part of the place
+        ("New York, NY Office", "New York, NY"),
+        ("New York, NY HQ USA, United States of America", "New York, NY"),
+        ("New York, 1 Columbus Circle, United States of America", "New York, NY"),  # "New York" is also a state name
+        ("Boston or Remote", "Boston, MA"),
+        ("Kansas City", "Kansas City, MO"),  # Missouri and Kansas are one metro area, so not ambiguous
+        ("7173 - Kansas City, United States of America", "Kansas City, MO"),
+        ("Home Office - Illinois - Chicago Metro, United States of America", "Chicago, IL"),
+        ("Home Office - Texas - Dallas/Fort Worth Metro, United States of America", "Dallas, TX"),
+        ("08579 Minneapolis Headquarters 901, United States of America", "Minneapolis, MN"),
+        ("Greater Boston Area", "Boston, MA"),
+        ("Remote City, FL, 33412 USA", "Florida"),  # no city we know: falls back to the state
+    ],
+)
+def test_workplace_words_and_area_words_are_not_part_of_the_place(entry, name):
+    assert resolve_metro(entry).name == name
+
+
+@pytest.mark.parametrize(
+    "entry, state",
+    [
+        ("Utah", "Utah"),
+        ("Remote - California", "California"),
+        ("California - Remote, United States of America", "California"),
+        ("Remote, California, United States", "California"),
+        ("Remote - CA, United States of America", "California"),  # abbreviation, backed by "United States"
+        ("CA, United States", "California"),
+        ("CO, United States", "Colorado"),
+        ("141278-NC-CIC Customer Information Ctr, United States of America", "North Carolina"),
+        ("(JRA)TN - Elm Hill Pike, United States of America", "Tennessee"),
+        ("GEORGIA - VIRTUAL - GA01, United States of America", "Georgia"),  # the state, given the US signal
+        ("Somewhere Unknown, TX 75001", "Texas"),  # abbreviation backed by a ZIP
+    ],
+)
+def test_with_no_city_an_entry_falls_back_to_its_state(entry, state):
+    resolution = resolve_entry(entry)
+
+    assert resolution.geo == "state"
+    assert resolution.metro is None
+    assert resolution.state.name == state
+    assert resolution.state.kind == "state"
+
+
+def test_a_real_place_in_a_county_outside_every_metro_still_gets_its_state():
+    resolution = resolve_entry("Delta, Utah")  # a town, but its county is in no metro area
+
+    assert resolution.geo == "city"
+    assert resolution.metro is None
+    assert resolution.state.name == "Utah"
+
+
+def test_a_city_in_a_metro_area_is_filed_under_the_metro_and_its_state():
+    resolution = resolve_entry("Salt Lake City, UT")
+
+    assert (resolution.metro.name, resolution.state.name) == ("Salt Lake City, UT", "Utah")
+    assert resolve_area_codes(["Salt Lake City, UT", "Sandy, Utah"]) == [SLC, "UT"]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        # Two-letter codes that are US states *and* countries: never read as a state
+        # without a US signal or a ZIP, and never when another country is named.
+        "IN - Hyderabad_HQ, India",
+        "Bengaluru, KA,IN, IN",
+        "Pune, MH, IN",
+        "Berlin, Berlin, DE",
+        "Amsterdam, NH, NL",
+        "Panamá, Provincia de Panamá,PA, PA",
+        "Vancouver, BC, Canada",
+        "Remote - India",
+        "Canada (Remote)",
+        "Tbilisi, Georgia",  # the country, not the state: no US signal
+        "CA",
+        "CO",
+        "Georgia",
+        "Washington",  # the state or the capital: not guessed
+        "Washington, United States",
+        "Remote",
+        "Hybrid",
+        "Asia",
+        "UAE, Dubai",
+        # A country (or a province) sharing its name with a small US town:
+        "Belgium",  # Belgium, WI
+        "Brazil",  # Brazil, IN
+        "Mexico",  # Mexico, MO
+        "Mexico - Mexico City - Av. Insurgentes Sur 730 - Remote, Mexico",
+        "CAN - Ontario - Toronto, Canada",  # Ontario, CA is a US city
+        "AMER - Canada - Ontario - Toronto - University Ave, Canada",
+        # "NE" here is a street direction, not Nebraska:
+        "Bend 1501 NE Medical Center Dr, United States of America",
+    ],
+)
+def test_no_state_is_invented_for_foreign_or_ambiguous_entries(entry):
+    resolution = resolve_entry(entry)
+
+    assert resolution.state is None
+    assert resolution.metro is None
+
+
+@pytest.mark.parametrize(
+    "entry, workplace, geo",
+    [
+        ("Remote", "remote", "empty"),
+        ("Hybrid", "hybrid", "empty"),
+        ("Remote - California", "remote", "state"),
+        ("Remote/Teleworker US", "remote", "country"),  # "US" is what is left after the workplace words
+        ("Boston or Remote", "remote", "city"),  # the entry itself says only "remote"; a city + remote is hybrid at posting level
+        ("Remote or Office", "hybrid", "empty"),
+        ("New York, NY Office", "onsite", "city"),
+        ("San Francisco- Hybrid, US", "hybrid", "city"),
+        ("Home Office - Illinois", None, "state"),  # "Home Office" is a company's HQ, not a work-from-home signal
+        ("Salt Lake City, UT", None, "city"),
+        ("Remote - India", "remote", "country"),
+        ("United States", None, "country"),
+        ("Cleveland Clinic Main Building", None, "other"),
+    ],
+)
+def test_entries_report_their_workplace_word_and_what_kind_of_place_is_left(entry, workplace, geo):
+    resolution = resolve_entry(entry)
+
+    assert resolution.workplace == workplace
+    assert resolution.geo == geo
+
+
+def test_generic_words_picked_out_of_an_address_are_not_cities():
+    # GeoNames lists "North" as an alternate name of North Ogden, UT — "214 North
+    # Tryon Street" must not become Ogden.
+    assert resolve_metro("214 North Tryon Street, United States of America") is None
+    assert resolve_metro("Charlotte NC - 214 North Tryon Street, United States of America").name == "Charlotte, NC"
+
+
+def test_an_explicit_us_city_and_state_still_wins_even_when_the_name_is_also_a_country():
+    assert resolve_entry("Mexico, MO").state.name == "Missouri"
+    assert resolve_entry("Lebanon, Ohio").state.name == "Ohio"
+    assert resolve_entry("Ontario, CA").state.name == "California"
+
+
+def test_a_facility_state_code_must_be_hyphen_or_underscore_delimited():
+    assert resolve_entry("111432-TX-Las Colinas Bldg A, Irving Campus, United States of America").state.name == "Texas"

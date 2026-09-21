@@ -10,10 +10,12 @@ class JobUrlSubmit(BaseModel):
 
 
 class MetroRead(BaseModel):
-    """A metro/micro area and how many postings fall in it."""
+    """A searchable area — a metro/micro area or a state — and how many postings
+    fall in it."""
 
     slug: str
     name: str
+    kind: str  # "metro" | "micro" | "state"
     count: int
 
 

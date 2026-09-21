@@ -21,6 +21,9 @@ Outputs:
   us_places.tsv          name, ascii, state, county_fips, population, aliases
   world_city_guard.tsv   name, country, population   (non-US cities >= 100k; lets the resolver
                          refuse to read a bare "London"/"Paris" as a small US namesake)
+  world_countries.tsv    name, iso2, iso3   (non-US countries; lets the resolver refuse to read a
+                         two-letter code as a US state when the entry names another country —
+                         "IN - Hyderabad, India" is not Indiana)
 
 Usage:
     python build_geo_data.py                    # download (cached) and rebuild
@@ -39,6 +42,7 @@ OUT_DIR = Path(__file__).parent / "app" / "data" / "geo"
 
 CITIES1000_URL = "https://download.geonames.org/export/dump/cities1000.zip"
 CITIES15000_URL = "https://download.geonames.org/export/dump/cities15000.zip"
+COUNTRY_INFO_URL = "https://download.geonames.org/export/dump/countryInfo.txt"
 CBSA_2020_URL = "https://data.nber.org/cbsa-csa-fips-county-crosswalk/2020/cbsa2fipsxw_2020.csv"
 CBSA_2023_URL = "https://data.nber.org/cbsa-csa-fips-county-crosswalk/2023/cbsa2fipsxw_2023.csv"
 CONNECTICUT_FIPS = "09"
@@ -185,6 +189,31 @@ def build_world_guard(zip_bytes: bytes) -> list[dict]:
     return sorted(guard, key=lambda r: (r["name"], -r["population"]))
 
 
+# Names people write that GeoNames' official country names don't cover.
+EXTRA_COUNTRY_NAMES = [
+    ("UK", "GB", "GBR"), ("Great Britain", "GB", "GBR"), ("England", "GB", "GBR"), ("Scotland", "GB", "GBR"),
+    ("Wales", "GB", "GBR"), ("Northern Ireland", "GB", "GBR"), ("UAE", "AE", "ARE"), ("Korea", "KR", "KOR"),
+    ("Czech Republic", "CZ", "CZE"), ("Turkiye", "TR", "TUR"), ("Holland", "NL", "NLD"), ("Viet Nam", "VN", "VNM"),
+]
+# Country names that are also US state names — the resolver treats those as states.
+US_STATE_NAMED_COUNTRIES = {"Georgia"}
+
+
+def build_countries(text: str) -> list[dict]:
+    """Non-US countries from GeoNames' countryInfo.txt (tab-separated, `#` comments)."""
+    countries = []
+    for line in text.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        cells = line.split("\t")
+        iso2, iso3, name = cells[0], cells[1], cells[4]
+        if iso2 == "US" or name in US_STATE_NAMED_COUNTRIES:
+            continue
+        countries.append({"name": name, "iso2": iso2, "iso3": iso3})
+    countries += [{"name": n, "iso2": a, "iso3": b} for n, a, b in EXTRA_COUNTRY_NAMES]
+    return sorted(countries, key=lambda r: r["name"])
+
+
 def write(path: Path, rows: list[dict], fieldnames: list[str], delimiter: str) -> None:
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter=delimiter, lineterminator="\n")
@@ -204,12 +233,14 @@ def main() -> None:
     state_fips = {s["abbr"]: s["fips"] for s in states}
     places = build_places(fetch(CITIES1000_URL, args.cache_dir), state_fips)
     guard = build_world_guard(fetch(CITIES15000_URL, args.cache_dir))
+    countries = build_countries(fetch(COUNTRY_INFO_URL, args.cache_dir).decode("utf-8"))
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     write(OUT_DIR / "us_states.csv", states, ["abbr", "name", "fips"], ",")
     write(OUT_DIR / "us_cbsa_counties.csv", counties, ["county_fips", "cbsa_code", "cbsa_title", "kind"], ",")
     write(OUT_DIR / "us_places.tsv", places, ["name", "ascii", "state", "county_fips", "population", "aliases"], "\t")
     write(OUT_DIR / "world_city_guard.tsv", guard, ["name", "country", "population"], "\t")
+    write(OUT_DIR / "world_countries.tsv", countries, ["name", "iso2", "iso3"], "\t")
 
 
 if __name__ == "__main__":

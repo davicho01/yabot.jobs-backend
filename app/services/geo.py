@@ -1,4 +1,4 @@
-"""Resolve a posting's US location strings to a Census metro/micro area (CBSA).
+"""Resolve a posting's US location strings to a Census metro/micro area and a state.
 
 The same place is spelled many ways ("Salt Lake City, UT, US" / "…, Utah" /
 "Salt Lake City UT, United States of America" / "USA, UT, Salt Lake City" /
@@ -8,9 +8,19 @@ City". Each entry is reduced to a US city + state, mapped to its county
 delineation) — see build_geo_data.py for where the bundled files under
 app/data/geo/ come from. Deterministic, offline, no network or LLM.
 
-Precision over recall: an entry only resolves when the place is unambiguous.
-States, countries, "Remote", non-US places and facility names it can't parse
-resolve to nothing and stay findable by plain text search.
+Three questions, in order, for every entry:
+  1. Is there a city?  -> its metro/micro area, and its state.
+  2. No city, but a state ("Utah", "Remote - California")?  -> the state.
+  3. Neither (a facility name, a street, a non-US place)?  -> nothing; the entry
+     stays findable by plain text search.
+
+Words like Remote / Hybrid / Office / HQ aren't places, so they're taken off the
+entry before the place is looked for and reported separately as the entry's
+work-type hint (Resolution.workplace).
+
+Precision over recall: a place only resolves when it is unambiguous, and a
+state is only taken from an entry when nothing suggests another country — "IN"
+is Indiana *or* India, "CA" California *or* Canada.
 """
 
 import csv
@@ -22,12 +32,17 @@ from pathlib import Path
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "geo"
 
-# A bare city name (no state) is only trusted when the biggest US place with
-# that name is this many times bigger than the runner-up ("Salt Lake City" yes,
-# "Springfield" no).
+# A bare city name (no state) is only trusted when the biggest metro area with a
+# place of that name is this many times bigger than the runner-up ("Salt Lake
+# City" yes, "Springfield" no).
 _DOMINANCE_RATIO = 5
 
 _US_COUNTRY_TOKENS = {"us", "usa", "united states", "united states of america", "america"}
+_US_SIGNAL_RE = re.compile(r"\b(?:us|usa|united states(?: of america)?)\b")
+
+# Words that are regions or whole-continent labels rather than places we could file.
+_REGION_WORDS = {"asia", "apac", "emea", "europe", "latam", "latin america", "worldwide", "global", "anywhere",
+                 "north america", "americas", "international"}
 
 # Words that mean the same thing spelled short or long. Applied to city names
 # only (never to state tokens: "MT" is Montana, not "Mount").
@@ -37,6 +52,10 @@ _FACILITY_SEPARATOR_RE = re.compile(r"\s+[-–—]\s+")
 _PARENTHETICAL_RE = re.compile(r"\([^)]*\)")
 # "Arden Hills US-MN", "US-CA - Santa Clara": a state code written as US-XX / US XX.
 _US_STATE_CODE_RE = re.compile(r"\bUS[- ]([A-Za-z]{2})\b")
+# "141278-NC-CIC Customer Information Ctr": a state code inside a store/facility number.
+# Hyphen/underscore only — with a space, "1501 NE Medical Center Dr" is a street
+# direction, not Nebraska.
+_FACILITY_STATE_CODE_RE = re.compile(r"\b\d{2,}[-_]([A-Z]{2})[-_]")
 
 # Well-known area names people put in a location field instead of a city.
 # Values are CBSA codes (a test asserts every one exists).
@@ -50,23 +69,66 @@ _AREA_ALIASES = {
     "research triangle": "39580",
 }
 
-# Formatting quirks seen in scraped data: a stray comma inside "United, States",
-# and a workplace word tacked on with a dash ("San Francisco- Hybrid").
+# Formatting quirks seen in scraped data: a stray comma inside "United, States".
 _SPLIT_COUNTRY_RE = re.compile(r"\bunited\s*,\s*states\b", re.IGNORECASE)
-_WORKPLACE_SUFFIX_RE = re.compile(r"\s*[-–—]\s*(?:hybrid|remote|on-?site|in-?office)\b", re.IGNORECASE)
 
-# How many trailing words of a street-address token to try as the city
+# Workplace words. They aren't part of the place: "Boston or Remote" is Boston.
+# ("Home Office" is deliberately not a signal — it usually means a company's
+# corporate headquarters, not working from home.)
+_HOME_OFFICE_RE = re.compile(r"\bhome\s+office\b", re.IGNORECASE)
+_REMOTE_WORDS = r"remote(?:ly)?|virtual|telecommut\w*|tele-?work\w*|work\s+from\s+home|wfh"
+_ONSITE_WORDS = r"on-?site|in-?office|office|hq|headquarters|campus"
+_WORKPLACE_RE = re.compile(
+    rf"\b(?P<remote>{_REMOTE_WORDS})\b|\b(?P<hybrid>hybrid)\b|\b(?P<onsite>{_ONSITE_WORDS})\b", re.IGNORECASE
+)
+_DANGLING_CONNECTOR_RE = re.compile(r"^(?:or|and)\b|\b(?:or|and)$", re.IGNORECASE)
+# "Chicago Metro", "Greater Boston Area": area words, not part of the city name.
+_METRO_WORDS_RE = re.compile(r"\b(?:metropolitan|metro|area|greater)\b", re.IGNORECASE)
+
+# Words that may follow a state abbreviation without changing what it is ("NY USA").
+_STATE_TRAILING_NOISE = {"us", "usa", "america", "the"}
+# Bare state names that can't be taken as a state on their own: "Washington" is
+# the state or the capital; "Georgia" is also a country (needs a US signal).
+_NEVER_STATE_ONLY = {"washington"}
+_NEEDS_US_SIGNAL = {"georgia"}
+
+# How many trailing/leading words of a street-address token to try as the city
 # ("6400 LAS COLINAS BLVD IRVING" -> "irving"; "2260 Watson Way Vista" -> "vista").
 _MAX_CITY_WORDS = 4
+# Words that show up in addresses and facility names and are also (tiny) place
+# names or place-name aliases — never a city on their own when picked out of a
+# longer string ("214 North Tryon Street" is not "North").
+_GENERIC_WORDS = {"north", "south", "east", "west", "central", "new", "old", "street", "avenue", "road", "drive",
+                  "boulevard", "park", "plaza", "center", "centre", "campus", "building", "tower", "square",
+                  "suite", "floor", "lane", "way", "court", "circle", "place", "main", "first", "second", "third"}
 
 
 @dataclass(frozen=True)
 class Metro:
-    code: str  # CBSA code, e.g. "41620"
-    slug: str  # url-safe, unique, e.g. "salt-lake-city-ut"
-    name: str  # short display name: principal city + first state, e.g. "Salt Lake City, UT"
-    title: str  # official CBSA title, e.g. "Salt Lake City, UT"
-    kind: str  # "metro" | "micro"
+    """A searchable area: a Census metro/micro area, or a state."""
+
+    code: str  # CBSA code ("41620") or state abbreviation ("UT")
+    slug: str  # url-safe, unique: "salt-lake-city-ut", "utah"
+    name: str  # short display name: "Salt Lake City, UT" / "Utah"
+    title: str  # official CBSA title, or the state name
+    kind: str  # "metro" | "micro" | "state"
+
+
+@dataclass(frozen=True)
+class Resolution:
+    """What one location entry says. `geo` is what kind of geography the rest of
+    the entry (after workplace words are removed) turned out to be: "city",
+    "state", "country" (US, another country, or a region like "Asia"), "empty"
+    (nothing left — a bare "Remote"), or "other" (text we couldn't classify)."""
+
+    metro: Metro | None = None  # the metro/micro area, if the city is in one
+    state: Metro | None = None  # the state-level area
+    geo: str = "other"
+    workplace: str | None = None  # "remote" | "hybrid" | "onsite" — explicit words in the entry
+
+    @property
+    def city(self) -> bool:
+        return self.geo == "city"
 
 
 @dataclass(frozen=True)
@@ -74,6 +136,13 @@ class _Place:
     state: str
     county_fips: str
     population: int
+
+
+@dataclass(frozen=True)
+class _Found:
+    metro: Metro | None
+    state: Metro
+    city: bool
 
 
 def _strip_accents(text: str) -> str:
@@ -97,12 +166,21 @@ def _slugify(text: str) -> str:
 
 class _Geo:
     def __init__(self) -> None:
+        self.metro_by_code: dict[str, Metro] = {}
+        self.metro_by_slug: dict[str, Metro] = {}
+
         self.state_by_abbr: dict[str, str] = {}
         self.state_by_name: dict[str, str] = {}
+        self.states: dict[str, Metro] = {}
         with (_DATA_DIR / "us_states.csv").open(encoding="utf-8") as handle:
             for row in csv.DictReader(handle):
-                self.state_by_abbr[row["abbr"].lower()] = row["abbr"]
-                self.state_by_name[_normalize(row["name"])] = row["abbr"]
+                abbr, name = row["abbr"], row["name"]
+                self.state_by_abbr[abbr.lower()] = abbr
+                self.state_by_name[_normalize(name)] = abbr
+                state = Metro(code=abbr, slug=_slugify(name), name=name, title=name, kind="state")
+                self.states[abbr] = state
+                self.metro_by_code[abbr] = state
+                self.metro_by_slug[state.slug] = state
 
         # Within a state a place's real name beats another place's alias:
         # GeoNames lists "Elizabethtown" as an alternate name of Hopkinsville, and
@@ -110,6 +188,7 @@ class _Geo:
         self.places_in_state: dict[tuple[str, str], list[_Place]] = {}
         self.aliases_in_state: dict[tuple[str, str], list[_Place]] = {}
         self.places_by_name: dict[str, list[_Place]] = {}
+        self.primary_by_name: dict[str, list[_Place]] = {}  # real names only, no aliases
         with (_DATA_DIR / "us_places.tsv").open(encoding="utf-8") as handle:
             for row in csv.DictReader(handle, delimiter="\t"):
                 place = _Place(row["state"], row["county_fips"], int(row["population"]))
@@ -121,7 +200,14 @@ class _Geo:
                     self.aliases_in_state.setdefault((place.state, key), []).append(place)
                 for key in primary_keys | alias_keys:
                     self.places_by_name.setdefault(key, []).append(place)
-        for places in (*self.places_in_state.values(), *self.aliases_in_state.values(), *self.places_by_name.values()):
+                for key in primary_keys:
+                    self.primary_by_name.setdefault(key, []).append(place)
+        for places in (
+            *self.places_in_state.values(),
+            *self.aliases_in_state.values(),
+            *self.places_by_name.values(),
+            *self.primary_by_name.values(),
+        ):
             places.sort(key=lambda p: -p.population)
 
         self.world_guard: dict[str, int] = {}
@@ -130,6 +216,15 @@ class _Geo:
                 key = _city_key(row["name"])
                 self.world_guard[key] = max(self.world_guard.get(key, 0), int(row["population"]))
 
+        # Names of other countries. Used to refuse to read a two-letter code as a
+        # US state when the entry names another country, and to tell a
+        # country-only entry from unrecognized text.
+        self.foreign_countries: set[str] = set()
+        with (_DATA_DIR / "world_countries.tsv").open(encoding="utf-8") as handle:
+            for row in csv.DictReader(handle, delimiter="\t"):
+                self.foreign_countries.add(_normalize(row["name"]))
+        self.foreign_countries -= set(self.state_by_name)
+
         self.county_cbsa: dict[str, str] = {}
         titles: dict[str, tuple[str, str]] = {}
         with (_DATA_DIR / "us_cbsa_counties.csv").open(encoding="utf-8") as handle:
@@ -137,8 +232,6 @@ class _Geo:
                 self.county_cbsa[row["county_fips"]] = row["cbsa_code"]
                 titles[row["cbsa_code"]] = (row["cbsa_title"], row["kind"])
 
-        self.metro_by_code: dict[str, Metro] = {}
-        self.metro_by_slug: dict[str, Metro] = {}
         for code, (title, kind) in sorted(titles.items(), key=lambda kv: kv[1][0]):
             name = self._short_name(title)
             slug = _slugify(name)
@@ -174,6 +267,7 @@ def search_key(text: str) -> str:
 
 
 def all_metros() -> list[Metro]:
+    """Every searchable area — metro/micro areas and states (see Metro.kind)."""
     return list(_geo().metro_by_code.values())
 
 
@@ -185,74 +279,128 @@ def metro_by_slug(slug: str) -> Metro | None:
     return _geo().metro_by_slug.get(slug)
 
 
-def _state_of(token: str) -> str | None:
-    """The US state a token names: "ut", "utah", or an abbreviation followed
-    only by a ZIP ("sc 29334", "mn 55403 2542")."""
+# ---------------------------------------------------------------- state tokens
+
+
+def _state_match(token: str) -> tuple[str, str] | None:
+    """(state abbreviation, how it was written) if a token names a US state:
+    "abbr" ("ut", or one followed by noise like "ny usa"), "name" ("utah"), or
+    "zip" (an abbreviation followed only by a ZIP: "sc 29334")."""
     geo = _geo()
     if len(token) == 2 and token in geo.state_by_abbr:
-        return geo.state_by_abbr[token]
+        return geo.state_by_abbr[token], "abbr"
     if token in geo.state_by_name:
-        return geo.state_by_name[token]
+        return geo.state_by_name[token], "name"
     words = token.split()
-    if len(words) > 1 and words[0] in geo.state_by_abbr and len(words[0]) == 2 and all(w.isdigit() for w in words[1:]):
-        return geo.state_by_abbr[words[0]]
+    if len(words) > 1 and len(words[0]) == 2 and words[0] in geo.state_by_abbr:
+        rest = words[1:]
+        if all(w.isdigit() for w in rest):
+            return geo.state_by_abbr[words[0]], "zip"
+        if all(w.isdigit() or w in _STATE_TRAILING_NOISE for w in rest):
+            return geo.state_by_abbr[words[0]], "abbr"
     return None
 
 
-def _place_metro(place: _Place | None) -> Metro | None:
-    if place is None:
+def _state_of(token: str) -> str | None:
+    match = _state_match(token)
+    return match[0] if match else None
+
+
+def _state_fallback(tokens: list[str], us_signal: bool) -> _Found | None:
+    """The entry has no city we can find — is there at least a state? Only with
+    evidence it's really a US state: a full name, or an abbreviation backed by
+    a ZIP or a US signal; and never when the entry names another country."""
+    geo = _geo()
+    if any(t in geo.foreign_countries for t in tokens):
         return None
+    for token in tokens:
+        match = _state_match(token)
+        if match is None:
+            continue
+        abbr, kind = match
+        trusted = (
+            kind == "zip"
+            or (kind == "abbr" and us_signal)
+            or (kind == "name" and token not in _NEVER_STATE_ONLY and (token not in _NEEDS_US_SIGNAL or us_signal))
+        )
+        if trusted:
+            return _Found(metro=None, state=geo.states[abbr], city=False)
+    return None
+
+
+# ------------------------------------------------------------------ city lookup
+
+
+def _place_found(place: _Place) -> _Found:
     geo = _geo()
     code = geo.county_cbsa.get(place.county_fips)
-    return geo.metro_by_code.get(code) if code else None
+    return _Found(metro=geo.metro_by_code.get(code) if code else None, state=geo.states[place.state], city=True)
 
 
-def _lone_city_metro(key: str) -> Metro | None:
-    """A city name with no state to pin it down — trusted only when it's clearly
-    the biggest US place of that name ("Salt Lake City" yes, "Springfield" no)
-    and no famous non-US city shares it ("Paris", "London")."""
+def _lone_city(key: str, *, primary_only: bool = False) -> _Found | None:
+    """A city name with no state to pin it down — trusted only when its metro
+    area is clearly the biggest of that name ("Salt Lake City" yes, "Springfield"
+    no; "Kansas City", split across Missouri and Kansas, is one metro so yes) and
+    no famous non-US city shares it ("Paris", "London"). `primary_only` ignores
+    aliases, for names picked out of the middle of a longer string."""
     geo = _geo()
-    candidates = geo.places_by_name.get(key)
+    candidates = (geo.primary_by_name if primary_only else geo.places_by_name).get(key)
     if not candidates:
         return None
-    best = candidates[0]
-    runner_up = candidates[1].population if len(candidates) > 1 else 0
+    biggest_per_area: dict[str, _Place] = {}
+    for place in candidates:  # already biggest first
+        area = geo.county_cbsa.get(place.county_fips) or f"rural:{place.state}"
+        biggest_per_area.setdefault(area, place)
+    ranked = list(biggest_per_area.values())
+    best = ranked[0]
+    runner_up = ranked[1].population if len(ranked) > 1 else 0
     if best.population < _DOMINANCE_RATIO * max(runner_up, 1) or geo.world_guard.get(key, 0) > best.population:
         return None
-    return _place_metro(best)
+    return _place_found(best)
 
 
 def _phrases(token: str, *, ngrams: bool) -> list[str]:
     """The token itself, then (for text with an address or facility name around
     the city) its trailing and leading 1-4 word groups, longest first:
-    "2260 watson way vista" -> "vista"; "irvine 6001 oak canyon ste 100" -> "irvine"."""
-    words = token.split()
+    "2260 watson way vista" -> "vista"; "irvine 6001 oak canyon ste 100" -> "irvine".
+    Bare numbers (store codes, street numbers) are ignored."""
+    words = [w for w in token.split() if not w.isdigit()] if ngrams else token.split()
     phrases = [token]
     if ngrams:
         for size in range(min(len(words) - 1, _MAX_CITY_WORDS), 0, -1):
             phrases.append(" ".join(words[-size:]))
             phrases.append(" ".join(words[:size]))
+        if words:
+            phrases.append(" ".join(words))
     return list(dict.fromkeys(phrases))
 
 
-def _city_in_state(state: str, token: str, *, ngrams: bool) -> Metro | None:
-    """A city of `state` named by `token`. The state pins the match, so the
+def _place_in_state(state: str, token: str, *, ngrams: bool) -> _Place | None:
+    """A place of `state` named by `token`. The state pins the match, so the
     looser n-gram matching can't drift to a same-named place elsewhere."""
     geo = _geo()
     for phrase in _phrases(token, ngrams=ngrams):
-        if phrase.isdigit():
+        if not phrase or phrase.isdigit():
             continue
         key = (state, _city_key(phrase))
         places = geo.places_in_state.get(key) or geo.aliases_in_state.get(key)
         if places:
-            return _place_metro(places[0])
+            return places[0]
     return None
 
 
-def _resolve_text(text: str) -> Metro | None:
+def _metro_state(metro: Metro) -> Metro:
+    return _geo().states[metro.title.rsplit(", ", 1)[1].split("-")[0]]
+
+
+def _resolve_text(text: str, us_hint: bool, foreign: bool = False) -> _Found | None:
+    """`foreign`: the whole entry names another country (and doesn't say United
+    States), so a bare town name or a state with no city is not enough to call it
+    American — only an explicit "City, State" is ("Lebanon, Ohio" yes, "Toronto -
+    Ontario, Canada" no: there is an Ontario, California)."""
     geo = _geo()
     tokens = [t for t in (_normalize(part) for part in text.split(",")) if t]
-    us_signal = any(t in _US_COUNTRY_TOKENS for t in tokens)
+    us_signal = us_hint or any(t in _US_COUNTRY_TOKENS for t in tokens)
     # Country words and bare numbers (ZIP codes, street numbers) carry no city.
     tokens = [t for t in tokens if t not in _US_COUNTRY_TOKENS and not t.isdigit()]
     if not tokens:
@@ -260,7 +408,8 @@ def _resolve_text(text: str) -> Metro | None:
 
     for token in tokens:
         if token in _AREA_ALIASES:
-            return geo.metro_by_code[_AREA_ALIASES[token]]
+            metro = geo.metro_by_code[_AREA_ALIASES[token]]
+            return _Found(metro=metro, state=_metro_state(metro), city=True)
 
     state: str | None = None
     whole: list[str] = []  # tokens to try as an exact city name, most likely first
@@ -273,7 +422,7 @@ def _resolve_text(text: str) -> Metro | None:
     ):
         # State first, city after: "USA, WA, Seattle", "United States, Washington,
         # Redmond", "USA, DC, Washington" (where "Washington" is also a state name).
-        state, whole, loose = first_state, tokens[1:], [tokens[1]]
+        state, whole, loose = first_state, [*tokens[1:], tokens[0]], [tokens[1]]
     else:
         # The rightmost state token wins: in "…, New York, NY" the city "New York"
         # is also a state name, but the abbreviation after it is the real state.
@@ -296,16 +445,19 @@ def _resolve_text(text: str) -> Metro | None:
 
     if state is not None:
         for token in whole:
-            metro = _city_in_state(state, token, ngrams=False)
-            if metro is not None:
-                return metro
+            place = _place_in_state(state, token, ngrams=False)
+            if place is not None:
+                return _place_found(place)
         for token in loose:
-            metro = _city_in_state(state, token, ngrams=True)
-            if metro is not None:
-                return metro
+            place = _place_in_state(state, token, ngrams=True)
+            if place is not None:
+                return _place_found(place)
+        return None if foreign else _state_fallback(tokens, us_signal)
+
+    if foreign:
         return None
 
-    # No state anywhere. A lone city name, or — when the entry says United
+    # No state next to a city. A lone city name, or — when the entry says United
     # States — the last thing before it that looks like a city ("Charlotte, United
     # States of America" after a facility code). Never a bare state/country name,
     # and without a US signal never a multi-part entry ("Cambridge, Ontario, Canada").
@@ -314,7 +466,7 @@ def _resolve_text(text: str) -> Metro | None:
     elif us_signal:
         candidates = list(reversed(tokens))
     else:
-        return None
+        candidates = []
     for token in candidates:
         if token in geo.state_by_name and token != "new york":
             continue
@@ -322,43 +474,113 @@ def _resolve_text(text: str) -> Metro | None:
         # number: "480 Washington Boulevard Jersey City") — not facility names,
         # where "Penn State University Park" would read as University Park, TX.
         for phrase in _phrases(token, ngrams=token[0].isdigit()):
-            metro = _lone_city_metro(_city_key(phrase))
-            if metro is not None:
-                return metro
-    return None
+            picked_out = phrase != token  # part of a longer string, not the whole token
+            if picked_out and phrase in _GENERIC_WORDS:
+                continue
+            found = _lone_city(_city_key(phrase), primary_only=picked_out)
+            if found is not None:
+                return found
+    return _state_fallback(tokens, us_signal)
+
+
+# --------------------------------------------------------------- entry cleaning
+
+
+def _strip_workplace(text: str) -> tuple[str, str | None]:
+    """The entry without its workplace words, and what they say. "Boston or
+    Remote" -> ("Boston", "hybrid"); "Remote - California" -> ("California",
+    "remote"); "New York, NY HQ" -> ("New York, NY", "onsite"). A city with a
+    remote option is hybrid, matching how JSON-LD postings are read."""
+    text = _HOME_OFFICE_RE.sub(" ", text.replace("_", " "))
+    found = {name for match in _WORKPLACE_RE.finditer(text) for name, hit in match.groupdict().items() if hit}
+    if not found:
+        return text, None
+    parts = []
+    for part in text.split(","):
+        part = _WORKPLACE_RE.sub(" ", part)
+        part = " ".join(part.split()).strip(" -–—/:")
+        part = _DANGLING_CONNECTOR_RE.sub("", part).strip(" -–—/:")
+        if part:
+            parts.append(part)
+    if "hybrid" in found or {"remote", "onsite"} <= found:
+        workplace = "hybrid"
+    else:
+        workplace = "remote" if "remote" in found else "onsite"
+    return ", ".join(parts), workplace
 
 
 def _entry_variants(entry: str) -> list[str]:
     """The entry cleaned of noise, plus each part of a "Facility - City" style
-    entry, most-specific-to-the-city first."""
+    entry, most-specific-to-the-city first — each also without "Metro"/"Area"."""
     cleaned = _PARENTHETICAL_RE.sub(" ", entry)          # "(Headquarters)", "(NY0466)"
     cleaned = _SPLIT_COUNTRY_RE.sub("United States", cleaned)
-    cleaned = _WORKPLACE_SUFFIX_RE.sub("", cleaned)      # "San Francisco- Hybrid"
-    cleaned = _US_STATE_CODE_RE.sub(r", \1", cleaned)     # "Arden Hills US-MN" -> "Arden Hills , MN"
+    cleaned = _US_STATE_CODE_RE.sub(r", \1, US", cleaned)  # "Arden Hills US-MN" -> "Arden Hills , MN, US"
     if ":" in cleaned:
         cleaned = cleaned.rsplit(":", 1)[1]              # "Client Office: Washington, DC"
     segments = _FACILITY_SEPARATOR_RE.split(cleaned)
     variants = [cleaned, *reversed(segments[1:]), *segments[:1]]
-    return list(dict.fromkeys(v.strip() for v in variants if v.strip()))
+    variants += [_METRO_WORDS_RE.sub(" ", v) for v in variants]
+    code = _FACILITY_STATE_CODE_RE.search(entry)
+    if code and _US_SIGNAL_RE.search(_normalize(entry)):
+        variants.append(f"{code.group(1)}, United States")  # last resort: just the state
+    return list(dict.fromkeys(v.strip() for v in variants if v.strip(" ,-–—/")))
+
+
+def _names_foreign_country(entry: str) -> bool:
+    """Does the entry name a country other than the US — as a comma part
+    ("Toronto, Canada") or a dash-separated one ("Mexico - Mexico City")?"""
+    geo = _geo()
+    parts = [p for chunk in entry.split(",") for p in _FACILITY_SEPARATOR_RE.split(chunk)]
+    return any(_normalize(part) in geo.foreign_countries for part in parts)
+
+
+def _classify_other(text: str) -> str:
+    """"country" if what's left is only country / region names, else "other"."""
+    geo = _geo()
+    tokens = [t for t in (_normalize(part) for part in text.split(",")) if t]
+    if tokens and all(t in _US_COUNTRY_TOKENS or t in geo.foreign_countries or t in _REGION_WORDS for t in tokens):
+        return "country"
+    return "other"
 
 
 @lru_cache(maxsize=200_000)
+def resolve_entry(entry: str) -> Resolution:
+    """What one location entry says: the city's metro area and state, or just a
+    state, plus any explicit remote/hybrid/onsite word."""
+    stripped, workplace = _strip_workplace(entry.strip())
+    if not stripped.strip(" ,-–—/"):
+        return Resolution(geo="empty", workplace=workplace)
+    us_hint = bool(_US_SIGNAL_RE.search(_normalize(entry)))
+    foreign = not us_hint and _names_foreign_country(entry)
+    state_only: _Found | None = None
+    for variant in _entry_variants(stripped):
+        found = _resolve_text(variant, us_hint, foreign)
+        if found is None:
+            continue
+        if found.city:
+            return Resolution(metro=found.metro, state=found.state, geo="city", workplace=workplace)
+        state_only = state_only or found
+    if state_only is not None:
+        return Resolution(state=state_only.state, geo="state", workplace=workplace)
+    return Resolution(geo=_classify_other(stripped), workplace=workplace)
+
+
 def resolve_metro(entry: str) -> Metro | None:
-    """The metro/micro area a single location entry belongs to, or None."""
-    if not entry.strip() or _normalize(entry).startswith(("remote", "hybrid")):
-        return None
-    for variant in _entry_variants(entry):
-        metro = _resolve_text(variant)
-        if metro is not None:
-            return metro
-    return None
+    """The most specific area a single entry belongs to — its metro/micro area,
+    else its state — or None."""
+    resolution = resolve_entry(entry)
+    return resolution.metro or resolution.state
 
 
-def resolve_metros(entries: list[str]) -> list[str]:
-    """CBSA codes for a posting's location entries — de-duplicated, in order."""
+def resolve_area_codes(entries: list[str]) -> list[str]:
+    """Area codes for a posting's location entries: each entry's metro/micro
+    area code and its state code, de-duplicated, in order. A city in a metro area
+    files the posting under the metro *and* the state, so a statewide search
+    finds everything in the state."""
     codes: list[str] = []
     for entry in entries:
-        metro = resolve_metro(entry)
-        if metro is not None and metro.code not in codes:
-            codes.append(metro.code)
+        resolution = resolve_entry(entry)
+        for area in (resolution.metro, resolution.state):
+            if area is not None and area.code not in codes:
+                codes.append(area.code)
     return codes

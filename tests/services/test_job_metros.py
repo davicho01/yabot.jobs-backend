@@ -40,8 +40,8 @@ def test_unresolved_only_hides_places_that_belong_to_a_metro(monkeypatch):
     counts = [
         ("Salt Lake City, UT, US", 30),
         ("Salt Lake City, Utah", 20),
-        ("Utah", 10),  # a state: no metro
-        ("Salt Lake County Courthouse", 5),  # a facility: no metro
+        ("Utah", 10),  # a state: suggested as "Utah (statewide)" instead
+        ("Salt Lake County Courthouse", 5),  # a facility: no area
     ]
     monkeypatch.setattr(job_locations, "_location_counts", lambda db: counts)
 
@@ -51,7 +51,7 @@ def test_unresolved_only_hides_places_that_belong_to_a_metro(monkeypatch):
         "Salt Lake County Courthouse",
     ]
     assert location_suggestions(None, "salt", 10, unresolved_only=True) == ["Salt Lake County Courthouse"]
-    assert location_suggestions(None, None, 10, unresolved_only=True) == ["Utah", "Salt Lake County Courthouse"]
+    assert location_suggestions(None, None, 10, unresolved_only=True) == ["Salt Lake County Courthouse"]
 
 
 def test_metro_filter_compiles_to_an_indexable_containment_check():
@@ -74,7 +74,8 @@ def test_upsert_stores_the_metro_areas_of_every_location(scan_db, make_source, m
     posting = jobs._upsert_posting(scan_db, url_row, result, datetime.now(timezone.utc))
     scan_db.commit()
 
-    assert posting.metros == [SLC, PROVO]  # de-duplicated, in order; the rest resolve to nothing
+    # de-duplicated, in order: each city's metro and its state; London resolves to nothing
+    assert posting.metros == [SLC, "UT", PROVO]
 
 
 def test_upsert_without_a_resolvable_location_stores_no_metros(scan_db, make_source, make_url):
@@ -94,4 +95,41 @@ def test_a_multi_location_posting_carries_every_area_it_lists(scan_db, make_sour
 
     posting = jobs._upsert_posting(scan_db, url_row, result, datetime.now(timezone.utc))
 
-    assert [geo.metro_by_code(c).name for c in posting.metros] == ["New York, NY", "San Francisco, CA", "Seattle, WA"]
+    areas = [geo.metro_by_code(c) for c in posting.metros]
+    assert [a.name for a in areas if a.kind != "state"] == ["New York, NY", "San Francisco, CA", "Seattle, WA"]
+    assert [a.name for a in areas if a.kind == "state"] == ["New York", "California", "Washington"]
+
+
+def test_upsert_reads_the_work_type_from_the_location_text(scan_db, make_source, make_url):
+    now = datetime.now(timezone.utc)
+
+    def stored(location, workplace_type):
+        posting = jobs._upsert_posting(
+            scan_db, make_url(make_source()), ScanResult(success=True, title="T", location=location, workplace_type=workplace_type), now
+        )
+        return posting.workplace_type
+
+    assert stored("Remote - United States", "onsite") == "remote"  # the adapter's plain-place guess is overridden
+    assert stored("Boston or Remote", "unknown") == "hybrid"
+    assert stored("New York, NY HQ", "unknown") == "onsite"
+    assert stored("Remote - United States", "hybrid") == "hybrid"  # an explicit adapter value is kept
+    assert stored("San Francisco, CA", "onsite") == "onsite"  # nothing stated: unchanged
+    assert stored("San Francisco, CA", "unknown") == "unknown"
+    assert stored(None, "remote") == "remote"
+
+
+def test_upsert_files_a_state_only_posting_under_its_state(scan_db, make_source, make_url):
+    result = ScanResult(success=True, title="Engineer", location="Remote - California")
+
+    posting = jobs._upsert_posting(scan_db, make_url(make_source()), result, datetime.now(timezone.utc))
+
+    assert posting.metros == ["CA"]
+    assert posting.workplace_type == "remote"
+
+
+def test_rank_metros_suggests_states_alongside_metro_areas():
+    counts = {SLC: 300, "UT": 500, NYC: 900, "NY": 1000}
+
+    assert [(m.name, m.kind) for m, _ in rank_metros(counts, "utah", 5)] == [("Utah", "state")]
+    assert [m.name for m, _ in rank_metros(counts, "new york", 5)] == ["New York, NY", "New York"]
+    assert [m.name for m, _ in rank_metros(counts, "salt", 5)] == ["Salt Lake City, UT"]
