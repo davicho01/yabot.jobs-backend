@@ -16,9 +16,10 @@ from app.services.adapters.base import (
     get_with_retry,
     posting_date,
 )
-from app.services.browser_fetch import fetch_rendered_html
+from app.services.adapters.text import html_to_formatted_text
 
 _ADP_JOBS_URL = "https://workforcenow.adp.com/mascsr/default/careercenter/public/events/staffing/v1/job-requisitions"
+_ADP_JOB_DETAIL_URL = _ADP_JOBS_URL + "/{job_id}"
 _ADP_JOB_URL = (
     "https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html"
     "?cid={cid}{cc_id_param}&type=JS&lang=en_US&selectedMenuKey=CareerCenter&jobId={job_id}"
@@ -128,16 +129,40 @@ def _posted_at_of(req: dict[str, Any]) -> date | None:
 def _fields_of(req: dict[str, Any]) -> ExtractedJobFields:
     return ExtractedJobFields(
         title=req.get("requisitionTitle"),
+        description=html_to_formatted_text(req.get("requisitionDescription")),
         location=_location_of(req),
         posted_at=_posted_at_of(req),
     )
 
 
 def extract(cid: str, cc_id: str | None, job_id: str) -> ExtractedJobFields | None:
-    for req in _search_requisitions(cid, cc_id):
-        if _external_job_id(req) == job_id:
-            return _fields_of(req)
-    return None
+    # A dedicated per-requisition endpoint, keyed by the same external job
+    # id the URL's jobId= param already carries — no need to page through
+    # the whole listing to find one job. Crucially, unlike the listing
+    # endpoint, this one *does* carry the full description (as HTML) —
+    # the job detail page itself is a JS SPA shell with no server-rendered
+    # content and no JSON-LD/OG description either (verified live: raw
+    # <title> is a static "Recruitment" placeholder), and even a real
+    # headless-browser render doesn't help here: the description renders
+    # inside open shadow DOM (ADP's own "sdf-*" web-component design
+    # system), which a plain document.outerHTML capture never serializes
+    # (verified live — the rendered page has real layout and 12k+
+    # characters of shadow-rendered text, but zero characters of visible
+    # light-DOM/innerText). This REST endpoint sidesteps all of that.
+    cc_id_param = {"ccId": cc_id} if cc_id else {}
+    try:
+        response = get_with_retry(
+            _ADP_JOB_DETAIL_URL.format(job_id=job_id),
+            params={"cid": cid, **cc_id_param, "lang": "en_US", "locale": "en_US"},
+            timeout=TIMEOUT,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return None
+    req = response.json()
+    if not isinstance(req, dict) or not req.get("requisitionTitle"):
+        return None
+    return _fields_of(req)
 
 
 def scan_job_url(url: str) -> ScanResult | None:
@@ -149,27 +174,15 @@ def scan_job_url(url: str) -> ScanResult | None:
     if not job_id:
         return None
 
-    try:
-        fields = extract(cid, cc_id or None, job_id)
-    except httpx.HTTPError as exc:
-        return ScanResult(success=False, error=str(exc))
+    fields = extract(cid, cc_id or None, job_id)
     if fields is None:
-        return ScanResult(success=False, error="Requisition not found in this career center's current listings.")
+        return ScanResult(success=False, error="Requisition not found (removed, filled, or an invalid job id).")
 
-    # The job-requisitions API has no description field at all — the
-    # detail page itself is a JS-rendered SPA shell with no JSON-LD/OG
-    # description either (verified live: title is a static "Recruitment"
-    # placeholder, not the actual job title), so the description can only
-    # come from a real render.
-    description = None
-    html = fetch_rendered_html(url)
-    if html is not None:
-        description = base.fallback_description(html) or base.og_description(html)
-    salary_min, salary_max, salary_currency = base.salary_from_text(description)
+    salary_min, salary_max, salary_currency = base.salary_from_text(fields.description)
     return ScanResult(
         success=True,
         title=fields.title,
-        description=description,
+        description=fields.description,
         location=fields.location,
         posted_at=fields.posted_at,
         salary_min=salary_min,
