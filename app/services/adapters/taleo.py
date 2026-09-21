@@ -130,21 +130,38 @@ def _fetch_jobs(board_key: str) -> list[str]:
 # browser-render fallback (verified live: every value below sits in a
 # `<span class="text">` right after its `<span class="subtitle">` label
 # once rendered, both empty in the raw response).
-_LABELED_VALUE_RE = re.compile(
-    r'class="subtitle">([^<]+)</span></h2>.*?class="text">([^<]*)</span>', re.DOTALL
-)
 _DESCRIPTION_MARKER = 'class="editablesection"'
-_TITLE_RE = re.compile(r'<h1[^>]*>\s*([^<]+?)\s*</h1>', re.IGNORECASE)
+# The <title> tag reliably renders as "Job Description - {title} ({job
+# number})" (verified live) — strip that wrapper rather than depend on the
+# metadata sidebar's own DOM shape, which turned out not to match this
+# tenant's actual rendered markup (see _META_VALUE_RE below).
+_TITLE_TAG_RE = re.compile(r"^Job Description - (.+?)\s*\(\d+\)\s*$")
 
 
-def _labeled_values(html: str) -> dict[str, str]:
-    return {label.strip(): clean_text(value) or "" for label, value in _LABELED_VALUE_RE.findall(html)}
+def _title_of(html: str) -> str | None:
+    raw = base.fallback_title(html)
+    if not raw:
+        return None
+    match = _TITLE_TAG_RE.match(raw.strip())
+    return clean_text(match.group(1)) if match else clean_text(raw)
+
+
+# The metadata sidebar (Recruiting Company, Primary Location, Schedule,
+# Worksite, ...) turned out — verified against real prod scans — not to
+# render into the `<span class="subtitle">`/`<span class="text">` pairing
+# the raw (pre-render) template suggested; whatever ends up filling those
+# spans doesn't match after a real render. But every value there also
+# appears as plain "Label: Value" text inside the description body itself
+# (both markdown-heading style, "## Primary Location\n\n: value", and
+# plain-line style, "Worksite: value" — verified live, format isn't even
+# consistent within one page), which html_to_formatted_text already
+# reduces to reliably, so pull them from there instead.
+def _meta_value(description: str, label: str) -> str | None:
+    match = re.search(rf"{re.escape(label)}\s*\n*:\s*([^\n]+)", description)
+    return clean_text(match.group(1)) if match else None
 
 
 def extract(html: str) -> ExtractedJobFields:
-    values = _labeled_values(html)
-    title_match = _TITLE_RE.search(html)
-
     description = None
     marker = html.find(_DESCRIPTION_MARKER)
     if marker != -1:
@@ -154,10 +171,10 @@ def extract(html: str) -> ExtractedJobFields:
             description = html_to_formatted_text(inner) if inner else None
 
     return ExtractedJobFields(
-        title=clean_text(title_match.group(1)) if title_match else None,
+        title=_title_of(html),
         description=description,
-        company_name=values.get("Recruiting Company") or None,
-        location=values.get("Primary Location") or None,
+        company_name=_meta_value(description, "Recruiting Company") if description else None,
+        location=_meta_value(description, "Primary Location") if description else None,
     )
 
 
