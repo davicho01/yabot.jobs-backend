@@ -42,7 +42,7 @@ _US_SIGNAL_RE = re.compile(r"\b(?:us|usa|united states(?: of america)?)\b")
 
 # Words that are regions or whole-continent labels rather than places we could file.
 _REGION_WORDS = {"asia", "apac", "emea", "europe", "latam", "latin america", "worldwide", "global", "anywhere",
-                 "north america", "americas", "international"}
+                 "north america", "americas", "international", "nationwide"}
 
 # Words that mean the same thing spelled short or long. Applied to city names
 # only (never to state tokens: "MT" is Montana, not "Mount").
@@ -76,10 +76,18 @@ _SPLIT_COUNTRY_RE = re.compile(r"\bunited\s*,\s*states\b", re.IGNORECASE)
 # ("Home Office" is deliberately not a signal — it usually means a company's
 # corporate headquarters, not working from home.)
 _HOME_OFFICE_RE = re.compile(r"\bhome\s+office\b", re.IGNORECASE)
+# "Nationwide Remote Office (US99)" is a remote posting, not "remote" + "office".
+_REMOTE_OFFICE_RE = re.compile(r"\b(?:remote|virtual)\s+office\b", re.IGNORECASE)
 _REMOTE_WORDS = r"remote(?:ly)?|virtual|telecommut\w*|tele-?work\w*|work\s+from\s+home|wfh"
-_ONSITE_WORDS = r"on-?site|in-?office|office|hq|headquarters|campus"
+# Words that state how the job is worked. HQ / Headquarters / Campus only label a
+# site — "Mountain View (HQ)" says nothing about remote vs on-site — so they are
+# taken off the place name but are not a work-type signal.
+_ONSITE_WORDS = r"on-?site|in-?office|office"
+_SITE_LABEL_WORDS = r"hq|headquarters|campus"
 _WORKPLACE_RE = re.compile(
-    rf"\b(?P<remote>{_REMOTE_WORDS})\b|\b(?P<hybrid>hybrid)\b|\b(?P<onsite>{_ONSITE_WORDS})\b", re.IGNORECASE
+    rf"\b(?P<remote>{_REMOTE_WORDS})\b|\b(?P<hybrid>hybrid)\b|\b(?P<onsite>{_ONSITE_WORDS})\b"
+    rf"|\b(?P<label>{_SITE_LABEL_WORDS})\b",
+    re.IGNORECASE,
 )
 _DANGLING_CONNECTOR_RE = re.compile(r"^(?:or|and)\b|\b(?:or|and)$", re.IGNORECASE)
 # "Chicago Metro", "Greater Boston Area": area words, not part of the city name.
@@ -492,8 +500,13 @@ def _strip_workplace(text: str) -> tuple[str, str | None]:
     "remote"); "New York, NY HQ" -> ("New York, NY", "onsite"). A city with a
     remote option is hybrid, matching how JSON-LD postings are read."""
     text = _HOME_OFFICE_RE.sub(" ", text.replace("_", " "))
-    found = {name for match in _WORKPLACE_RE.finditer(text) for name, hit in match.groupdict().items() if hit}
-    if not found:
+    remote_office = bool(_REMOTE_OFFICE_RE.search(text))
+    text = _REMOTE_OFFICE_RE.sub(" ", text)
+    matches = [(name, hit) for m in _WORKPLACE_RE.finditer(text) for name, hit in m.groupdict().items() if hit]
+    found = {name for name, _ in matches if name != "label"}
+    if remote_office:
+        found.add("remote")
+    if not matches and not remote_office:
         return text, None
     parts = []
     for part in text.split(","):
@@ -504,8 +517,10 @@ def _strip_workplace(text: str) -> tuple[str, str | None]:
             parts.append(part)
     if "hybrid" in found or {"remote", "onsite"} <= found:
         workplace = "hybrid"
-    else:
+    elif found:
         workplace = "remote" if "remote" in found else "onsite"
+    else:
+        workplace = None  # only site labels (HQ, Campus): stripped, but no work-type statement
     return ", ".join(parts), workplace
 
 
@@ -537,7 +552,7 @@ def _names_foreign_country(entry: str) -> bool:
 def _classify_other(text: str) -> str:
     """"country" if what's left is only country / region names, else "other"."""
     geo = _geo()
-    tokens = [t for t in (_normalize(part) for part in text.split(",")) if t]
+    tokens = [t for t in (_normalize(part) for part in _PARENTHETICAL_RE.sub(" ", text).split(",")) if t]
     if tokens and all(t in _US_COUNTRY_TOKENS or t in geo.foreign_countries or t in _REGION_WORDS for t in tokens):
         return "country"
     return "other"

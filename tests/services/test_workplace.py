@@ -21,7 +21,11 @@ REMOTE, HYBRID, ONSITE, UNKNOWN = WorkplaceType.REMOTE, WorkplaceType.HYBRID, Wo
         (["Hybrid"], HYBRID),
         (["San Francisco- Hybrid, US"], HYBRID),
         (["New York, NY Office"], ONSITE),
-        (["New York, NY HQ USA, United States of America"], ONSITE),
+        (["Chicago Office"], ONSITE),
+        (["Nationwide Remote Office (US99), United States of America"], REMOTE),  # "remote office" is remote, not hybrid
+        (["Maryland Remote Office (MD99), United States of America"], REMOTE),
+        (["Mountain View, California (HQ)"], None),  # HQ / Headquarters / Campus label a site, not a work arrangement
+        (["New York, NY HQ USA, United States of America"], None),
         (["Remote or Office"], HYBRID),
         # nothing stated
         (["San Francisco, CA"], None),

@@ -298,10 +298,14 @@ def test_no_state_is_invented_for_foreign_or_ambiguous_entries(entry):
         ("New York, NY Office", "onsite", "city"),
         ("San Francisco- Hybrid, US", "hybrid", "city"),
         ("Home Office - Illinois", None, "state"),  # "Home Office" is a company's HQ, not a work-from-home signal
+        ("Nationwide Remote Office (US99), United States of America", "remote", "country"),  # a remote office is remote
+        ("Maryland Remote Office (MD99), United States of America", "remote", "state"),
+        ("Mountain View, California (HQ)", None, "city"),  # HQ labels a site; it doesn't say how the job is worked
+        ("New York, NY HQ USA, United States of America", None, "city"),
+        ("Cleveland Clinic Main Campus", None, "other"),
         ("Salt Lake City, UT", None, "city"),
         ("Remote - India", "remote", "country"),
         ("United States", None, "country"),
-        ("Cleveland Clinic Main Building", None, "other"),
     ],
 )
 def test_entries_report_their_workplace_word_and_what_kind_of_place_is_left(entry, workplace, geo):

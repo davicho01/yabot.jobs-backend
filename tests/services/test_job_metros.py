@@ -111,7 +111,9 @@ def test_upsert_reads_the_work_type_from_the_location_text(scan_db, make_source,
 
     assert stored("Remote - United States", "onsite") == "remote"  # the adapter's plain-place guess is overridden
     assert stored("Boston or Remote", "unknown") == "hybrid"
-    assert stored("New York, NY HQ", "unknown") == "onsite"
+    assert stored("New York, NY Office", "unknown") == "onsite"
+    assert stored("New York, NY HQ", "unknown") == "unknown"  # HQ labels a site; it doesn't state the arrangement
+    assert stored("Nationwide Remote Office (US99), United States of America", "onsite") == "remote"
     assert stored("Remote - United States", "hybrid") == "hybrid"  # an explicit adapter value is kept
     assert stored("San Francisco, CA", "onsite") == "onsite"  # nothing stated: unchanged
     assert stored("San Francisco, CA", "unknown") == "unknown"
