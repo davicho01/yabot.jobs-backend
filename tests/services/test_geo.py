@@ -345,3 +345,68 @@ def test_remote_plus_a_bare_state_name_that_is_also_a_city_means_the_state():
 def test_a_us_city_and_state_is_unaffected_by_the_country_code_guard():
     assert resolve_entry("Concord, CA").state.name == "California"
     assert resolve_entry("Concord, CA, United States").state.name == "California"
+
+
+# ------------------------------------------------------------- radius search
+
+
+def test_a_city_search_covers_the_areas_within_25_miles_plus_its_own():
+    bountiful = resolve_entry("Bountiful, Utah, United States")
+    assert (bountiful.geo, bountiful.place.name, bountiful.metro.name) == ("city", "Bountiful", "Ogden, UT")
+
+    codes = geo.search_areas("Bountiful, Utah")
+
+    assert codes[0] == bountiful.metro.code  # its own area first, then by distance
+    assert {"36260", SLC} <= set(codes)  # Ogden (its own) and Salt Lake City, 10 miles south
+    assert "39340" not in codes  # Provo is ~40 miles away
+
+
+def test_the_radius_reaches_across_state_lines():
+    # Kansas City, MO sits on the state line: the Kansas side is well inside 25 miles.
+    codes = geo.search_areas("Kansas City, Missouri")
+
+    assert "28140" in codes  # Kansas City, MO-KS metro
+    assert all(geo.metro_by_code(code).kind != "state" for code in codes)
+
+
+def test_a_state_or_the_united_states_searches_states_and_other_text_is_a_plain_search():
+    assert geo.search_areas("Utah, United States") == ["UT"]
+    assert geo.search_areas("Utah") == ["UT"]
+    assert len(geo.search_areas("United States")) == 52  # 50 states + DC + Puerto Rico
+    for text in ("Canada", "Remote", "Salt", "Cleveland Clinic Main Campus", "Toronto, Ontario, Canada"):
+        assert geo.search_areas(text) is None
+
+
+def test_nearby_area_codes_honours_the_distance():
+    place = resolve_entry("Bountiful, Utah").place
+
+    assert set(geo.nearby_area_codes(place, 5)) == {"36260"}  # Bountiful itself; Salt Lake City proper is 10 miles off
+    assert "39340" in geo.nearby_area_codes(place, 60)
+
+
+# ------------------------------------------------------------ place suggestions
+
+
+def test_place_suggestions_are_only_cities_states_and_the_united_states():
+    for q in ("", "b", "salt", "cleveland", "utah", "new"):
+        for label in geo.place_suggestions(q, 50):
+            assert label == "United States" or label.endswith(", United States"), label
+            assert not any(ch.isdigit() for ch in label) and " - " not in label, label
+
+
+def test_place_suggestions_rank_prefix_matches_first_states_before_cities():
+    assert geo.place_suggestions("bount", 5) == ["Bountiful, Utah, United States", "West Bountiful, Utah, United States"]
+    assert geo.place_suggestions("bountiful, ut", 5)[0] == "Bountiful, Utah, United States"  # abbreviations work
+    utah = geo.place_suggestions("utah", 3)
+    assert utah[0] == "Utah, United States"
+    assert utah[1] == "Salt Lake City, Utah, United States"  # then cities that contain it, biggest first
+    assert geo.place_suggestions("united", 3)[0] == "United States"
+    assert geo.place_suggestions("usa", 3) == ["United States"]  # "usa" is not found inside "thousand"
+
+
+def test_place_suggestions_with_nothing_typed_lead_with_the_united_states_then_big_cities():
+    suggestions = geo.place_suggestions("", 4)
+
+    assert suggestions[0] == "United States"
+    assert suggestions[1] == "New York City, New York, United States"
+    assert len(suggestions) == 4

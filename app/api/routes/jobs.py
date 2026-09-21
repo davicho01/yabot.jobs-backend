@@ -2,7 +2,7 @@ import uuid
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import false, func, select
+from sqlalchemy import false, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
@@ -59,7 +59,13 @@ def list_job_urls(
         if q:
             stmt = stmt.where(JobPosting.title.ilike(f"%{q}%"))
         if location:
-            stmt = stmt.where(location_matches(f"%{location}%"))
+            # Text that names a place we know (a city, a state, "United States")
+            # also finds postings filed under the areas it covers — a city
+            # reaches its metro area and the ones within RADIUS_MILES — however
+            # they spelled it; anything else is a plain text match.
+            conditions = [location_matches(f"%{location}%")]
+            conditions += [JobPosting.metros.contains([code]) for code in geo.search_areas(location) or []]
+            stmt = stmt.where(or_(*conditions))
         if metro:
             metro_area = geo.metro_by_slug(metro)
             # An unknown slug matches nothing (rather than erroring): a stale
@@ -85,15 +91,22 @@ def list_job_urls(
 def list_job_locations(
     q: str | None = None,
     limit: int = Query(200, ge=1, le=500),
-    unresolved_only: bool = False,
     db: Session = Depends(get_db),
 ) -> list[str]:
     """Individual locations across all postings (a posting listing several
     contributes each one), most-used first. With `q`, only ones containing it,
-    those starting with it ranked first — meant to back a typeahead. With
-    `unresolved_only`, leaves out places that belong to a metro area (those are
-    suggested by GET /jobs/metros instead)."""
-    return location_suggestions(db, q, limit, unresolved_only=unresolved_only)
+    those starting with it ranked first. These are the raw scraped strings,
+    facility names and all — the search box suggests GET /jobs/places instead."""
+    return location_suggestions(db, q, limit)
+
+
+@router.get("/places", response_model=list[str])
+def list_job_places(q: str | None = None, limit: int = Query(10, ge=1, le=50)) -> list[str]:
+    """Places to suggest as the location search is typed: "City, State, United
+    States", "State, United States" or "United States". Searching one of them
+    (GET /jobs?location=<label>) covers the city and 25 miles around it, or the
+    whole state."""
+    return geo.place_suggestions(q, limit)
 
 
 @router.get("/metros", response_model=list[MetroRead])

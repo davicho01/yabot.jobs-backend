@@ -24,6 +24,7 @@ is Indiana *or* India, "CA" California *or* Canada.
 """
 
 import csv
+import math
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -139,6 +140,7 @@ class Resolution:
     state: Metro | None = None  # the state-level area
     geo: str = "other"
     workplace: str | None = None  # "remote" | "hybrid" | "onsite" — explicit words in the entry
+    place: "_Place | None" = None  # the city itself, when it was matched to one (not for an area alias)
 
     @property
     def city(self) -> bool:
@@ -147,9 +149,12 @@ class Resolution:
 
 @dataclass(frozen=True)
 class _Place:
+    name: str
     state: str
     county_fips: str
     population: int
+    lat: float
+    lon: float
 
 
 @dataclass(frozen=True)
@@ -157,6 +162,7 @@ class _Found:
     metro: Metro | None
     state: Metro
     city: bool
+    place: _Place | None = None
 
 
 def _strip_accents(text: str) -> str:
@@ -202,10 +208,14 @@ class _Geo:
         self.places_in_state: dict[tuple[str, str], list[_Place]] = {}
         self.aliases_in_state: dict[tuple[str, str], list[_Place]] = {}
         self.places_by_name: dict[str, list[_Place]] = {}
+        self.all_places: list[_Place] = []
         self.primary_by_name: dict[str, list[_Place]] = {}  # real names only, no aliases
         with (_DATA_DIR / "us_places.tsv").open(encoding="utf-8") as handle:
             for row in csv.DictReader(handle, delimiter="\t"):
-                place = _Place(row["state"], row["county_fips"], int(row["population"]))
+                place = _Place(
+                    row["name"], row["state"], row["county_fips"], int(row["population"]),
+                    float(row["lat"]), float(row["lon"]),
+                )
                 primary_keys = {_city_key(row["name"]), _city_key(row["ascii"])}
                 alias_keys = {_city_key(a) for a in row["aliases"].split("|") if a} - primary_keys
                 for key in primary_keys:
@@ -216,6 +226,7 @@ class _Geo:
                     self.places_by_name.setdefault(key, []).append(place)
                 for key in primary_keys:
                     self.primary_by_name.setdefault(key, []).append(place)
+                self.all_places.append(place)
         for places in (
             *self.places_in_state.values(),
             *self.aliases_in_state.values(),
@@ -349,7 +360,9 @@ def _state_fallback(tokens: list[str], us_signal: bool) -> _Found | None:
 def _place_found(place: _Place) -> _Found:
     geo = _geo()
     code = geo.county_cbsa.get(place.county_fips)
-    return _Found(metro=geo.metro_by_code.get(code) if code else None, state=geo.states[place.state], city=True)
+    return _Found(
+        metro=geo.metro_by_code.get(code) if code else None, state=geo.states[place.state], city=True, place=place
+    )
 
 
 def _lone_city(key: str, *, primary_only: bool = False) -> _Found | None:
@@ -596,7 +609,7 @@ def resolve_entry(entry: str) -> Resolution:
             # also a city means the state ("remote, in New York"), not the city.
             if workplace == "remote" and _is_bare_state_name(stripped):
                 return Resolution(state=found.state, geo="state", workplace=workplace)
-            return Resolution(metro=found.metro, state=found.state, geo="city", workplace=workplace)
+            return Resolution(metro=found.metro, state=found.state, geo="city", workplace=workplace, place=found.place)
         state_only = state_only or found
     if state_only is not None:
         return Resolution(state=state_only.state, geo="state", workplace=workplace)
@@ -622,3 +635,131 @@ def resolve_area_codes(entries: list[str]) -> list[str]:
             if area is not None and area.code not in codes:
                 codes.append(area.code)
     return codes
+
+
+# ------------------------------------------------------------- radius search
+
+# How far around a searched city to look. Postings only record their metro/micro
+# area (not the city), so this picks every area with a place inside the circle —
+# see nearby_area_codes.
+RADIUS_MILES = 25
+
+_EARTH_RADIUS_MILES = 3958.8
+_MILES_PER_DEGREE_LAT = 69.0
+_UNITED_STATES_NAMES = {"usa", "united states", "united states of america"}
+
+
+def _distance_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance (haversine)."""
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    a = math.sin((phi2 - phi1) / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(math.radians(lon2 - lon1) / 2) ** 2
+    return 2 * _EARTH_RADIUS_MILES * math.asin(math.sqrt(a))
+
+
+@lru_cache(maxsize=4096)
+def nearby_area_codes(place: _Place, miles: float = RADIUS_MILES) -> tuple[str, ...]:
+    """Codes of the metro/micro areas that have a place within `miles` of `place`,
+    nearest first, starting with the place's own area (which is included whole,
+    however far its far side reaches). A place outside every area still gets the
+    areas around it."""
+    geo = _geo()
+    lat_span = miles / _MILES_PER_DEGREE_LAT
+    lon_span = miles / (_MILES_PER_DEGREE_LAT * max(math.cos(math.radians(place.lat)), 0.01))
+    nearest: dict[str, float] = {}
+    own = geo.county_cbsa.get(place.county_fips)
+    if own is not None:
+        nearest[own] = 0.0
+    for other in geo.all_places:
+        if abs(other.lat - place.lat) > lat_span or abs(other.lon - place.lon) > lon_span:
+            continue  # cheap box test first: most of the 17k places are nowhere near
+        code = geo.county_cbsa.get(other.county_fips)
+        if code is None:
+            continue
+        distance = _distance_miles(place.lat, place.lon, other.lat, other.lon)
+        if distance <= miles and distance < nearest.get(code, math.inf):
+            nearest[code] = distance
+    return tuple(sorted(nearest, key=nearest.__getitem__))
+
+
+def _is_united_states(text: str) -> bool:
+    parts = [part for part in (_normalize(p) for p in text.split(",")) if part]
+    return bool(parts) and all(part in _UNITED_STATES_NAMES for part in parts)
+
+
+def search_areas(text: str) -> list[str] | None:
+    """The area codes a location search covers, for text that names a place we
+    know: a city -> the areas within RADIUS_MILES of it (its own metro included);
+    a state -> that state; "United States" -> every state. None for anything else
+    (partial typing, a facility, another country), which stays a plain text search."""
+    resolution = resolve_entry(text)
+    if resolution.geo == "city":
+        if resolution.place is not None:
+            return list(nearby_area_codes(resolution.place)) or None
+        return [resolution.metro.code] if resolution.metro else None  # an area alias ("Bay Area")
+    if resolution.geo == "state" and resolution.state is not None:
+        return [resolution.state.code]
+    if resolution.geo == "country" and _is_united_states(text):
+        return list(_geo().states)
+    return None
+
+
+# ----------------------------------------------------------- place suggestions
+
+_UNITED_STATES = "United States"
+# Smaller GeoNames "places" are neighbourhoods and districts ("Barracks Row"),
+# not somewhere people search for work.
+_SUGGESTION_MIN_POPULATION = 2500
+
+
+@dataclass(frozen=True)
+class _Suggestion:
+    label: str
+    keys: tuple[str, ...]  # normalized spellings a typed query is matched against
+    rank: tuple[int, int]  # (0 country / 1 state / 2 city, -population)
+
+
+@lru_cache(maxsize=1)
+def _suggestions() -> tuple[_Suggestion, ...]:
+    geo = _geo()
+    entries = [_Suggestion(_UNITED_STATES, (_normalize(_UNITED_STATES), "usa"), (0, 0))]
+    for abbr, state in geo.states.items():
+        entries.append(
+            _Suggestion(f"{state.name}, {_UNITED_STATES}", (_normalize(f"{state.name} {_UNITED_STATES}"), _normalize(abbr)), (1, 0))
+        )
+    biggest: dict[tuple[str, str], _Place] = {}
+    for place in geo.all_places:
+        if place.population < _SUGGESTION_MIN_POPULATION or re.search(r"\d| - ", place.name):
+            continue
+        key = (place.state, _normalize(place.name))
+        if key not in biggest or place.population > biggest[key].population:
+            biggest[key] = place
+    for place in biggest.values():
+        state = geo.states[place.state]
+        entries.append(
+            _Suggestion(
+                f"{place.name}, {state.name}, {_UNITED_STATES}",
+                (_normalize(f"{place.name} {state.name} {_UNITED_STATES}"), _normalize(f"{place.name} {place.state}")),
+                (2, -place.population),
+            )
+        )
+    return tuple(sorted(entries, key=lambda e: e.rank))
+
+
+def place_suggestions(q: str | None, limit: int) -> list[str]:
+    """Places to offer for the text typed so far — "City, State, United States",
+    "State, United States" or "United States", never a facility or street. Names
+    that start with what was typed come first, then ones with a word that does; states
+    before cities, bigger cities first. With nothing typed: the United States,
+    then the biggest cities."""
+    needle = _normalize(q or "")
+    entries = _suggestions()
+    if not needle:
+        return [e.label for e in entries[:1] + tuple(e for e in entries if e.rank[0] == 2)][:limit]
+    starts_with: list[str] = []
+    contains: list[str] = []
+    for entry in entries:
+        if any(key.startswith(needle) for key in entry.keys):
+            starts_with.append(entry.label)
+        elif any(f" {needle}" in f" {key}" for key in entry.keys):  # at a word start: "usa" isn't in "thousand"
+            contains.append(entry.label)
+    return (starts_with + contains)[:limit]

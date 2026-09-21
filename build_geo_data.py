@@ -18,7 +18,8 @@ Sources:
 Outputs:
   us_states.csv          abbr, name, fips
   us_cbsa_counties.csv   county_fips, cbsa_code, cbsa_title, kind    (only counties inside a CBSA)
-  us_places.tsv          name, ascii, state, county_fips, population, aliases
+  us_places.tsv          name, ascii, state, county_fips, population, aliases, lat, lon
+                         (lat/lon centre a radius search on a city; see geo.nearby_area_codes)
   world_city_guard.tsv   name, country, population   (non-US cities >= 100k; lets the resolver
                          refuse to read a bare "London"/"Paris" as a small US namesake)
   world_countries.tsv    name, iso2, iso3   (non-US countries; lets the resolver refuse to read a
@@ -174,6 +175,8 @@ def build_places(zip_bytes: bytes, state_fips: dict[str, str]) -> list[dict]:
                 "county_fips": county_fips,
                 "population": int(row["population"] or 0),
                 "aliases": "|".join(aliases[:ALIAS_MAX_PER_PLACE]),
+                "lat": f"{float(row['lat']):.4f}",
+                "lon": f"{float(row['lon']):.4f}",
             }
         )
     print(f"inferred a county for {len(inferred)} places with none in GeoNames: {', '.join(inferred[:6])}, ...")
@@ -238,7 +241,7 @@ def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     write(OUT_DIR / "us_states.csv", states, ["abbr", "name", "fips"], ",")
     write(OUT_DIR / "us_cbsa_counties.csv", counties, ["county_fips", "cbsa_code", "cbsa_title", "kind"], ",")
-    write(OUT_DIR / "us_places.tsv", places, ["name", "ascii", "state", "county_fips", "population", "aliases"], "\t")
+    write(OUT_DIR / "us_places.tsv", places, ["name", "ascii", "state", "county_fips", "population", "aliases", "lat", "lon"], "\t")
     write(OUT_DIR / "world_city_guard.tsv", guard, ["name", "country", "population"], "\t")
     write(OUT_DIR / "world_countries.tsv", countries, ["name", "iso2", "iso3"], "\t")
 

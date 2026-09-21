@@ -37,22 +37,11 @@ def test_rank_metros_matches_punctuation_insensitively():
     assert [m.name for m, _ in rank_metros({"41180": 4}, "st louis", 5)] == ["St. Louis, MO"]
 
 
-def test_unresolved_only_hides_places_that_belong_to_a_metro(monkeypatch):
-    counts = [
-        ("Salt Lake City, UT, US", 30),
-        ("Salt Lake City, Utah", 20),
-        ("Utah", 10),  # a state: suggested as "Utah (statewide)" instead
-        ("Salt Lake County Courthouse", 5),  # a facility: no area
-    ]
+def test_location_suggestions_are_the_raw_locations_ranked(monkeypatch):
+    counts = [("Salt Lake City, UT, US", 30), ("Utah", 10), ("Salt Lake County Courthouse", 5)]
     monkeypatch.setattr(job_locations, "_location_counts", lambda db: counts)
 
-    assert location_suggestions(None, "salt", 10) == [
-        "Salt Lake City, UT, US",
-        "Salt Lake City, Utah",
-        "Salt Lake County Courthouse",
-    ]
-    assert location_suggestions(None, "salt", 10, unresolved_only=True) == ["Salt Lake County Courthouse"]
-    assert location_suggestions(None, None, 10, unresolved_only=True) == ["Salt Lake County Courthouse"]
+    assert location_suggestions(None, "salt", 10) == ["Salt Lake City, UT, US", "Salt Lake County Courthouse"]
 
 
 def test_metro_filter_compiles_to_an_indexable_containment_check():
@@ -164,3 +153,19 @@ def test_upsert_stores_decoded_text_and_places_split_correctly(scan_db, make_sou
     assert posting.locations == ["1403 - Tacoma & Gordon, Canada", "Austin, TX"]
     # Only Austin counts: the Canadian entry no longer leaves a "Tacoma" fragment that files it under Washington.
     assert posting.metros == ["12420", "TX"]
+
+
+def test_a_location_search_compiles_to_the_text_match_or_indexable_area_checks():
+    from sqlalchemy import or_
+
+    from app.services.job_locations import location_matches
+
+    areas = geo.search_areas("Bountiful, Utah")
+    stmt = select(JobPosting.id).where(
+        or_(location_matches("%Bountiful, Utah%"), *[JobPosting.metros.contains([code]) for code in areas])
+    )
+
+    sql = " ".join(str(stmt.compile(dialect=postgresql.dialect())).split())
+
+    assert sql.count("job_postings.metros @>") == len(areas) >= 3
+    assert " OR " in sql

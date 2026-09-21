@@ -143,14 +143,8 @@ def _location_counts(db: Session) -> list[tuple[str, int]]:
     return counts
 
 
-def location_suggestions(db: Session, q: str | None, limit: int, *, unresolved_only: bool = False) -> list[str]:
-    """`unresolved_only` drops entries that resolve to a metro area — for a
-    search box that already suggests the areas, they'd just be the same place
-    spelled a dozen ways ("Salt Lake City, UT, US", "…, Utah", …)."""
-    counts = _location_counts(db)
-    if unresolved_only:
-        counts = [(name, n) for name, n in counts if geo.resolve_metro(name) is None]
-    return rank_locations(counts, q, limit)
+def location_suggestions(db: Session, q: str | None, limit: int) -> list[str]:
+    return rank_locations(_location_counts(db), q, limit)
 
 
 _metro_counts_cache: tuple[float, dict[str, int]] | None = None
