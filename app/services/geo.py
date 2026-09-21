@@ -40,6 +40,12 @@ _DOMINANCE_RATIO = 5
 _US_COUNTRY_TOKENS = {"us", "usa", "united states", "united states of america", "america"}
 _US_SIGNAL_RE = re.compile(r"\b(?:us|usa|united states(?: of america)?)\b")
 
+# Canadian provinces and territories. They count as "another country" for the
+# guards below: "Remote - Ontario" is Canada, not Ontario, California.
+_CANADIAN_REGIONS = {"ontario", "quebec", "british columbia", "alberta", "manitoba", "saskatchewan", "nova scotia",
+                     "new brunswick", "newfoundland and labrador", "newfoundland", "prince edward island", "yukon",
+                     "northwest territories", "nunavut"}
+
 # Words that are regions or whole-continent labels rather than places we could file.
 _REGION_WORDS = {"asia", "apac", "emea", "europe", "latam", "latin america", "worldwide", "global", "anywhere",
                  "north america", "americas", "international", "nationwide"}
@@ -231,6 +237,7 @@ class _Geo:
         with (_DATA_DIR / "world_countries.tsv").open(encoding="utf-8") as handle:
             for row in csv.DictReader(handle, delimiter="\t"):
                 self.foreign_countries.add(_normalize(row["name"]))
+        self.foreign_countries |= _CANADIAN_REGIONS
         self.foreign_countries -= set(self.state_by_name)
 
         self.county_cbsa: dict[str, str] = {}
@@ -541,6 +548,11 @@ def _entry_variants(entry: str) -> list[str]:
     return list(dict.fromkeys(v.strip() for v in variants if v.strip(" ,-–—/")))
 
 
+def _is_bare_state_name(text: str) -> bool:
+    tokens = [t for t in (_normalize(part) for part in text.split(",")) if t and t not in _US_COUNTRY_TOKENS]
+    return len(tokens) == 1 and tokens[0] in _geo().state_by_name
+
+
 def _names_foreign_country(entry: str) -> bool:
     """Does the entry name a country other than the US — as a comma part
     ("Toronto, Canada") or a dash-separated one ("Mexico - Mexico City")?"""
@@ -573,6 +585,10 @@ def resolve_entry(entry: str) -> Resolution:
         if found is None:
             continue
         if found.city:
+            # "Remote - New York": with a remote word, a bare state name that is
+            # also a city means the state ("remote, in New York"), not the city.
+            if workplace == "remote" and _is_bare_state_name(stripped):
+                return Resolution(state=found.state, geo="state", workplace=workplace)
             return Resolution(metro=found.metro, state=found.state, geo="city", workplace=workplace)
         state_only = state_only or found
     if state_only is not None:

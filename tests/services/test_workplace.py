@@ -12,6 +12,8 @@ REMOTE, HYBRID, ONSITE, UNKNOWN = WorkplaceType.REMOTE, WorkplaceType.HYBRID, Wo
     "entries, expected",
     [
         (["Remote - California"], REMOTE),  # remote, with only a state
+        (["Remote - New York, United States of America"], REMOTE),  # "New York" here is the state
+        (["Remote - Ontario"], REMOTE),  # Canada, not a US city
         (["Remote - United States"], REMOTE),
         (["Remote", "Remote - Canada"], REMOTE),
         (["Arizona", "Remote"], REMOTE),  # a state plus a "Remote" tag

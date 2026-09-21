@@ -273,6 +273,7 @@ def test_a_city_in_a_metro_area_is_filed_under_the_metro_and_its_state():
         "Brazil",  # Brazil, IN
         "Mexico",  # Mexico, MO
         "Mexico - Mexico City - Av. Insurgentes Sur 730 - Remote, Mexico",
+        "Remote - Ontario",  # the province, not Ontario, California
         "CAN - Ontario - Toronto, Canada",  # Ontario, CA is a US city
         "AMER - Canada - Ontario - Toronto - University Ave, Canada",
         # "NE" here is a street direction, not Nebraska:
@@ -330,3 +331,11 @@ def test_an_explicit_us_city_and_state_still_wins_even_when_the_name_is_also_a_c
 
 def test_a_facility_state_code_must_be_hyphen_or_underscore_delimited():
     assert resolve_entry("111432-TX-Las Colinas Bldg A, Irving Campus, United States of America").state.name == "Texas"
+
+
+def test_remote_plus_a_bare_state_name_that_is_also_a_city_means_the_state():
+    # "Remote - New York" is remote within the state, not a New York City job.
+    remote = resolve_entry("Remote - New York, United States of America")
+    assert (remote.geo, remote.metro, remote.state.name, remote.workplace) == ("state", None, "New York", "remote")
+    # ...while the city on its own is still the city.
+    assert resolve_entry("New York, United States of America").metro.name == "New York, NY"
