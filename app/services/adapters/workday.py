@@ -83,6 +83,14 @@ def _fetch_jobs(board_key: str) -> list[str]:
 
     urls: list[str] = []
     offset = 0
+    # Some tenants' Workday configuration omits postedOn from the
+    # career-site API response entirely (verified live: Memorial
+    # Healthcare System, 566 real open roles, every jobPostings entry
+    # missing the key) — filtering by recency there wouldn't exclude old
+    # postings, it'd silently exclude *every* posting, since
+    # _posted_age_days(None) is always None. Detected from the first page;
+    # None means "not yet known."
+    filter_by_recency: bool | None = None
     while len(urls) < _WORKDAY_MAX_JOBS:
         response = post_with_retry(
             jobs_url,
@@ -95,20 +103,36 @@ def _fetch_jobs(board_key: str) -> list[str]:
         if not postings:
             break
 
-        # Workday's default sort is newest-first (verified: offset=0 was
-        # entirely "Posted Today", offset=300 was entirely "Posted 7 Days
-        # Ago" — no interleaving). Stop as soon as a page contains anything
-        # outside RECENT_WINDOW_DAYS instead of always paginating to
-        # _WORKDAY_MAX_JOBS — far fewer requests per crawl, and correct
-        # regardless of how many jobs the company has total.
-        recent_postings = [
-            p for p in postings if (age := _posted_age_days(p.get("postedOn"))) is not None and age < RECENT_WINDOW_DAYS
-        ]
-        urls.extend(
-            job_base_url + posting["externalPath"] for posting in recent_postings if posting.get("externalPath")
-        )
-        if len(recent_postings) < len(postings) or len(postings) < _WORKDAY_PAGE_SIZE:
-            break  # hit an older posting, or this was the last page
+        if filter_by_recency is None:
+            filter_by_recency = any(p.get("postedOn") for p in postings)
+
+        if filter_by_recency:
+            # Workday's default sort is newest-first (verified: offset=0
+            # was entirely "Posted Today", offset=300 was entirely "Posted
+            # 7 Days Ago" — no interleaving). Stop as soon as a page
+            # contains anything outside RECENT_WINDOW_DAYS instead of
+            # always paginating to _WORKDAY_MAX_JOBS — far fewer requests
+            # per crawl, and correct regardless of how many jobs the
+            # company has total.
+            recent_postings = [
+                p
+                for p in postings
+                if (age := _posted_age_days(p.get("postedOn"))) is not None and age < RECENT_WINDOW_DAYS
+            ]
+            urls.extend(
+                job_base_url + posting["externalPath"] for posting in recent_postings if posting.get("externalPath")
+            )
+            if len(recent_postings) < len(postings) or len(postings) < _WORKDAY_PAGE_SIZE:
+                break  # hit an older posting, or this was the last page
+        else:
+            # No recency signal available for this tenant at all — capture
+            # every posting up to the shared cap instead, same as any
+            # other adapter with no postedOn-equivalent to filter on.
+            urls.extend(
+                job_base_url + posting["externalPath"] for posting in postings if posting.get("externalPath")
+            )
+            if len(postings) < _WORKDAY_PAGE_SIZE:
+                break
         offset += _WORKDAY_PAGE_SIZE
 
     # _WORKDAY_MAX_JOBS is a safety net, not the normal stopping point — it
