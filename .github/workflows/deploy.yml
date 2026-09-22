@@ -43,7 +43,13 @@ jobs:
           python-version: "3.13"
 
       - run: pip install -r requirements-dev.txt
-      - run: pytest
+      # `python -m pytest`, not bare `pytest`: -m prepends the cwd (repo
+      # root, where app/ lives) to sys.path, which is what makes `app.*`
+      # importable in every test module and conftest.py. The bare `pytest`
+      # console script doesn't do that — it collects fine locally only
+      # because whatever installed this repo's venv already put it on
+      # sys.path some other way; a clean CI checkout has nothing to rely on.
+      - run: python -m pytest
 
   deploy:
     needs: test
