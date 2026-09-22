@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.api.deps import get_current_user, get_db
 from app.models.enums import ApplicationStatus
 from app.models.job_application import UserJobApplication
+from app.models.job_posting import JobPosting
 from app.models.user import User
 from app.schemas.application import ApplicationCreate, ApplicationRead, ApplicationUpdate
 from app.services.jobs import find_existing_application, get_or_create_job_posting
@@ -23,7 +24,7 @@ def list_applications(
         select(UserJobApplication)
         .where(UserJobApplication.user_id == current_user.id)
         .options(
-            selectinload(UserJobApplication.job_posting),
+            selectinload(UserJobApplication.job_posting).selectinload(JobPosting.url),
             selectinload(UserJobApplication.latest_score),
             selectinload(UserJobApplication.latest_tailored_resume),
             selectinload(UserJobApplication.latest_cover_letter),
