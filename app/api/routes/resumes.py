@@ -60,6 +60,22 @@ def _get_main_resume(db: Session, user_id: uuid.UUID) -> Resume:
     return resume
 
 
+def _resolve_resume(db: Session, user_id: uuid.UUID, resume_id: uuid.UUID | None) -> Resume:
+    """Which resume a review/score/tailored-resume/cover-letter call against:
+    an explicit resume_id when the caller supplies one (the frontend's
+    ApplyPage resume picker — see #8), otherwise this user's main resume,
+    the only option before resume_id existed here. Callers that never send
+    resume_id (the MCP server included) keep getting exactly that same
+    fallback, unchanged.
+    """
+    if resume_id is not None:
+        resume = db.scalar(select(Resume).where(Resume.id == resume_id, Resume.user_id == user_id))
+        if resume is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
+        return resume
+    return _get_main_resume(db, user_id)
+
+
 def _get_job_posting(db: Session, job_posting_id: uuid.UUID) -> JobPosting:
     posting = db.get(JobPosting, job_posting_id)
     if posting is None:
@@ -224,9 +240,11 @@ def download_resume(
 
 @router.post("/main/review", response_model=ResumeReviewRead)
 def review_main_resume(
-    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+    resume_id: uuid.UUID | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> ResumeReview:
-    resume = _get_main_resume(db, current_user.id)
+    resume = _resolve_resume(db, current_user.id, resume_id)
     key = get_users_default_llm_key(db, current_user.id)
 
     try:
@@ -256,9 +274,11 @@ def review_main_resume(
 
 @router.get("/main/review", response_model=ResumeReviewRead)
 def get_main_resume_review(
-    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+    resume_id: uuid.UUID | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> ResumeReview:
-    resume = _get_main_resume(db, current_user.id)
+    resume = _resolve_resume(db, current_user.id, resume_id)
     review = db.scalar(
         select(ResumeReview).where(ResumeReview.resume_id == resume.id).order_by(ResumeReview.created_at.desc())
     )
@@ -272,10 +292,11 @@ def get_main_resume_review(
 @router.post("/main/score", response_model=ResumeScoreRead)
 def score_main_resume(
     job_posting_id: uuid.UUID,
+    resume_id: uuid.UUID | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ResumeScore:
-    resume = _get_main_resume(db, current_user.id)
+    resume = _resolve_resume(db, current_user.id, resume_id)
     posting = _get_job_posting(db, job_posting_id)
     key = get_users_default_llm_key(db, current_user.id)
 
@@ -311,6 +332,7 @@ def score_main_resume(
 def upload_main_resume_score(
     job_posting_id: uuid.UUID,
     payload: ResumeScoreUpload,
+    resume_id: uuid.UUID | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ResumeScore:
@@ -318,7 +340,7 @@ def upload_main_resume_score(
     LLM — see mcp_server/) as the current score for a job, skipping this
     app's own LLM call. Same storage as the generate endpoint above.
     """
-    resume = _get_main_resume(db, current_user.id)
+    resume = _resolve_resume(db, current_user.id, resume_id)
     posting = _get_job_posting(db, job_posting_id)
 
     score = ResumeScore(
@@ -340,10 +362,11 @@ def upload_main_resume_score(
 @router.get("/main/score", response_model=ResumeScoreRead)
 def get_main_resume_score(
     job_posting_id: uuid.UUID,
+    resume_id: uuid.UUID | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ResumeScore:
-    resume = _get_main_resume(db, current_user.id)
+    resume = _resolve_resume(db, current_user.id, resume_id)
     score = db.scalar(
         select(ResumeScore)
         .where(ResumeScore.resume_id == resume.id, ResumeScore.job_posting_id == job_posting_id)
@@ -411,10 +434,11 @@ def _store_tailored_resume(
 @router.post("/main/tailored", response_model=TailoredResumeRead, status_code=status.HTTP_201_CREATED)
 def generate_main_tailored_resume(
     job_posting_id: uuid.UUID,
+    resume_id: uuid.UUID | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> TailoredResume:
-    resume = _get_main_resume(db, current_user.id)
+    resume = _resolve_resume(db, current_user.id, resume_id)
     posting = _get_job_posting(db, job_posting_id)
     key = get_users_default_llm_key(db, current_user.id)
 
@@ -442,6 +466,7 @@ def generate_main_tailored_resume(
 def upload_main_tailored_resume(
     job_posting_id: uuid.UUID,
     payload: TailoredResumeUpload,
+    resume_id: uuid.UUID | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> TailoredResume:
@@ -450,7 +475,7 @@ def upload_main_tailored_resume(
     skipping this app's own LLM call. Same content -> .docx pipeline as
     the generate endpoint above.
     """
-    resume = _get_main_resume(db, current_user.id)
+    resume = _resolve_resume(db, current_user.id, resume_id)
     posting = _get_job_posting(db, job_posting_id)
     return _store_tailored_resume(db, current_user, resume, posting, payload, None)
 
@@ -458,10 +483,11 @@ def upload_main_tailored_resume(
 @router.get("/main/tailored", response_model=TailoredResumeRead)
 def get_main_tailored_resume(
     job_posting_id: uuid.UUID,
+    resume_id: uuid.UUID | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> TailoredResume:
-    resume = _get_main_resume(db, current_user.id)
+    resume = _resolve_resume(db, current_user.id, resume_id)
     tailored = db.scalar(
         select(TailoredResume)
         .where(TailoredResume.resume_id == resume.id, TailoredResume.job_posting_id == job_posting_id)
@@ -613,10 +639,11 @@ def _store_cover_letter(
 @router.post("/main/cover-letter", response_model=CoverLetterRead, status_code=status.HTTP_201_CREATED)
 def generate_main_cover_letter(
     job_posting_id: uuid.UUID,
+    resume_id: uuid.UUID | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> CoverLetter:
-    resume = _get_main_resume(db, current_user.id)
+    resume = _resolve_resume(db, current_user.id, resume_id)
     posting = _get_job_posting(db, job_posting_id)
     key = get_users_default_llm_key(db, current_user.id)
 
@@ -645,6 +672,7 @@ def generate_main_cover_letter(
 def upload_main_cover_letter(
     job_posting_id: uuid.UUID,
     payload: CoverLetterUpload,
+    resume_id: uuid.UUID | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> CoverLetter:
@@ -653,7 +681,7 @@ def upload_main_cover_letter(
     this app's own LLM call. Same content -> .docx pipeline as the generate
     endpoint above.
     """
-    resume = _get_main_resume(db, current_user.id)
+    resume = _resolve_resume(db, current_user.id, resume_id)
     posting = _get_job_posting(db, job_posting_id)
     return _store_cover_letter(db, current_user, resume, posting, payload, None)
 
@@ -661,10 +689,11 @@ def upload_main_cover_letter(
 @router.get("/main/cover-letter", response_model=CoverLetterRead)
 def get_main_cover_letter(
     job_posting_id: uuid.UUID,
+    resume_id: uuid.UUID | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> CoverLetter:
-    resume = _get_main_resume(db, current_user.id)
+    resume = _resolve_resume(db, current_user.id, resume_id)
     cover_letter = db.scalar(
         select(CoverLetter)
         .where(CoverLetter.resume_id == resume.id, CoverLetter.job_posting_id == job_posting_id)
