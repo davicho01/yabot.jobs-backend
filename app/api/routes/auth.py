@@ -75,7 +75,16 @@ def read_current_user(current_user: User = Depends(get_current_user)) -> UserRea
 def update_current_user(
     payload: UserUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> UserRead:
-    display_name = payload.display_name.strip() if payload.display_name else None
-    current_user.display_name = display_name or None
+    # A genuine partial update: a field is only touched when the request
+    # actually included it (exclude_unset), not whenever it happens to be
+    # non-None — otherwise adding email_alerts_enabled here would make any
+    # call that sets it (without also re-sending display_name) silently
+    # wipe the name back to blank.
+    fields = payload.model_dump(exclude_unset=True)
+    if "display_name" in fields:
+        display_name = payload.display_name.strip() if payload.display_name else None
+        current_user.display_name = display_name or None
+    if "email_alerts_enabled" in fields:
+        current_user.email_alerts_enabled = payload.email_alerts_enabled
     db.flush()
     return UserRead.model_validate(current_user)

@@ -39,8 +39,8 @@ def db():
     session.close()
 
 
-def _make_user(db) -> m.User:
-    user = m.User(email=f"{uuid.uuid4()}@example.com")
+def _make_user(db, *, email_alerts_enabled: bool = True) -> m.User:
+    user = m.User(email=f"{uuid.uuid4()}@example.com", email_alerts_enabled=email_alerts_enabled)
     db.add(user)
     db.flush()
     return user
@@ -186,3 +186,21 @@ def test_sweep_skips_a_failing_search_without_losing_the_others(send, db):
 
     assert sent == 1
     assert send.call_count == 2
+
+
+@patch("app.services.saved_search_alerts.send_saved_search_digest_email")
+def test_sweep_skips_a_users_searches_entirely_when_alerts_are_off(send, db):
+    now = datetime.now(timezone.utc)
+    opted_out = _make_user(db, email_alerts_enabled=False)
+    opted_in = _make_user(db, email_alerts_enabled=True)
+    opted_out_search = _make_saved_search(db, opted_out, created_at=now - timedelta(days=1))
+    _make_saved_search(db, opted_in, created_at=now - timedelta(days=1))
+    _make_scanned_posting(db, scanned_at=now, title="Match")
+
+    sent = sweep_saved_searches(db, now=now)
+
+    assert sent == 1
+    assert send.call_args.args[0] == opted_in.email
+    # Not just "no email" — left alone entirely, so turning alerts back on
+    # picks up from here rather than either a lost gap or a flood of backlog.
+    assert opted_out_search.last_alerted_at is None

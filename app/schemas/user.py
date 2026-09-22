@@ -14,3 +14,4 @@ class UserRead(BaseModel):
     role: str
     created_at: datetime
     last_login_at: datetime | None
+    email_alerts_enabled: bool
