@@ -54,6 +54,8 @@ def list_job_urls(
     company: str | None = None,
     posted_within_days: int | None = Query(None, ge=1),
     workplace_type: WorkplaceType | None = None,
+    salary_min: int | None = Query(None, ge=0),
+    salary_max: int | None = Query(None, ge=0),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -76,7 +78,19 @@ def list_job_urls(
     )
     order = [JobPostingUrl.created_at.desc()]
     search_area: SearchAreaRead | None = None
-    if q or location or metro or company or posted_within_days or workplace_type:
+    # salary_min/salary_max use `is not None`, not truthy-`or` like the rest of
+    # these — 0 is a valid, meaningful value for both (Query(..., ge=0)) and a
+    # plain `or` would silently treat salary_min=0 as "not provided".
+    if (
+        q
+        or location
+        or metro
+        or company
+        or posted_within_days
+        or workplace_type
+        or salary_min is not None
+        or salary_max is not None
+    ):
         stmt = stmt.distinct()
         if q:
             stmt = stmt.where(JobPosting.title.ilike(f"%{q}%"))
@@ -110,6 +124,19 @@ def list_job_urls(
             stmt = stmt.where(JobPosting.posted_at >= date.today() - timedelta(days=posted_within_days))
         if workplace_type:
             stmt = stmt.where(JobPosting.workplace_type == workplace_type)
+        # A posting often lists only one of salary_min/salary_max — compare
+        # against whichever end of its range is actually set, falling back to
+        # the other one, rather than requiring both. A posting with neither
+        # set fails both comparisons (NULL >=/<= anything is NULL, which
+        # WHERE treats as false), so an active salary filter also drops
+        # postings with no pay listed at all — same as every other filter
+        # here, which only ever narrows to postings that positively match.
+        # Currencies aren't normalized: this compares raw numbers regardless
+        # of salary_currency, acceptable while postings are overwhelmingly USD.
+        if salary_min is not None:
+            stmt = stmt.where(func.coalesce(JobPosting.salary_max, JobPosting.salary_min) >= salary_min)
+        if salary_max is not None:
+            stmt = stmt.where(func.coalesce(JobPosting.salary_min, JobPosting.salary_max) <= salary_max)
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
 
