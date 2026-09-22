@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
 from app.models.saved_search import SavedSearch
+from app.models.user import User
 from app.services import geo
 from app.services.email import send_saved_search_digest_email
 from app.services.jobs import build_job_search_statement, to_job_detail
@@ -64,8 +65,17 @@ def sweep_saved_searches(db: Session, now: datetime | None = None) -> int:
     """
     now = now or datetime.now(timezone.utc)
     sent = 0
-    saved_searches = db.scalars(select(SavedSearch).options(selectinload(SavedSearch.user))).all()
-    logger.info("Sweeping %d saved search(es).", len(saved_searches))
+    # Skipped entirely (not even matched/last_alerted_at-advanced) for a user
+    # with alerts off — same as a sweep that finds nothing, so re-enabling
+    # picks up right where it left off instead of either flooding them with
+    # a backlog or silently losing whatever matched while they were opted out.
+    saved_searches = db.scalars(
+        select(SavedSearch)
+        .join(User, SavedSearch.user_id == User.id)
+        .where(User.email_alerts_enabled.is_(True))
+        .options(selectinload(SavedSearch.user))
+    ).all()
+    logger.info("Sweeping %d saved search(es) (alerts-enabled users only).", len(saved_searches))
     for saved_search in saved_searches:
         try:
             if _sweep_one(db, saved_search, now):

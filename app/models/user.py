@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, String
+from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -35,6 +35,12 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     role: Mapped[str] = mapped_column(String(20), default=UserRole.USER, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Whether to email a digest for this user's saved searches (see
+    # app.services.saved_search_alerts.sweep_saved_searches, the only
+    # reader). Defaults on: saving a search is itself an opt-in signal, and
+    # this is the one place to turn it back off without deleting every
+    # saved search individually.
+    email_alerts_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     magic_link_tokens: Mapped[list["MagicLinkToken"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
