@@ -84,6 +84,47 @@ def _location_from_fields(html: str) -> str | None:
     return ", ".join(deduped) if deduped else None
 
 
+# Yet another tenant field shape (verified live: careers.ibm.com): no
+# data-map spans at all, just plain labelled divs -
+# `<div class="article__content__view__field__label">Introduction</div>
+# <div class="article__content__view__field__value">...</div>` - inside
+# article--details blocks that, like every other headingless one here, have
+# no h2-4 of their own. Unlike lululemon's short location-only fields,
+# *this* tenant's real content (Introduction, role, education, expertise)
+# uses this exact same field shape instead of a heading, sitting alongside
+# a second, separate headingless block of one-line facts (Job ID, City,
+# Employment type, ...). Treating every headingless block as location-only
+# metadata (today's default) would silently drop the entire description.
+_IBM_FIELD_RE = re.compile(
+    r'field__label"[^>]*>\s*(.*?)\s*</div>\s*<div class="article__content__view__field__value"[^>]*>(.*?)</div>',
+    re.IGNORECASE | re.DOTALL,
+)
+# A single field's own length doesn't distinguish these (verified live:
+# IBM's content block includes one-line fields like "Required education" -
+# 17 chars - right alongside a 1200-char one) - but the block's *combined*
+# field text does: content blocks run well past a thousand characters total,
+# while the pure-metadata block (Job ID, City, Employment type, ...) never
+# clears a few hundred even added together.
+_IBM_CONTENT_BLOCK_MIN_CHARS = 300
+_IBM_LOCATION_FIELD_LABELS = ("City / Township / Village", "City", "State / Province", "State", "Country")
+
+
+def _ibm_fields(html: str) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for raw_label, raw_value in _IBM_FIELD_RE.findall(html):
+        label = clean_text(raw_label)
+        if label and label not in fields:
+            fields[label] = raw_value
+    return fields
+
+
+def _location_from_ibm_fields(html: str) -> str | None:
+    fields = _ibm_fields(html)
+    parts = [clean_text(fields[label]) for label in _IBM_LOCATION_FIELD_LABELS if fields.get(label)]
+    deduped = list(dict.fromkeys(p for p in parts if p))
+    return ", ".join(deduped) if deduped else None
+
+
 # Neither JSON-LD hiringOrganization nor og:site_name are present at all on
 # this tenant's pages (verified live: careers.lululemon.com) - the only
 # company-name signal left is the plain `<h1>` Avature renders inside its
@@ -192,7 +233,14 @@ def _fetch_job_detail_html(url: str) -> str | None:
     # that content genuinely exists, closing the race - only for job-detail
     # fetches, since .description-ajax never appears on the board root or
     # SearchJobs listing pages _fetch_page_html also serves.
-    return _fetch_page_html(url, wait_for_selector=".description-ajax article")
+    #
+    # Some tenants (verified live: careers.ibm.com) don't use
+    # .description-ajax at all, so that half of the selector never matches
+    # and every job-detail fetch failed outright - article--details is
+    # present on every verified tenant's job-detail page regardless (it's
+    # what extract() itself parses), so pair the two as alternatives:
+    # whichever one the tenant actually has still closes the race.
+    return _fetch_page_html(url, wait_for_selector=".description-ajax article, article.article--details")
 
 
 def _resolve_careers_url(host: str) -> str | None:
@@ -248,16 +296,27 @@ def extract(html: str) -> ExtractedJobFields:
     either field.
     """
     location_match = _AVATURE_LOCATION_RE.search(html)
-    location = clean_text(location_match.group(1)) if location_match else _location_from_fields(html)
+    location = (
+        clean_text(location_match.group(1))
+        if location_match
+        else _location_from_fields(html) or _location_from_ibm_fields(html)
+    )
 
     sections = []
     for article_html in _AVATURE_ARTICLE_RE.findall(html):
         heading_match = _AVATURE_HEADING_RE.search(article_html)
-        if heading_match is None:
+        if heading_match is not None:
+            heading = clean_text(heading_match.group(1))
+            body = html_to_formatted_text(article_html[heading_match.end() :])
+            sections.append(f"## {heading}\n\n{body}" if body else f"## {heading}")
+            continue
+        fields = _ibm_fields(article_html)
+        if sum(len(clean_text(v)) for v in fields.values()) < _IBM_CONTENT_BLOCK_MIN_CHARS:
             continue  # the location/department/date/ref# header has no heading - not a content section
-        heading = clean_text(heading_match.group(1))
-        body = html_to_formatted_text(article_html[heading_match.end() :])
-        sections.append(f"## {heading}\n\n{body}" if body else f"## {heading}")
+        for label, raw_value in fields.items():
+            body = html_to_formatted_text(raw_value)
+            if body:
+                sections.append(f"## {label}\n\n{body}")
 
     return ExtractedJobFields(location=location, description="\n\n".join(sections) or None)
 

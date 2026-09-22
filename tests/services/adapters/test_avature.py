@@ -131,7 +131,7 @@ def test_job_detail_fetch_waits_for_the_description_to_actually_render(monkeypat
     html = avature._fetch_job_detail_html(URL)
 
     assert html == _page()
-    assert seen["wait_for_selector"] == ".description-ajax article"
+    assert seen["wait_for_selector"] == ".description-ajax article, article.article--details"
 
 
 class _FakeRendered:
