@@ -381,6 +381,43 @@ def test_nearby_state_codes_are_the_states_within_range_own_state_first():
     assert "KS" in geo.nearby_state_codes(kansas_city, 25)
 
 
+def test_nearest_place_label_is_the_closest_known_city_by_coordinates():
+    bountiful = geo.search_place("Bountiful, Utah")
+    # A point right on Bountiful itself: the exact match wins over anything nearby.
+    assert geo.nearest_place_label(bountiful.lat, bountiful.lon) == "Bountiful, Utah, United States"
+
+    west_bountiful = geo.search_place("West Bountiful, Utah")
+    # A point right on the smaller neighbor: that one wins instead.
+    assert geo.nearest_place_label(west_bountiful.lat, west_bountiful.lon) == "West Bountiful, Utah, United States"
+
+
+def test_nearest_place_label_is_none_too_far_from_any_known_city():
+    # The middle of the Pacific — nowhere near any US place.
+    assert geo.nearest_place_label(0.0, -140.0) is None
+
+
+def test_nearest_default_location_label_prefers_the_metro_area_over_the_town():
+    # West Bountiful itself isn't a metro's principal city — its metro is
+    # Ogden-Clearfield, not Salt Lake City — so this also checks the right
+    # area is picked, not just any area.
+    west_bountiful = geo.search_place("West Bountiful, Utah")
+    assert geo.search_metro("West Bountiful, Utah (metro area)").name == "Ogden, UT"  # sanity check on the fixture
+
+    assert geo.nearest_default_location_label(west_bountiful.lat, west_bountiful.lon) == "Ogden, Utah (metro area)"
+
+
+def test_nearest_default_location_label_falls_back_to_the_town_outside_any_metro():
+    # Bethel, AK: a real town with no CBSA at all (no metro *or* micro area).
+    bethel = geo.search_place("Bethel, Alaska")
+    assert bethel is not None
+
+    assert geo.nearest_default_location_label(bethel.lat, bethel.lon) == "Bethel, Alaska, United States"
+
+
+def test_nearest_default_location_label_is_none_too_far_from_any_known_city():
+    assert geo.nearest_default_location_label(0.0, -140.0) is None
+
+
 def test_resolve_places_gives_coordinates_only_for_entries_that_name_a_city():
     points = geo.resolve_places(
         ["West Bountiful, UT", "West Bountiful, Utah, US", "Salt Lake City, UT", "Remote", "Utah", "London, UK",

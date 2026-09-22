@@ -737,6 +737,61 @@ def search_place(text: str) -> Place | None:
     return resolution.place if resolution.geo == "city" else None
 
 
+# Past this many miles, guessing is worse than not guessing: someone outside
+# the US (or an inaccurate/coarse geolocation fix) gets no default location
+# instead of a random nearest US city that may be hundreds of miles off.
+_NEAREST_PLACE_MAX_MILES = 100
+
+
+def _nearest_place(lat: float, lon: float) -> Place | None:
+    """The closest real, suggestion-worthy city to (lat, lon) — tiny
+    unincorporated places skipped, same as place_suggestions. None past
+    _NEAREST_PLACE_MAX_MILES."""
+    geo = _geo()
+    best: Place | None = None
+    best_distance = _NEAREST_PLACE_MAX_MILES
+    for place in geo.all_places:
+        if place.population < _SUGGESTION_MIN_POPULATION:
+            continue
+        distance = _distance_miles(lat, lon, place.lat, place.lon)
+        if distance <= best_distance:
+            best = place
+            best_distance = distance
+    return best
+
+
+def nearest_place_label(lat: float, lon: float) -> str | None:
+    """"Bountiful, Utah, United States" for the closest known city to a browser
+    geolocation fix — same format as place_suggestions, so the result drops
+    straight into a location search exactly like a picked suggestion would.
+    None if nothing knowable is within _NEAREST_PLACE_MAX_MILES."""
+    place = _nearest_place(lat, lon)
+    if place is None:
+        return None
+    return f"{place.name}, {_geo().states[place.state].name}, {_UNITED_STATES}"
+
+
+def nearest_default_location_label(lat: float, lon: float) -> str | None:
+    """The location search to default someone at (lat, lon) to: their nearest
+    *metro* area, when they're in (or near) one, formatted the same way a
+    "(metro area)" suggestion is ("Salt Lake City, Utah (metro area)") so
+    search_metro resolves it straight back to that area — not just their
+    nearest city on its own, which for someone in a small town can turn up
+    too few postings (everywhere else in commuting distance has its own
+    separate, usually much bigger, pool). Falls back to nearest_place_label
+    for anyone not in a metro area (rural places, micro areas); None if
+    nothing's close enough to place them at all."""
+    geo = _geo()
+    place = _nearest_place(lat, lon)
+    if place is None:
+        return None
+    cbsa_code = geo.county_cbsa.get(place.county_fips)
+    metro = geo.metro_by_code.get(cbsa_code) if cbsa_code else None
+    if metro is not None and metro.kind == "metro":
+        return metro_area_label(metro)
+    return f"{place.name}, {geo.states[place.state].name}, {_UNITED_STATES}"
+
+
 def place_label(place: Place) -> str:
     """"West Bountiful, Utah"."""
     return f"{place.name}, {_geo().states[place.state].name}"

@@ -156,6 +156,20 @@ def list_job_places(q: str | None = None, limit: int = Query(10, ge=1, le=50)) -
     return geo.place_suggestions(q, limit)
 
 
+# Two path segments, unlike /{url_id}'s one, so — unlike /locations above —
+# there's no ordering hazard here; kept next to the other /places routes
+# purely for readability.
+@router.get("/places/nearest", response_model=str | None)
+def nearest_job_place(lat: float = Query(..., ge=-90, le=90), lon: float = Query(..., ge=-180, le=180)) -> str | None:
+    """The location search to default someone to from a browser geolocation
+    fix — their nearest metro area when they're in (or near) one, so a small
+    town doesn't default to a radius search too narrow to turn up much;
+    otherwise their nearest known city. Same label(s) GET /jobs/places would
+    offer, so the frontend can treat this like a picked suggestion. None if
+    nothing knowable is close enough (see geo.nearest_default_location_label)."""
+    return geo.nearest_default_location_label(lat, lon)
+
+
 @router.get("/metros", response_model=list[MetroRead])
 def list_job_metros(
     q: str | None = None,
