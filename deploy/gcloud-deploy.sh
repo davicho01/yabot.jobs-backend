@@ -12,6 +12,8 @@
 #                       + Cloud Scheduler cron trigger
 #   - saved-search-alerts  Cloud Function 2nd gen (saved_search_alerts.py:dispatch)
 #                       + Cloud Scheduler cron trigger
+#   - follow-up-reminders  Cloud Function 2nd gen (follow_up_reminders.py:dispatch)
+#                       + Cloud Scheduler cron trigger
 #   - browser-fetch   already deployed separately; see BROWSER_FETCH_SERVICE_URL below
 #
 # Prereqs this script assumes already exist (create once, not here):
@@ -339,6 +341,50 @@ gcloud scheduler jobs create http saved-search-alerts-hourly \
   --oidc-token-audience="$SAVED_SEARCH_ALERTS_FUNCTION_URL"
 
 # ---------------------------------------------------------------------------
+# 8. follow-up-reminders — Cloud Function (2nd gen), triggered daily by
+#    Scheduler. Deploys from source (this repo), entry point is dispatch()
+#    in follow_up_reminders.py — same shape as saved-search-alerts above in
+#    every respect except cadence: daily, not hourly, since a follow-up
+#    date is a day, not a moment (see follow_up_reminders.py's own
+#    docstring) — checking more often than once a day couldn't send
+#    anything sooner. 13:00 UTC ≈ 8am ET / 5am PT, a US-morning send time
+#    for this product's currently US-centric user base.
+# ---------------------------------------------------------------------------
+
+gcloud functions deploy follow-up-reminders \
+  --gen2 \
+  --region="$REGION" \
+  --runtime=python313 \
+  --source=. \
+  --entry-point=dispatch \
+  --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=follow_up_reminders.py \
+  --trigger-http \
+  --no-allow-unauthenticated \
+  --set-env-vars="$COMMON_ENV" \
+  --set-secrets="$COMMON_SECRETS" \
+  --memory=512Mi \
+  --timeout=540s
+
+gcloud run services update follow-up-reminders \
+  --region="$REGION" \
+  --add-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION"
+
+FOLLOW_UP_REMINDERS_FUNCTION_URL="$(gcloud functions describe follow-up-reminders --gen2 --region="$REGION" --format='value(serviceConfig.uri)')"
+
+gcloud functions add-invoker-policy-binding follow-up-reminders \
+  --gen2 \
+  --region="$REGION" \
+  --member="serviceAccount:${PROJECT_ID}@appspot.gserviceaccount.com"
+
+gcloud scheduler jobs create http follow-up-reminders-daily \
+  --location="$REGION" \
+  --schedule="0 13 * * *" \
+  --uri="$FOLLOW_UP_REMINDERS_FUNCTION_URL" \
+  --http-method=POST \
+  --oidc-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com" \
+  --oidc-token-audience="$FOLLOW_UP_REMINDERS_FUNCTION_URL"
+
+# ---------------------------------------------------------------------------
 # Redeploys after this point (new image/source, no infra changes) — this is
 # also exactly what .github/workflows/deploy.yml runs on every push to main:
 #   gcloud builds submit --tag "${IMAGE}:$(git rev-parse --short HEAD)" --project="$PROJECT_ID" .
@@ -353,4 +399,6 @@ gcloud scheduler jobs create http saved-search-alerts-hourly \
 #     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=crawl_dispatcher.py
 #   gcloud functions deploy saved-search-alerts --gen2 --region="$REGION" --project="$PROJECT_ID" \
 #     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=saved_search_alerts.py
+#   gcloud functions deploy follow-up-reminders --gen2 --region="$REGION" --project="$PROJECT_ID" \
+#     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=follow_up_reminders.py
 # ---------------------------------------------------------------------------
