@@ -110,6 +110,31 @@ class ResumeScoreRead(BaseModel):
     created_at: datetime
 
 
+class ResumeScoreHistoryEntryRead(BaseModel):
+    # One past scoring of this resume against a job — job_title/company_name
+    # are flattened in here (not a nested JobPostingRead) since this is only
+    # ever shown as a label on a history row, not linked out to.
+    id: uuid.UUID
+    job_posting_id: uuid.UUID
+    job_title: str | None
+    company_name: str | None
+    overall_score: int
+    missing_keywords: list[str]
+    created_at: datetime
+
+
+class RecurringMissingKeywordRead(BaseModel):
+    # A keyword that has shown up in missing_keywords on 2+ separate scores
+    # of this resume — see GET /resumes/{resume_id}/score-history.
+    keyword: str
+    count: int
+
+
+class ResumeScoreHistoryRead(BaseModel):
+    entries: list[ResumeScoreHistoryEntryRead]
+    recurring_missing_keywords: list[RecurringMissingKeywordRead]
+
+
 class TailoredResumeRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

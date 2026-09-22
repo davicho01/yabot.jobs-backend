@@ -1,8 +1,9 @@
 import uuid
+from collections import Counter
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy import func, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, get_db
 from app.models.job_application import UserJobApplication
@@ -13,9 +14,12 @@ from app.schemas.resume import (
     ContactInfo,
     CoverLetterRead,
     CoverLetterUpload,
+    RecurringMissingKeywordRead,
     ResumeDetailRead,
     ResumeRead,
     ResumeReviewRead,
+    ResumeScoreHistoryEntryRead,
+    ResumeScoreHistoryRead,
     ResumeScoreRead,
     ResumeScoreUpload,
     ResumeSectionContent,
@@ -236,6 +240,65 @@ def download_resume(
         # downloading it regardless of this header.
         headers={"Content-Disposition": f'inline; filename="{resume.filename}"'},
     )
+
+
+@router.get("/{resume_id}/score-history", response_model=ResumeScoreHistoryRead)
+def get_resume_score_history(
+    resume_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> ResumeScoreHistoryRead:
+    """Every past scoring of this resume (see ResumeScore's own "history
+    kept" note), newest first, plus which missing_keywords keep recurring
+    across them — a pattern worth actually fixing on the resume, as
+    opposed to a one-off gap a single job happened to want. "Recurring"
+    means 2+ separate scores, case-insensitively (a keyword is deduped
+    within one score's own list first, so a list that happens to repeat a
+    word doesn't inflate its count on its own).
+    """
+    resume = db.scalar(select(Resume).where(Resume.id == resume_id, Resume.user_id == current_user.id))
+    if resume is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
+
+    scores = db.scalars(
+        select(ResumeScore)
+        .where(ResumeScore.resume_id == resume_id)
+        .order_by(ResumeScore.created_at.desc())
+        .options(selectinload(ResumeScore.job_posting))
+    ).all()
+
+    entries = [
+        ResumeScoreHistoryEntryRead(
+            id=score.id,
+            job_posting_id=score.job_posting_id,
+            job_title=score.job_posting.title,
+            company_name=score.job_posting.company_name,
+            overall_score=score.overall_score,
+            missing_keywords=score.missing_keywords,
+            created_at=score.created_at,
+        )
+        for score in scores
+    ]
+
+    keyword_counts: Counter[str] = Counter()
+    display_form: dict[str, str] = {}
+    for score in scores:
+        seen_in_this_score: set[str] = set()
+        for keyword in score.missing_keywords:
+            cleaned = (keyword or "").strip()
+            if not cleaned:
+                continue
+            key = cleaned.lower()
+            if key in seen_in_this_score:
+                continue
+            seen_in_this_score.add(key)
+            keyword_counts[key] += 1
+            display_form.setdefault(key, cleaned)
+    recurring = [
+        RecurringMissingKeywordRead(keyword=display_form[key], count=count)
+        for key, count in keyword_counts.most_common()
+        if count >= 2
+    ][:15]
+
+    return ResumeScoreHistoryRead(entries=entries, recurring_missing_keywords=recurring)
 
 
 @router.post("/main/review", response_model=ResumeReviewRead)
