@@ -112,10 +112,14 @@ class ResumeScoreRead(BaseModel):
 
 class ResumeScoreHistoryEntryRead(BaseModel):
     # One past scoring of this resume against a job — job_title/company_name
-    # are flattened in here (not a nested JobPostingRead) since this is only
-    # ever shown as a label on a history row, not linked out to.
+    # are flattened in here (not a nested JobPostingRead) since a history
+    # row only ever needs a label plus somewhere to link to. url_id (not
+    # job_posting_id) is what a history row links out to — GET/POST
+    # /jobs/{url_id}/... and the ApplyPage route are keyed on the URL, the
+    # same id every other "open this posting" link on the site already uses.
     id: uuid.UUID
     job_posting_id: uuid.UUID
+    url_id: uuid.UUID
     job_title: str | None
     company_name: str | None
     overall_score: int

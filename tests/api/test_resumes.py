@@ -178,6 +178,10 @@ def test_get_resume_score_history_lists_entries_newest_first_with_job_labels(db)
     assert result.entries[0].job_title == "Platform Engineer"
     assert result.entries[0].company_name == "Globex"
     assert result.entries[0].overall_score == 80
+    # What a history row links out to (the ApplyPage route is keyed on
+    # this, not job_posting_id) — the posting's own url_id, not its id.
+    assert result.entries[0].url_id == newer_job.url_id
+    assert result.entries[0].url_id != result.entries[0].job_posting_id
 
 
 def test_get_resume_score_history_finds_keywords_recurring_across_scores(db):

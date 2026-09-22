@@ -279,6 +279,7 @@ def get_resume_score_history(
         ResumeScoreHistoryEntryRead(
             id=score.id,
             job_posting_id=score.job_posting_id,
+            url_id=score.job_posting.url_id,
             job_title=score.job_posting.title,
             company_name=score.job_posting.company_name,
             overall_score=score.overall_score,
