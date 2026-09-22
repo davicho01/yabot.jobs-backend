@@ -5,7 +5,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.orm import Session
 
@@ -127,8 +127,32 @@ def _create_pending_posting(db: Session, url_row: JobPostingUrl) -> JobPosting:
     return posting
 
 
+def find_existing_application(db: Session, user_id: uuid.UUID, job_posting_id: uuid.UUID) -> UserJobApplication | None:
+    """`user_id`'s UserJobApplication for job_posting_id, or for any other
+    JobPostingUrl found to be the same job (see app.services.job_dedup:
+    JobPosting.primary_posting_id links a cross-posted duplicate to an
+    existing "primary" row) — so saving/applying to a repost of something
+    already tracked reuses that one row instead of a second, separately
+    tracked application for what is, to the user, the same job. None if
+    job_posting_id itself doesn't exist."""
+    posting = db.get(JobPosting, job_posting_id)
+    if posting is None:
+        return None
+    canonical_id = posting.primary_posting_id or posting.id
+    return db.scalar(
+        select(UserJobApplication)
+        .join(JobPosting, UserJobApplication.job_posting_id == JobPosting.id)
+        .where(
+            UserJobApplication.user_id == user_id,
+            or_(JobPosting.id == canonical_id, JobPosting.primary_posting_id == canonical_id),
+        )
+    )
+
+
 def ensure_user_applicant(db: Session, user_id: uuid.UUID, job_posting_id: uuid.UUID) -> None:
-    """Mark `user_id` as an applicant on `job_posting_id`, if not already linked.
+    """Mark `user_id` as an applicant on `job_posting_id`, if not already linked
+    (see find_existing_application — this also catches a cross-posted
+    duplicate of a job they're already linked to under a different URL).
 
     Called wherever a user's own submission resolves to a JobPosting — either
     immediately (submit_job_url, when the URL was already scanned) or later
@@ -136,12 +160,7 @@ def ensure_user_applicant(db: Session, user_id: uuid.UUID, job_posting_id: uuid.
     submitting a job always adds it to the submitter's applications instead
     of requiring a separate POST /applications call.
     """
-    existing = db.scalar(
-        select(UserJobApplication).where(
-            UserJobApplication.user_id == user_id,
-            UserJobApplication.job_posting_id == job_posting_id,
-        )
-    )
+    existing = find_existing_application(db, user_id, job_posting_id)
     if existing is None:
         db.add(
             UserJobApplication(
@@ -151,6 +170,11 @@ def ensure_user_applicant(db: Session, user_id: uuid.UUID, job_posting_id: uuid.
                 applied_at=datetime.now(timezone.utc),
             )
         )
+        # The session (SessionLocal, app/db/session.py) is autoflush=False, so
+        # without this a second call in the same request/session — a
+        # cross-posted duplicate resolving to a *different* job_posting_id —
+        # wouldn't see this one's still-pending insert and would add another.
+        db.flush()
 
 
 def process_scan_job(db: Session, url_id: uuid.UUID) -> None:

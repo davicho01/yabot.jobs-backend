@@ -3,15 +3,45 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import select
 
 import app.models as m
 from app.core.config import settings
 from app.core.rate_limit import RateLimitExceeded
+from app.models.enums import ScanStatus
 from app.services.job_scanner import normalize_url
 from app.services.job_scanner import url_hash as compute_url_hash
-from app.services.jobs import _backoff_seconds, _enforce_submission_rate_limit, get_or_create_job_posting
+from app.services.jobs import (
+    _backoff_seconds,
+    _enforce_submission_rate_limit,
+    ensure_user_applicant,
+    find_existing_application,
+    get_or_create_job_posting,
+)
 
 _url_counter = itertools.count()
+
+
+def _make_posting(scan_db, *, primary_posting_id: uuid.UUID | None = None) -> m.JobPosting:
+    n = next(_url_counter)
+    url_row = m.JobPostingUrl(
+        url=f"https://example.com/jobs/dedup-{n}",
+        normalized_url=f"https://example.com/jobs/dedup-{n}",
+        url_hash=f"dedup-hash-{n}",
+        domain="example.com",
+    )
+    scan_db.add(url_row)
+    scan_db.flush()
+    posting = m.JobPosting(
+        url_id=url_row.id,
+        company_name="Acme",
+        title="Engineer",
+        extraction_status=ScanStatus.SUCCESS,
+        primary_posting_id=primary_posting_id,
+    )
+    scan_db.add(posting)
+    scan_db.commit()
+    return posting
 
 
 def _submit(scan_db, user_id: uuid.UUID | None, *, minutes_ago: float) -> m.JobPostingUrl:
@@ -117,3 +147,65 @@ def test_get_or_create_job_posting_still_allows_resubmitting_a_known_url_past_th
     posting, url_row = get_or_create_job_posting(scan_db, raw_url, user_id, now=now)
     assert url_row.url == raw_url
     assert posting.url_id == url_row.id
+
+
+# ------------------------------------------------------- application dedup
+
+
+def test_find_existing_application_matches_a_cross_posted_duplicate(scan_db):
+    user_id = uuid.uuid4()
+    canonical = _make_posting(scan_db)
+    duplicate = _make_posting(scan_db, primary_posting_id=canonical.id)
+    application = m.UserJobApplication(user_id=user_id, job_posting_id=canonical.id, status="saved")
+    scan_db.add(application)
+    scan_db.commit()
+
+    # Looked up via the *duplicate*'s id — still finds the application saved
+    # against the canonical posting.
+    found = find_existing_application(scan_db, user_id, duplicate.id)
+    assert found is not None and found.id == application.id
+
+
+def test_find_existing_application_matches_via_the_canonical_from_another_duplicate(scan_db):
+    user_id = uuid.uuid4()
+    canonical = _make_posting(scan_db)
+    duplicate_a = _make_posting(scan_db, primary_posting_id=canonical.id)
+    duplicate_b = _make_posting(scan_db, primary_posting_id=canonical.id)
+    application = m.UserJobApplication(user_id=user_id, job_posting_id=duplicate_a.id, status="saved")
+    scan_db.add(application)
+    scan_db.commit()
+
+    # Two siblings under the same canonical, neither one the canonical itself.
+    found = find_existing_application(scan_db, user_id, duplicate_b.id)
+    assert found is not None and found.id == application.id
+
+
+def test_find_existing_application_ignores_unrelated_postings_and_other_users(scan_db):
+    user_id = uuid.uuid4()
+    posting = _make_posting(scan_db)
+    unrelated_posting = _make_posting(scan_db)  # a different job entirely, no primary_posting_id link
+    scan_db.add(m.UserJobApplication(user_id=user_id, job_posting_id=posting.id, status="saved"))
+    scan_db.commit()
+
+    assert find_existing_application(scan_db, user_id, unrelated_posting.id) is None
+    assert find_existing_application(scan_db, uuid.uuid4(), posting.id) is None  # right posting, wrong user
+
+
+def test_find_existing_application_is_none_for_an_unknown_posting(scan_db):
+    assert find_existing_application(scan_db, uuid.uuid4(), uuid.uuid4()) is None
+
+
+def test_ensure_user_applicant_does_not_duplicate_across_a_cross_posted_duplicate(scan_db):
+    user_id = uuid.uuid4()
+    canonical = _make_posting(scan_db)
+    duplicate = _make_posting(scan_db, primary_posting_id=canonical.id)
+
+    ensure_user_applicant(scan_db, user_id, canonical.id)
+    ensure_user_applicant(scan_db, user_id, duplicate.id)  # same job, found via a different URL
+    scan_db.commit()
+
+    applications = scan_db.scalars(
+        select(m.UserJobApplication).where(m.UserJobApplication.user_id == user_id)
+    ).all()
+    assert len(applications) == 1
+    assert applications[0].job_posting_id == canonical.id  # the first one made stays the tracked row

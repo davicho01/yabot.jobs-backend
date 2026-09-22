@@ -10,7 +10,7 @@ from app.models.enums import ApplicationStatus
 from app.models.job_application import UserJobApplication
 from app.models.user import User
 from app.schemas.application import ApplicationCreate, ApplicationRead, ApplicationUpdate
-from app.services.jobs import get_or_create_job_posting
+from app.services.jobs import find_existing_application, get_or_create_job_posting
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 
@@ -42,12 +42,10 @@ def create_application(
 ) -> ApplicationRead:
     posting, _url_row = get_or_create_job_posting(db, str(payload.url), current_user.id)
 
-    application = db.scalar(
-        select(UserJobApplication).where(
-            UserJobApplication.user_id == current_user.id,
-            UserJobApplication.job_posting_id == posting.id,
-        )
-    )
+    # Also catches a cross-posted duplicate of a job already saved/applied to
+    # under a different URL (see find_existing_application) — not just this
+    # exact posting, which alone would only catch resubmitting the same URL.
+    application = find_existing_application(db, current_user.id, posting.id)
     if application is None:
         application = UserJobApplication(
             user_id=current_user.id, job_posting=posting, status=ApplicationStatus.SAVED
