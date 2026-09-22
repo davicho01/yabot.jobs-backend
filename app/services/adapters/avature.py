@@ -19,8 +19,16 @@ from app.services.browser_fetch import fetch_rendered_page
 
 _AVATURE_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _AVATURE_URL_RE = re.compile(r"([a-zA-Z0-9-]+\.avature\.net)", re.IGNORECASE)
-_JOB_LINK_RE = re.compile(r'href="(https?://[^"?]+/careers/JobDetail/[^"?]+)', re.IGNORECASE)
-_JOB_DETAIL_URL_RE = re.compile(r"/careers/JobDetail/", re.IGNORECASE)
+# Most tenants link job details by slug/id path segment
+# (/careers/JobDetail/Some-Title/12345); some (verified live:
+# careers.ibm.com) instead link by a bare ?jobId= query param
+# (/careers/JobDetail?jobId=12345) on the listing page itself - the
+# slug-path form still shows up as the *browser's* URL once a query-param
+# link is opened (client-side routing rewrites it for the pretty/shareable
+# address), which is why an already-`active` tenant's stored job URLs can
+# look path-based even though discovery here needs to recognize both shapes.
+_JOB_LINK_RE = re.compile(r'href="(https?://[^"]+/careers/JobDetail(?:/[^"?]+|\?jobId=\d+))', re.IGNORECASE)
+_JOB_DETAIL_URL_RE = re.compile(r"/careers/JobDetail(?:/|\?jobId=)", re.IGNORECASE)
 _DEFAULT_PAGE_SIZE = 6  # observed tenant-configured default (verified: Synopsys)
 # Some tenants white-label Avature entirely onto their own domain with no
 # *.avature.net hop anywhere in the page (verified live: careers.lululemon.com)
@@ -220,7 +228,7 @@ def _fetch_jobs(host: str) -> list[str]:
         # timeout salvage, get used anyway) before those results exist,
         # silently reading as zero jobs rather than "still loading". Give it
         # a real per-page completion signal instead of guessing.
-        html = _fetch_page_html(page_url, wait_for_selector='a[href*="/careers/JobDetail/"]')
+        html = _fetch_page_html(page_url, wait_for_selector='a[href*="/careers/JobDetail"]')
         if html is None:
             break
         links = dict.fromkeys(_JOB_LINK_RE.findall(html))
