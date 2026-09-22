@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from app.models.job_application import UserJobApplication
     from app.models.oauth import OAuthAuthorizationRequest, OAuthRefreshToken
     from app.models.resume import Resume
+    from app.models.saved_search import SavedSearch
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -51,6 +52,9 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="user", cascade="all, delete-orphan"
     )
     resumes: Mapped[list["Resume"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    saved_searches: Mapped[list["SavedSearch"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
     oauth_authorization_requests: Mapped[list["OAuthAuthorizationRequest"]] = relationship(

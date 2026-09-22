@@ -6,6 +6,7 @@ from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
 from app.models.oauth import OAuthAuthorizationRequest, OAuthClient, OAuthRefreshToken
 from app.models.resume import Resume, ResumeReview, ResumeScore, TailoredResume
+from app.models.saved_search import SavedSearch
 from app.models.user import User
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "ResumeReview",
     "ResumeScore",
     "TailoredResume",
+    "SavedSearch",
     "OAuthClient",
     "OAuthAuthorizationRequest",
     "OAuthRefreshToken",

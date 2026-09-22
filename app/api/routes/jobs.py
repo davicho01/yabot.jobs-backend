@@ -1,8 +1,7 @@
 import uuid
-from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import false, func, or_, select, true
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, get_db
@@ -11,10 +10,16 @@ from app.models.enums import ScanStatus, WorkplaceType
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
 from app.models.user import User
-from app.schemas.job import JobDetailRead, JobListRead, JobUrlSubmit, MetroRead, SearchAreaRead
+from app.schemas.job import JobDetailRead, JobListRead, JobUrlSubmit, MetroRead
 from app.services import geo
-from app.services.job_locations import location_matches, location_suggestions, metro_suggestions, radius_search
-from app.services.jobs import ensure_user_applicant, get_or_create_job_posting, rescan_job_url, to_job_detail
+from app.services.job_locations import location_suggestions, metro_suggestions
+from app.services.jobs import (
+    build_job_search_statement,
+    ensure_user_applicant,
+    get_or_create_job_posting,
+    rescan_job_url,
+    to_job_detail,
+)
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -60,83 +65,20 @@ def list_job_urls(
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> JobListRead:
-    # Only postings that have been scanned: one still waiting on its scan (or that
-    # failed) has no title to show, so it would just be an empty "Scanning posting…"
-    # card, and — being newest first — a bulk crawl would fill whole pages with them.
-    # primary_posting_id IS NULL: only canonical rows — a posting matched to
-    # an existing one (see app.services.job_dedup) is the same job found at
-    # another URL, hidden here (see JobPosting.also_posted_count) but still
-    # independently reachable via GET /jobs/{url_id}.
-    stmt = (
-        select(JobPostingUrl)
-        .join(JobPosting, JobPosting.url_id == JobPostingUrl.id)
-        .where(
-            JobPosting.extraction_status == ScanStatus.SUCCESS,
-            JobPosting.title.is_not(None),
-            JobPosting.primary_posting_id.is_(None),
-        )
+    # Only postings that have been scanned, canonical ones only, plus whatever
+    # filters were given — see build_job_search_statement, shared with the
+    # saved-search alert sweep so matching is defined in exactly one place.
+    stmt, order, search_area = build_job_search_statement(
+        q=q,
+        location=location,
+        metro=metro,
+        radius=radius,
+        company=company,
+        posted_within_days=posted_within_days,
+        workplace_type=workplace_type,
+        salary_min=salary_min,
+        salary_max=salary_max,
     )
-    order = [JobPostingUrl.created_at.desc()]
-    search_area: SearchAreaRead | None = None
-    # salary_min/salary_max use `is not None`, not truthy-`or` like the rest of
-    # these — 0 is a valid, meaningful value for both (Query(..., ge=0)) and a
-    # plain `or` would silently treat salary_min=0 as "not provided".
-    if (
-        q
-        or location
-        or metro
-        or company
-        or posted_within_days
-        or workplace_type
-        or salary_min is not None
-        or salary_max is not None
-    ):
-        stmt = stmt.distinct()
-        if q:
-            stmt = stmt.where(JobPosting.title.ilike(f"%{q}%"))
-        if location:
-            metro_area = geo.search_metro(location)
-            place = None if metro_area else geo.search_place(location)
-            if metro_area is not None:
-                # "Salt Lake City, Utah (metro area)": everything filed under that area.
-                stmt = stmt.where(JobPosting.metros.contains([metro_area.code]))
-            elif place is not None:
-                # A city: postings with a place within `radius` miles of it, the
-                # city's own first, then nearer before farther (see radius_search).
-                nearest, near, band = radius_search(place, radius)
-                stmt = stmt.join(nearest, true()).where(near).add_columns(band.label("distance_band"))
-                order = [band, JobPostingUrl.created_at.desc()]
-                search_area = SearchAreaRead(label=geo.place_label(place), radius_miles=radius)
-            else:
-                # A state or "United States" also finds postings filed under it
-                # however they spelled the place; anything else is a plain text match.
-                conditions = [location_matches(f"%{location}%")]
-                conditions += [JobPosting.metros.contains([code]) for code in geo.search_areas(location) or []]
-                stmt = stmt.where(or_(*conditions))
-        if metro:
-            metro_area = geo.metro_by_slug(metro)
-            # An unknown slug matches nothing (rather than erroring): a stale
-            # shared link should just show an empty board.
-            stmt = stmt.where(JobPosting.metros.contains([metro_area.code]) if metro_area else false())
-        if company:
-            stmt = stmt.where(JobPosting.company_name.ilike(f"%{company}%"))
-        if posted_within_days:
-            stmt = stmt.where(JobPosting.posted_at >= date.today() - timedelta(days=posted_within_days))
-        if workplace_type:
-            stmt = stmt.where(JobPosting.workplace_type == workplace_type)
-        # A posting often lists only one of salary_min/salary_max — compare
-        # against whichever end of its range is actually set, falling back to
-        # the other one, rather than requiring both. A posting with neither
-        # set fails both comparisons (NULL >=/<= anything is NULL, which
-        # WHERE treats as false), so an active salary filter also drops
-        # postings with no pay listed at all — same as every other filter
-        # here, which only ever narrows to postings that positively match.
-        # Currencies aren't normalized: this compares raw numbers regardless
-        # of salary_currency, acceptable while postings are overwhelmingly USD.
-        if salary_min is not None:
-            stmt = stmt.where(func.coalesce(JobPosting.salary_max, JobPosting.salary_min) >= salary_min)
-        if salary_max is not None:
-            stmt = stmt.where(func.coalesce(JobPosting.salary_min, JobPosting.salary_max) <= salary_max)
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
 

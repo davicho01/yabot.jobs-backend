@@ -113,6 +113,11 @@ class Settings(BaseSettings):
     job_submission_rate_limit_window_minutes: float = 60.0
     job_submission_rate_limit_max_new_urls: int = 20
 
+    # Per-user cap on saved searches (app.api.routes.saved_searches) — each
+    # one gets re-run against every posting on every alert sweep
+    # (saved_search_alerts.py), so this also bounds that sweep's per-user cost.
+    saved_search_max_per_user: int = 5
+
     # Where the emailed magic link points the user's browser (a frontend
     # route that reads ?token=... and POSTs it to /auth/verify).
     frontend_base_url: str = "http://localhost:3000"

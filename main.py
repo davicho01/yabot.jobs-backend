@@ -6,7 +6,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.api.routes import admin, api_keys, applications, auth, auth_tokens, crawl_sources, jobs, oauth, resumes
+from app.api.routes import (
+    admin,
+    api_keys,
+    applications,
+    auth,
+    auth_tokens,
+    crawl_sources,
+    jobs,
+    oauth,
+    resumes,
+    saved_searches,
+)
 from app.core.config import settings
 from app.db.session import engine
 from app.services.resume_storage import ensure_bucket_exists
@@ -41,6 +52,7 @@ app.include_router(jobs.router)
 app.include_router(applications.router)
 app.include_router(crawl_sources.router)
 app.include_router(resumes.router)
+app.include_router(saved_searches.router)
 app.include_router(admin.router)
 
 
