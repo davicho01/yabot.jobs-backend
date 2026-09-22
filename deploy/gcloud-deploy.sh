@@ -10,6 +10,8 @@
 #                     + Pub/Sub trigger on crawl-source-requests
 #   - crawl-dispatcher  Cloud Function 2nd gen (crawl_dispatcher.py:dispatch)
 #                       + Cloud Scheduler cron trigger
+#   - saved-search-alerts  Cloud Function 2nd gen (saved_search_alerts.py:dispatch)
+#                       + Cloud Scheduler cron trigger
 #   - browser-fetch   already deployed separately; see BROWSER_FETCH_SERVICE_URL below
 #
 # Prereqs this script assumes already exist (create once, not here):
@@ -290,6 +292,53 @@ gcloud scheduler jobs create http crawl-dispatch-hourly \
   --oidc-token-audience="$FUNCTION_URL"
 
 # ---------------------------------------------------------------------------
+# 7. saved-search-alerts — Cloud Function (2nd gen), triggered hourly by
+#    Scheduler. Deploys from source (this repo), entry point is dispatch()
+#    in saved_search_alerts.py — same shape as crawl-dispatcher above in
+#    every respect (HTTP-triggered, no-allow-unauthenticated, OIDC-invoked
+#    by Scheduler, Cloud SQL attached to the underlying Cloud Run service
+#    afterward since `gcloud functions deploy` has no --set-cloudsql-instances
+#    flag). Hourly, not every-2-hours like crawl-dispatcher: unlike the
+#    discovery crawl there's no natural "once a day is enough" cadence here
+#    (new postings show up continuously via scanning), and a sweep that
+#    finds nothing new is a no-op (see sweep_saved_searches), so there's no
+#    cost to checking more often.
+# ---------------------------------------------------------------------------
+
+gcloud functions deploy saved-search-alerts \
+  --gen2 \
+  --region="$REGION" \
+  --runtime=python313 \
+  --source=. \
+  --entry-point=dispatch \
+  --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=saved_search_alerts.py \
+  --trigger-http \
+  --no-allow-unauthenticated \
+  --set-env-vars="$COMMON_ENV" \
+  --set-secrets="$COMMON_SECRETS" \
+  --memory=512Mi \
+  --timeout=540s
+
+gcloud run services update saved-search-alerts \
+  --region="$REGION" \
+  --add-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION"
+
+SAVED_SEARCH_ALERTS_FUNCTION_URL="$(gcloud functions describe saved-search-alerts --gen2 --region="$REGION" --format='value(serviceConfig.uri)')"
+
+gcloud functions add-invoker-policy-binding saved-search-alerts \
+  --gen2 \
+  --region="$REGION" \
+  --member="serviceAccount:${PROJECT_ID}@appspot.gserviceaccount.com"
+
+gcloud scheduler jobs create http saved-search-alerts-hourly \
+  --location="$REGION" \
+  --schedule="0 * * * *" \
+  --uri="$SAVED_SEARCH_ALERTS_FUNCTION_URL" \
+  --http-method=POST \
+  --oidc-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com" \
+  --oidc-token-audience="$SAVED_SEARCH_ALERTS_FUNCTION_URL"
+
+# ---------------------------------------------------------------------------
 # Redeploys after this point (new image/source, no infra changes) — this is
 # also exactly what .github/workflows/deploy.yml runs on every push to main:
 #   gcloud builds submit --tag "${IMAGE}:$(git rev-parse --short HEAD)" --project="$PROJECT_ID" .
@@ -302,4 +351,6 @@ gcloud scheduler jobs create http crawl-dispatch-hourly \
 #     --source=. --entry-point=handle_crawl_request --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=crawl_worker.py
 #   gcloud functions deploy crawl-dispatcher --gen2 --region="$REGION" --project="$PROJECT_ID" \
 #     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=crawl_dispatcher.py
+#   gcloud functions deploy saved-search-alerts --gen2 --region="$REGION" --project="$PROJECT_ID" \
+#     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=saved_search_alerts.py
 # ---------------------------------------------------------------------------
