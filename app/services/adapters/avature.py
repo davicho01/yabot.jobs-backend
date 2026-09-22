@@ -212,7 +212,15 @@ def _fetch_jobs(host: str) -> list[str]:
     page_size = _DEFAULT_PAGE_SIZE
     while len(urls) < _AVATURE_MAX_JOBS:
         page_url = f"{careers_url}/SearchJobs/?jobRecordsPerPage={page_size}&jobOffset={offset}"
-        html = _fetch_page_html(page_url)
+        # Tenants that need the browser fallback at all (verified live:
+        # careers.ibm.com) render this page's results in via a separate AJAX
+        # call after the initial page load, on its own timeline distinct
+        # from the WAF-challenge navigation itself - a plain networkidle
+        # wait can resolve (or, post yabot.jobs-browser's networkidle-
+        # timeout salvage, get used anyway) before those results exist,
+        # silently reading as zero jobs rather than "still loading". Give it
+        # a real per-page completion signal instead of guessing.
+        html = _fetch_page_html(page_url, wait_for_selector='a[href*="/careers/JobDetail/"]')
         if html is None:
             break
         links = dict.fromkeys(_JOB_LINK_RE.findall(html))
