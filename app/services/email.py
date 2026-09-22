@@ -283,3 +283,88 @@ def send_saved_search_digest_email(
     except ClientError:
         logger.exception("Failed to send saved-search digest email to %s", to_email)
         raise
+
+
+_FOLLOW_UP_HTML = """\
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f5f5f7;padding:40px 16px;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border:1px solid #e8e8ed;border-radius:18px;max-width:480px;width:100%;">
+        <tr>
+          <td style="padding:32px 32px 24px;">
+            <table role="presentation" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="width:32px;">
+                  <img src="{logo}" width="32" height="32" alt="Yabot Jobs" style="display:block;border-radius:8px;">
+                </td>
+                <td style="padding-left:10px;font-family:-apple-system,'Segoe UI',sans-serif;font-weight:700;font-size:18px;letter-spacing:-0.01em;color:#1d1d1f;">Yabot Jobs</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 32px 8px;font-family:-apple-system,'Segoe UI',sans-serif;font-size:22px;font-weight:700;letter-spacing:-0.01em;color:#1d1d1f;">
+            Time to follow up
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 32px 24px;font-family:-apple-system,'Segoe UI',sans-serif;font-size:14px;line-height:1.6;color:#6e6e73;">
+            You set a reminder for <strong style="color:#1d1d1f;">{title}</strong>{company_clause}.
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 32px 28px;">
+            <a href="{apply_url}" style="display:inline-block;background-color:#0071e3;color:#ffffff;font-family:-apple-system,'Segoe UI',sans-serif;font-weight:600;font-size:14px;text-decoration:none;padding:12px 24px;border-radius:980px;">
+              Open it &rarr;
+            </a>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 32px 32px;border-top:1px solid #e8e8ed;padding-top:16px;font-family:-apple-system,'Segoe UI',sans-serif;font-size:12px;line-height:1.6;color:#6e6e73;">
+            You're getting this because you set a follow-up reminder on Yabot Jobs. Clear the date on that application to stop.
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+"""
+
+
+def send_follow_up_reminder_email(to_email: str, *, title: str | None, company_name: str | None, apply_url: str) -> None:
+    """A single reminder for one application whose follow_up_at is due — see
+    app.services.follow_up_reminders.send_due_reminders, the only caller.
+    Same log-only local-dev fallback as send_magic_link_email.
+    """
+    display_title = title or "this application"
+    subject = f"Follow up on {display_title}" if title else "Time to follow up on a saved application"
+    company_clause = f" at {company_name}" if company_name else ""
+
+    if settings.email_sender_access_key_id is None:
+        logger.info("Follow-up reminder for %s: %s%s", to_email, display_title, company_clause)
+        return
+
+    try:
+        _get_client().send_email(
+            FromEmailAddress=settings.email_from_address,
+            Destination={"ToAddresses": [to_email]},
+            Content={
+                "Simple": {
+                    "Subject": {"Data": subject},
+                    "Body": {
+                        "Text": {"Data": f"Time to follow up on {display_title}{company_clause}:\n\n{apply_url}"},
+                        "Html": {
+                            "Data": _FOLLOW_UP_HTML.format(
+                                logo=_YABOT_LOGO_DATA_URI,
+                                title=html.escape(display_title),
+                                company_clause=html.escape(company_clause),
+                                apply_url=apply_url,
+                            )
+                        },
+                    },
+                }
+            },
+        )
+    except ClientError:
+        logger.exception("Failed to send follow-up reminder email to %s", to_email)
+        raise
