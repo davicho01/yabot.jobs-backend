@@ -10,12 +10,13 @@ from app.models.enums import ScanStatus, WorkplaceType
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
 from app.models.user import User
-from app.schemas.job import JobDetailRead, JobListRead, JobUrlSubmit, MetroRead
+from app.schemas.job import JobDetailRead, JobListRead, JobUrlSubmit, MetroRead, SimilarJobsRead
 from app.services import geo
 from app.services.job_locations import location_suggestions, metro_suggestions
 from app.services.jobs import (
     build_job_search_statement,
     ensure_user_applicant,
+    find_similar_job_urls,
     get_or_create_job_posting,
     rescan_job_url,
     to_job_detail,
@@ -162,6 +163,25 @@ def get_job_url(url_id: uuid.UUID, db: Session = Depends(get_db)) -> JobDetailRe
     if url_row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job URL not found.")
     return to_job_detail(url_row)
+
+
+@router.get("/{url_id}/similar", response_model=SimilarJobsRead)
+def similar_jobs(url_id: uuid.UUID, db: Session = Depends(get_db)) -> SimilarJobsRead:
+    """Other postings related to this one, for a "similar jobs" panel on its
+    case file — see find_similar_job_urls. Empty on both sides (rather than
+    404) for a posting that hasn't scanned yet or has no title, since
+    there's simply nothing to compare it against."""
+    url_row = db.get(JobPostingUrl, url_id)
+    if url_row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job URL not found.")
+    posting = url_row.postings[0] if url_row.postings else None
+    if posting is None or posting.extraction_status != ScanStatus.SUCCESS or not posting.title:
+        return SimilarJobsRead(same_company=[], similar_title=[])
+    same_company, similar_title = find_similar_job_urls(db, posting)
+    return SimilarJobsRead(
+        same_company=[to_job_detail(row) for row in same_company],
+        similar_title=[to_job_detail(row) for row in similar_title],
+    )
 
 
 @router.post("/{url_id}/rescan", response_model=JobDetailRead)

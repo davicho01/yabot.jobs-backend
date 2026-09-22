@@ -9,6 +9,7 @@ import app.models as m
 from app.core.config import settings
 from app.core.rate_limit import RateLimitExceeded
 from app.models.enums import ScanStatus
+from app.services.job_dedup import normalize_company_name, normalize_title
 from app.services.job_scanner import normalize_url
 from app.services.job_scanner import url_hash as compute_url_hash
 from app.services.jobs import (
@@ -17,6 +18,7 @@ from app.services.jobs import (
     build_job_search_statement,
     ensure_user_applicant,
     find_existing_application,
+    find_similar_job_urls,
     get_or_create_job_posting,
     parse_search_query,
 )
@@ -25,7 +27,11 @@ _url_counter = itertools.count()
 
 
 def _make_posting(
-    scan_db, *, primary_posting_id: uuid.UUID | None = None, title: str = "Engineer"
+    scan_db,
+    *,
+    primary_posting_id: uuid.UUID | None = None,
+    title: str = "Engineer",
+    company_name: str = "Acme",
 ) -> m.JobPosting:
     n = next(_url_counter)
     url_row = m.JobPostingUrl(
@@ -38,8 +44,13 @@ def _make_posting(
     scan_db.flush()
     posting = m.JobPosting(
         url_id=url_row.id,
-        company_name="Acme",
+        company_name=company_name,
         title=title,
+        # Set the same way _upsert_posting computes them on a real scan
+        # (app.services.jobs), not hardcoded — these are exactly what
+        # find_similar_job_urls matches on.
+        company_key=normalize_company_name(company_name),
+        title_key=normalize_title(title),
         extraction_status=ScanStatus.SUCCESS,
         primary_posting_id=primary_posting_id,
     )
@@ -267,3 +278,60 @@ def test_build_job_search_statement_with_only_an_exclusion_still_filters(scan_db
     results = scan_db.scalars(stmt).all()
 
     assert [row.id for row in results] == [keep.url_id]
+
+
+# ------------------------------------------------------------ similar jobs
+
+
+def test_find_similar_job_urls_matches_same_company_regardless_of_title(scan_db):
+    posting = _make_posting(scan_db, title="Backend Engineer", company_name="Acme")
+    other_role = _make_posting(scan_db, title="Data Analyst", company_name="Acme")
+    _make_posting(scan_db, title="Backend Engineer", company_name="Globex")  # different company
+
+    same_company, _similar_title = find_similar_job_urls(scan_db, posting)
+
+    assert [row.id for row in same_company] == [other_role.url_id]
+
+
+def test_find_similar_job_urls_matches_same_title_at_a_different_company(scan_db):
+    posting = _make_posting(scan_db, title="Backend Engineer", company_name="Acme")
+    same_title_elsewhere = _make_posting(scan_db, title="Backend Engineer", company_name="Globex")
+    _make_posting(scan_db, title="Backend Engineer II", company_name="Initech")  # not an exact match
+
+    _same_company, similar_title = find_similar_job_urls(scan_db, posting)
+
+    assert [row.id for row in similar_title] == [same_title_elsewhere.url_id]
+
+
+def test_find_similar_job_urls_never_includes_the_posting_itself(scan_db):
+    posting = _make_posting(scan_db, title="Backend Engineer", company_name="Acme")
+
+    same_company, similar_title = find_similar_job_urls(scan_db, posting)
+
+    assert same_company == []
+    assert similar_title == []
+
+
+def test_find_similar_job_urls_similar_title_excludes_rows_already_in_same_company(scan_db):
+    # A same-company, same-title posting is real (a duplicate opening at the
+    # same employer) but already shown under same_company — similar_title
+    # shouldn't repeat it.
+    posting = _make_posting(scan_db, title="Backend Engineer", company_name="Acme")
+    same_company_same_title = _make_posting(scan_db, title="Backend Engineer", company_name="Acme")
+
+    same_company, similar_title = find_similar_job_urls(scan_db, posting)
+
+    assert [row.id for row in same_company] == [same_company_same_title.url_id]
+    assert similar_title == []
+
+
+def test_find_similar_job_urls_ignores_non_canonical_postings(scan_db):
+    posting = _make_posting(scan_db, title="Backend Engineer", company_name="Acme")
+    canonical = _make_posting(scan_db, title="Backend Engineer", company_name="Globex")
+    _make_posting(
+        scan_db, title="Backend Engineer", company_name="Globex", primary_posting_id=canonical.id
+    )  # a cross-posted duplicate of `canonical` — not its own separate result
+
+    _same_company, similar_title = find_similar_job_urls(scan_db, posting)
+
+    assert [row.id for row in similar_title] == [canonical.url_id]

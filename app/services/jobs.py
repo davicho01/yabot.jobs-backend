@@ -162,6 +162,57 @@ def build_job_search_statement(
     return stmt, order, search_area
 
 
+def find_similar_job_urls(
+    db: Session, posting: JobPosting, *, limit: int = 5
+) -> tuple[list[JobPostingUrl], list[JobPostingUrl]]:
+    """Two short lists of other postings related to `posting`, for a
+    "similar jobs" panel on its case file:
+
+    - same_company: other canonical postings at the same company (any
+      role), newest first.
+    - similar_title: canonical postings elsewhere with the exact same
+      normalized title (title_key — see app.services.job_dedup), newest
+      first, excluding anything already in same_company.
+
+    Both are canonical-only (primary_posting_id is null, same gate
+    build_job_search_statement uses) and exclude `posting` itself — the
+    posting a user is looking at is never its own recommendation.
+    title_key is matched exactly rather than fuzzily: job_dedup's
+    difflib-based similarity is deliberately only ever compared within an
+    already company-narrowed set (see its module docstring) — doing that
+    app-wide here, across every company, risked recommending unrelated
+    roles that merely read similarly ("Software Engineer" vs. "Software
+    Engineer II" already fails dedup's own threshold check).
+    """
+    base = select(JobPostingUrl).join(JobPosting, JobPosting.url_id == JobPostingUrl.id).where(
+        JobPosting.extraction_status == ScanStatus.SUCCESS,
+        JobPosting.title.is_not(None),
+        JobPosting.primary_posting_id.is_(None),
+        JobPosting.id != posting.id,
+    )
+
+    same_company: list[JobPostingUrl] = []
+    if posting.company_key:
+        stmt = (
+            base.where(JobPosting.company_key == posting.company_key)
+            .order_by(JobPostingUrl.created_at.desc())
+            .limit(limit)
+        )
+        same_company = list(db.scalars(stmt).all())
+
+    similar_title: list[JobPostingUrl] = []
+    if posting.title_key:
+        exclude_ids = {row.id for row in same_company}
+        stmt = (
+            base.where(JobPosting.title_key == posting.title_key)
+            .order_by(JobPostingUrl.created_at.desc())
+            .limit(limit + len(exclude_ids))
+        )
+        similar_title = [row for row in db.scalars(stmt).all() if row.id not in exclude_ids][:limit]
+
+    return same_company, similar_title
+
+
 def get_or_create_job_posting(
     db: Session,
     raw_url: str,

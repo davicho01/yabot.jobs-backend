@@ -97,7 +97,10 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
     # the canonical row is ever deleted, a duplicate just becomes its own canonical
     # again instead of being orphaned.
     company_key: Mapped[str | None] = mapped_column(String(255), index=True)
-    title_key: Mapped[str | None] = mapped_column(String(255))
+    # Indexed too (not just company_key): find_similar_job_urls (app.services.jobs)
+    # matches on title_key alone, app-wide rather than within an already
+    # company-narrowed set the way job_dedup uses it.
+    title_key: Mapped[str | None] = mapped_column(String(255), index=True)
     primary_posting_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("job_postings.id", ondelete="SET NULL"), index=True
     )

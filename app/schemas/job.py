@@ -77,3 +77,10 @@ class JobListRead(BaseModel):
     page: int
     page_size: int
     search_area: SearchAreaRead | None = None  # set when the location search was a city, searched by distance
+
+
+class SimilarJobsRead(BaseModel):
+    """See app.services.jobs.find_similar_job_urls."""
+
+    same_company: list[JobDetailRead]
+    similar_title: list[JobDetailRead]
