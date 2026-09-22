@@ -1,10 +1,13 @@
-"""Fixtures for the per-source scan-throttling tests.
+"""Fixtures shared by this directory's plain-function (no FastAPI/HTTP)
+service tests — the per-source scan-throttling ones and app.services.jobs's
+own submission/dedup tests.
 
 Like tests/test_oauth_service.py, these run against an in-memory SQLite
 engine with only the tables they touch (JobPosting and friends use
 Postgres-only JSONB). SQLite ignores `FOR UPDATE [SKIP LOCKED]`, so the
-*locking* that serialises concurrent claims isn't exercised here — these
-tests cover the counting/claim logic that sits on top of it.
+*locking* that serialises concurrent claims isn't exercised by the
+scan-throttling tests — those cover the counting/claim logic that sits on
+top of it.
 """
 
 import itertools
@@ -41,7 +44,10 @@ def now() -> datetime:
 @pytest.fixture
 def scan_db() -> Session:
     engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine, tables=[m.CrawlSource.__table__, m.JobPostingUrl.__table__, m.JobPosting.__table__])
+    Base.metadata.create_all(
+        engine,
+        tables=[m.CrawlSource.__table__, m.JobPostingUrl.__table__, m.JobPosting.__table__, m.UserJobApplication.__table__],
+    )
     session = sessionmaker(bind=engine, autoflush=False)()
     yield session
     session.close()
