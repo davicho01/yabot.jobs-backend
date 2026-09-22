@@ -1,5 +1,5 @@
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, HttpUrl
 
@@ -51,6 +51,9 @@ class ApplicationRead(BaseModel):
     status: str
     notes: str | None
     is_archived: bool
+    # When this row was first made — saving/applying to a job always adds one
+    # (see create_application, ensure_user_applicant), so this is never null.
+    created_at: datetime
     job_posting: ApplicationJobPostingRead
     # Max of latest_score/latest_tailored_resume_score — see
     # UserJobApplication.best_score in app/models/job_application.py.
