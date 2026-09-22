@@ -14,15 +14,19 @@ from app.services.job_scanner import url_hash as compute_url_hash
 from app.services.jobs import (
     _backoff_seconds,
     _enforce_submission_rate_limit,
+    build_job_search_statement,
     ensure_user_applicant,
     find_existing_application,
     get_or_create_job_posting,
+    parse_search_query,
 )
 
 _url_counter = itertools.count()
 
 
-def _make_posting(scan_db, *, primary_posting_id: uuid.UUID | None = None) -> m.JobPosting:
+def _make_posting(
+    scan_db, *, primary_posting_id: uuid.UUID | None = None, title: str = "Engineer"
+) -> m.JobPosting:
     n = next(_url_counter)
     url_row = m.JobPostingUrl(
         url=f"https://example.com/jobs/dedup-{n}",
@@ -35,7 +39,7 @@ def _make_posting(scan_db, *, primary_posting_id: uuid.UUID | None = None) -> m.
     posting = m.JobPosting(
         url_id=url_row.id,
         company_name="Acme",
-        title="Engineer",
+        title=title,
         extraction_status=ScanStatus.SUCCESS,
         primary_posting_id=primary_posting_id,
     )
@@ -209,3 +213,57 @@ def test_ensure_user_applicant_does_not_duplicate_across_a_cross_posted_duplicat
     ).all()
     assert len(applications) == 1
     assert applications[0].job_posting_id == canonical.id  # the first one made stays the tracked row
+
+
+# ------------------------------------------------------- search query parsing
+
+
+def test_parse_search_query_with_no_exclusions_is_unchanged():
+    assert parse_search_query("Senior Software Engineer") == ("Senior Software Engineer", [])
+
+
+def test_parse_search_query_pulls_out_dash_prefixed_terms():
+    include, exclude_terms = parse_search_query("engineer -senior -lead")
+    assert include == "engineer"
+    assert exclude_terms == ["senior", "lead"]
+
+
+def test_parse_search_query_exclusions_can_be_interspersed():
+    # Order in the box doesn't matter — every non-excluded token still ends
+    # up in `include`, in the order it was typed.
+    include, exclude_terms = parse_search_query("-remote senior engineer -contract")
+    assert include == "senior engineer"
+    assert exclude_terms == ["remote", "contract"]
+
+
+def test_parse_search_query_all_exclusions_has_no_include_text():
+    assert parse_search_query("-senior") == (None, ["senior"])
+
+
+def test_parse_search_query_a_lone_dash_is_kept_as_a_literal_token():
+    # "-" alone has nothing after the dash to exclude, so it's treated as
+    # ordinary (if useless) search text rather than a malformed exclusion.
+    assert parse_search_query("-") == ("-", [])
+
+
+# --------------------------------------------- build_job_search_statement search
+
+
+def test_build_job_search_statement_excludes_postings_matching_a_dash_term(scan_db):
+    keep = _make_posting(scan_db, title="Staff Engineer")
+    _make_posting(scan_db, title="Senior Engineer")
+
+    stmt, _order, _area = build_job_search_statement(q="engineer -senior")
+    results = scan_db.scalars(stmt).all()
+
+    assert [row.id for row in results] == [keep.url_id]
+
+
+def test_build_job_search_statement_with_only_an_exclusion_still_filters(scan_db):
+    keep = _make_posting(scan_db, title="Staff Engineer")
+    _make_posting(scan_db, title="Senior Engineer")
+
+    stmt, _order, _area = build_job_search_statement(q="-senior")
+    results = scan_db.scalars(stmt).all()
+
+    assert [row.id for row in results] == [keep.url_id]

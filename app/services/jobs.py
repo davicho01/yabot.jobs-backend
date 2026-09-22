@@ -37,6 +37,29 @@ def to_job_detail(url_row: JobPostingUrl) -> JobDetailRead:
     return JobDetailRead(url=url_row, posting=latest_posting)
 
 
+def parse_search_query(q: str) -> tuple[str | None, list[str]]:
+    """Splits a search-box query into what a title must contain and what it
+    must not. A whitespace-separated token starting with "-" (e.g.
+    "-senior") excludes postings whose title contains that word; every other
+    token is rejoined (single-spaced) and matched as one substring, same as
+    a plain query was matched before exclusion existed — so "Software
+    Engineer" still means titles containing that exact phrase, not just
+    containing both words in any order.
+
+    Returns (include, exclude_terms) — include is None when the query is
+    exclusions only (e.g. "-senior" alone still narrows the search, just
+    with nothing positive to match on).
+    """
+    exclude_terms: list[str] = []
+    include_parts: list[str] = []
+    for token in q.split():
+        if len(token) > 1 and token.startswith("-"):
+            exclude_terms.append(token[1:])
+        else:
+            include_parts.append(token)
+    return " ".join(include_parts).strip() or None, exclude_terms
+
+
 def build_job_search_statement(
     *,
     q: str | None = None,
@@ -87,7 +110,11 @@ def build_job_search_statement(
     ):
         stmt = stmt.distinct()
         if q:
-            stmt = stmt.where(JobPosting.title.ilike(f"%{q}%"))
+            include, exclude_terms = parse_search_query(q)
+            if include:
+                stmt = stmt.where(JobPosting.title.ilike(f"%{include}%"))
+            for term in exclude_terms:
+                stmt = stmt.where(JobPosting.title.not_ilike(f"%{term}%"))
         if location:
             metro_area = geo.search_metro(location)
             place = None if metro_area else geo.search_place(location)
