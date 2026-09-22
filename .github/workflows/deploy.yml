@@ -1,10 +1,11 @@
 name: Deploy
 
-# Redeploys api/worker/crawl-worker/crawl-dispatcher/saved-search-alerts with
-# the new image/source on every push to main. worker and crawl-worker are
-# Cloud Functions (2nd gen, Pub/Sub-triggered) redeployed from source, same
-# as crawl-dispatcher and saved-search-alerts (HTTP-triggered, Scheduler-
-# invoked) — not from the built image below. One-time setup (API enablement,
+# Redeploys api/worker/crawl-worker/crawl-dispatcher/saved-search-alerts/
+# follow-up-reminders with the new image/source on every push to main.
+# worker and crawl-worker are Cloud Functions (2nd gen, Pub/Sub-triggered)
+# redeployed from source, same as crawl-dispatcher, saved-search-alerts, and
+# follow-up-reminders (HTTP-triggered, Scheduler-invoked) — not from the
+# built image below. One-time setup (API enablement,
 # Cloud SQL instance, secrets, IAM bindings, Scheduler jobs, the functions'
 # Pub/Sub triggers) lives in deploy/gcloud-deploy.sh and is NOT part of this
 # workflow — see that script's comments before changing infra, not just code.
@@ -146,3 +147,16 @@ jobs:
             --source=. \
             --entry-point=dispatch \
             --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=saved_search_alerts.py
+
+      # Same shape as saved-search-alerts above — its own dispatch() entry
+      # point in follow_up_reminders.py, not this repo's main.py.
+      - name: Deploy follow-up-reminders
+        run: |
+          gcloud functions deploy follow-up-reminders \
+            --gen2 \
+            --region="$REGION" \
+            --project="$PROJECT_ID" \
+            --runtime=python313 \
+            --source=. \
+            --entry-point=dispatch \
+            --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=follow_up_reminders.py
