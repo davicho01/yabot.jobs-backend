@@ -54,11 +54,18 @@ def list_job_urls(
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> JobListRead:
-    stmt = select(JobPostingUrl)
+    # Only postings that have been scanned: one still waiting on its scan (or that
+    # failed) has no title to show, so it would just be an empty "Scanning posting…"
+    # card, and — being newest first — a bulk crawl would fill whole pages with them.
+    stmt = (
+        select(JobPostingUrl)
+        .join(JobPosting, JobPosting.url_id == JobPostingUrl.id)
+        .where(JobPosting.extraction_status == ScanStatus.SUCCESS, JobPosting.title.is_not(None))
+    )
     order = [JobPostingUrl.created_at.desc()]
     search_area: SearchAreaRead | None = None
     if q or location or metro or company or posted_within_days or workplace_type:
-        stmt = stmt.join(JobPosting, JobPosting.url_id == JobPostingUrl.id).distinct()
+        stmt = stmt.distinct()
         if q:
             stmt = stmt.where(JobPosting.title.ilike(f"%{q}%"))
         if location:
