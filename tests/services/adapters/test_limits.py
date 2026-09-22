@@ -51,10 +51,13 @@ def test_dates_normalize_timezone_and_reject_invalid_values():
 @pytest.mark.parametrize('adapter,url_field,date_field', [
     (greenhouse, 'absolute_url', 'first_published'), (ashby, 'jobUrl', 'publishedAt'),
 ])
-def test_unsorted_feeds_filter_before_applying_cap(monkeypatch, adapter, url_field, date_field):
+def test_full_board_discovery_keeps_jobs_older_than_recent_window(monkeypatch, adapter, url_field, date_field):
+    # Both APIs return the complete current board in one call, so a job that's
+    # still open but was posted long ago must still come back — no recency
+    # filter should ever be applied here (that's only correct for adapters
+    # that paginate a whole board every crawl, see base.RECENT_WINDOW_DAYS).
     today = datetime.now(timezone.utc).date()
-    jobs = [{url_field: 'old', date_field: (today - timedelta(days=10)).isoformat(),
-             'updated_at': today.isoformat()}]
-    jobs += [{url_field: f'new-{i}', date_field: today.isoformat()} for i in range(510)]
+    jobs = [{url_field: 'old', date_field: (today - timedelta(days=10)).isoformat()}]
+    jobs += [{url_field: f'new-{i}', date_field: today.isoformat()} for i in range(5)]
     monkeypatch.setattr(adapter, 'get_with_retry', lambda *a, **k: FakeResponse(json_data={'jobs': jobs}))
-    assert adapter._fetch_jobs('board') == [f'new-{i}' for i in range(500)]
+    assert adapter._fetch_jobs('board') == ['old'] + [f'new-{i}' for i in range(5)]

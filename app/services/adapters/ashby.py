@@ -11,7 +11,6 @@ from app.services.adapters.base import (
     ScanResult,
     candidate_slugs_from_domain,
     get_with_retry,
-    is_recent_posting,
     limit_job_urls,
 )
 from app.services.adapters.text import clean_text, html_to_formatted_text
@@ -43,11 +42,13 @@ def _match(url: str) -> str | None:
 
 
 def _fetch_jobs(board_key: str) -> list[str]:
-    # Free, public, unauthenticated API — no key required.
+    # Free, public, unauthenticated API — no key required, and this single
+    # call already returns the complete current board, so no recency filter
+    # is needed here: limit_job_urls's dedupe/cap is the only shaping done.
     response = get_with_retry(_ASHBY_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
     response.raise_for_status()
     jobs = response.json().get("jobs", [])
-    return limit_job_urls(job["jobUrl"] for job in jobs if job.get("jobUrl") and is_recent_posting(job.get("publishedAt")))
+    return limit_job_urls(job["jobUrl"] for job in jobs if job.get("jobUrl"))
 
 
 def _board_has_job(slug: str, job_id: str) -> bool:

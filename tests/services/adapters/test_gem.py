@@ -1,5 +1,4 @@
 import json
-from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -23,17 +22,16 @@ def test_match(url, key):
     assert gem._match(url) == key
 
 
-def test_discovery_filters_dates_deduplicates_and_honors_shared_cap(monkeypatch):
-    now = datetime.now(timezone.utc)
+def test_discovery_dedupes_invalid_ids_and_honors_shared_cap(monkeypatch):
+    # The board's own GraphQL query already returns the complete current
+    # listing, so discovery applies no recency filter of its own — only
+    # dedupe, extId-shape validation, and the shared cap.
     jobs = [
-        {'extId': 'old', 'firstPublishedTsSec': (now - timedelta(days=base.RECENT_WINDOW_DAYS)).timestamp()},
-        {'extId': 'missing'},
-        {'extId': 'invalid', 'firstPublishedTsSec': 'yesterday'},
-        {'extId': '../bad', 'firstPublishedTsSec': now.timestamp()},
-        {'extId': 'boundary', 'firstPublishedTsSec': (now - timedelta(days=base.RECENT_WINDOW_DAYS - 1)).timestamp()},
-        {'extId': 'boundary', 'firstPublishedTsSec': now.timestamp()},
-        {'extId': 'today', 'firstPublishedTsSec': now.timestamp()},
-        {'extId': 'over-cap', 'firstPublishedTsSec': now.timestamp()},
+        {'extId': 'a'},
+        {'extId': 'a'},  # duplicate, collapses to one URL
+        {'extId': '../bad'},  # fails the extId shape check, rejected
+        {'extId': 'b'},
+        {'extId': 'over-cap'},  # beyond the (monkeypatched) cap
     ]
     monkeypatch.setattr(base, 'DEFAULT_MAX_JOBS_PER_CRAWL', 2)
 
@@ -47,7 +45,7 @@ def test_discovery_filters_dates_deduplicates_and_honors_shared_cap(monkeypatch)
     ats, key = detect_ats_source('https://jobs.gem.com/11x-ai/job-id')
     board = board_url_for_key(ats, key, 'unused')
     assert board == 'https://jobs.gem.com/11x-ai'
-    assert list_job_urls(ats, board) == [board + '/boundary', board + '/today']
+    assert list_job_urls(ats, board) == [board + '/a', board + '/b']
 
 
 @pytest.mark.parametrize('body', [{'errors': [{'message': 'Unknown board'}]}, {'data': None},

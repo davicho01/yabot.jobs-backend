@@ -39,6 +39,7 @@ from app.core.log_config import configure_logging
 from app.db.session import SessionLocal
 from app.models.crawl_source import CrawlSource
 from app.services.ats_adapters import list_job_urls
+from app.services.coverage_monitor import update_coverage
 from app.services.crawl_queue import ensure_topic_and_subscription, subscriber_client, subscription_path
 from app.services.job_queue import enqueue_source_scan
 from app.services.jobs import get_or_create_job_posting
@@ -98,6 +99,7 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
         return
     source.last_crawled_at = datetime.now(timezone.utc)
     source.last_error = f"{failed} of {len(urls)} discovered URL(s) failed to process." if failed else None
+    update_coverage(source, len(urls))
     db.commit()  # stats persisted before waking lanes (has_unclaimed_pending ends its transaction)
     logger.info("Crawled %s: %d job URL(s) discovered (%d failed).", source_name, len(urls), failed)
 

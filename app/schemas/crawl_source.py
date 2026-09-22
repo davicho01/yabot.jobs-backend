@@ -62,4 +62,10 @@ class CrawlSourceRead(BaseModel):
     max_concurrent_scans: int
     last_crawled_at: datetime | None
     last_error: str | None
+    # System-managed coverage monitoring (see app.services.coverage_monitor)
+    # — not settable via CrawlSourceUpdate.
+    coverage_last_count: int | None
+    coverage_baseline: float | None
+    coverage_sample_count: int
+    coverage_flagged_at: datetime | None
     created_at: datetime

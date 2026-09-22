@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Index, Integer, String, Text
+from sqlalchemy import CheckConstraint, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -64,6 +64,18 @@ class CrawlSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         server_default=str(DEFAULT_MAX_CONCURRENT_SCANS),
         nullable=False,
     )
+    # Generic, adapter-agnostic coverage monitoring (see
+    # app.services.coverage_monitor.update_coverage) — catches a source's
+    # discovered-URL count silently regressing (a broken adapter, an ATS
+    # API/rate-limit change, ...) for ANY platform, not just a specific bug.
+    # It can't catch a source that's been under-counting since its very
+    # first crawl (nothing to regress from) — that class of bug is prevented
+    # at the adapter level instead.
+    coverage_last_count: Mapped[int | None] = mapped_column(Integer)
+    coverage_baseline: Mapped[float | None] = mapped_column(Float)
+    coverage_sample_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    coverage_low_streak: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    coverage_flagged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     def __repr__(self) -> str:
         return f"<CrawlSource name={self.name!r} ats_type={self.ats_type!r} board_url={self.board_url!r} status={self.status!r}>"

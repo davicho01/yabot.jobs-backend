@@ -1,5 +1,4 @@
 import re
-from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -13,7 +12,6 @@ from app.services.adapters.base import (
     AtsAdapter,
     ExtractedJobFields,
     ScanResult,
-    is_recent_posting,
     limit_job_urls,
     post_with_retry,
 )
@@ -22,7 +20,7 @@ from app.services.adapters.text import MAX_LOCATION_LENGTH, OG_TITLE_RE, clean_t
 _JOBS_URL = "https://jobs.gem.com/api/public/graphql"
 _QUERY = """query JobBoardList($boardId: String!) {
   oatsExternalJobPostings(boardId: $boardId) {
-    jobPostings { extId firstPublishedTsSec }
+    jobPostings { extId }
   }
 }"""
 
@@ -35,20 +33,10 @@ def _match(url: str) -> str | None:
     return slug if re.fullmatch(r"[a-zA-Z0-9_-]+", slug) and slug != "api" else None
 
 
-def _published_at(job: dict) -> datetime | None:
-    timestamp = job.get("firstPublishedTsSec")
-    if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)):
-        return None
-    try:
-        return datetime.fromtimestamp(timestamp, timezone.utc)
-    except (ValueError, OverflowError, OSError):
-        return None
-
-
 def _fetch_jobs(board_key: str) -> list[str]:
-    # The public board's own GraphQL query returns the complete listing;
-    # firstPublishedTsSec is available on the same records without fetching
-    # each detail page. HTTP 200 can still contain GraphQL errors.
+    # The public board's own GraphQL query returns the complete listing, so
+    # no recency filter is needed here: limit_job_urls's dedupe/cap is the
+    # only shaping done. HTTP 200 can still contain GraphQL errors.
     response = post_with_retry(
         _JOBS_URL, json={"query": _QUERY, "variables": {"boardId": board_key}}, timeout=TIMEOUT
     )
@@ -64,9 +52,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
     return limit_job_urls(
         f"https://jobs.gem.com/{board_key}/{job['extId']}"
         for job in jobs
-        if isinstance(job.get("extId"), str)
-        and re.fullmatch(r"[a-zA-Z0-9_-]+", job["extId"])
-        and is_recent_posting(_published_at(job))
+        if isinstance(job.get("extId"), str) and re.fullmatch(r"[a-zA-Z0-9_-]+", job["extId"])
     )
 
 

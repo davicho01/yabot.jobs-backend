@@ -72,3 +72,16 @@ def test_crawl_still_records_its_stats_when_waking_lanes_fails(monkeypatch, scan
 
     scan_db.expire_all()
     assert scan_db.get(type(source), source.id).last_crawled_at is not None
+
+
+def test_crawl_records_discovered_url_count_for_coverage_monitoring(monkeypatch, scan_db, make_source):
+    source = make_source()
+    urls = [f"https://example.com/jobs/{i}" for i in range(7)]
+
+    _run_crawl(monkeypatch, scan_db, source, urls)
+
+    scan_db.expire_all()
+    refreshed = scan_db.get(type(source), source.id)
+    assert refreshed.coverage_last_count == 7
+    assert refreshed.coverage_baseline == 7  # first-ever sample, running mean == the value itself
+    assert refreshed.coverage_sample_count == 1

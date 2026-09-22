@@ -29,6 +29,7 @@ class WindowCounts(BaseModel):
 class DashboardTotals(BaseModel):
     job_listings: int
     crawl_sources: int
+    crawl_sources_flagged: int
     users: int
 
 
