@@ -10,7 +10,13 @@ from sqlalchemy.orm import Session
 
 from app.models.api_key import UserApiKey
 from app.services.llm_client import LlmError, call_llm
-from app.services.prompts import COVER_LETTER_PROMPT, REVIEW_PROMPT, SCORE_PROMPT, TAILOR_PROMPT
+from app.services.prompts import (
+    COVER_LETTER_PROMPT,
+    INTERVIEW_PREP_PROMPT,
+    REVIEW_PROMPT,
+    SCORE_PROMPT,
+    TAILOR_PROMPT,
+)
 
 _CODE_FENCE_RE = re.compile(r"^```[a-zA-Z]*\n?|```$", re.MULTILINE)
 
@@ -241,5 +247,65 @@ def generate_cover_letter_with_llm(
         body_paragraphs=_as_str_list(data.get("body_paragraphs")),
         closing=data.get("closing") if isinstance(data.get("closing"), str) else "",
         contact=_as_contact_dict(data.get("contact")),
+        raw_response=data,
+    )
+
+
+# --- Interview prep ---------------------------------------------------------
+
+_QUESTION_CATEGORIES = {"behavioral", "technical", "role_specific"}
+
+
+def _as_questions_list(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    questions = []
+    for item in value:
+        if not isinstance(item, dict) or not isinstance(item.get("question"), str):
+            continue
+        category = item.get("category")
+        questions.append(
+            {
+                "question": item["question"],
+                # An unrecognized/missing category still gets a question
+                # people can use — falls back to the most general bucket
+                # rather than dropping the question entirely.
+                "category": category if category in _QUESTION_CATEGORIES else "role_specific",
+                "approach": item.get("approach") if isinstance(item.get("approach"), str) else "",
+            }
+        )
+    return questions
+
+
+@dataclass
+class InterviewPrepContent:
+    likely_questions: list[dict[str, str]] = field(default_factory=list)
+    talking_points: list[str] = field(default_factory=list)
+    questions_to_ask: list[str] = field(default_factory=list)
+    raw_response: dict[str, Any] | None = None
+
+
+def generate_interview_prep_with_llm(
+    resume_text: str,
+    job_description: str,
+    *,
+    provider: str,
+    model: str | None,
+    api_key: str,
+    base_url: str | None,
+) -> InterviewPrepContent:
+    prompt = INTERVIEW_PREP_PROMPT.format(
+        resume_text=resume_text[:_MAX_TEXT_CHARS], job_description=job_description[:_MAX_TEXT_CHARS]
+    )
+    raw = call_llm(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
+    try:
+        data = _parse_response(raw)
+    except json.JSONDecodeError as exc:
+        raise LlmError(f"Model response was not valid JSON: {exc}") from exc
+
+    return InterviewPrepContent(
+        likely_questions=_as_questions_list(data.get("likely_questions")),
+        talking_points=_as_str_list(data.get("talking_points")),
+        questions_to_ask=_as_str_list(data.get("questions_to_ask")),
         raw_response=data,
     )

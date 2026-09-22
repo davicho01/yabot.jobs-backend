@@ -178,3 +178,27 @@ class CoverLetterRead(BaseModel):
     content: CoverLetterUpload
     filename: str
     created_at: datetime
+
+
+class InterviewQuestion(BaseModel):
+    question: str
+    category: str  # "behavioral" | "technical" | "role_specific"
+    # How this specific candidate should answer it, referencing their own
+    # resume — not a generic tip.
+    approach: str
+
+
+class InterviewPrepContent(BaseModel):
+    likely_questions: list[InterviewQuestion] = []
+    talking_points: list[str] = []
+    questions_to_ask: list[str] = []
+
+
+class InterviewPrepRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    resume_id: uuid.UUID
+    job_posting_id: uuid.UUID
+    content: InterviewPrepContent
+    created_at: datetime
