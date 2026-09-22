@@ -7,10 +7,21 @@ tests.
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.models as m
 from app.db.base import Base
+
+
+# JobPosting (needed by tests/api/test_applications.py) has Postgres-only
+# JSONB columns — same shim tests/services/conftest.py registers for its own
+# directory's tests, just scoped here too since this directory's tests
+# don't share that conftest.
+@compiles(JSONB, "sqlite")
+def _jsonb_as_json_on_sqlite(_type, _compiler, **_kw):
+    return "JSON"
 
 
 @pytest.fixture

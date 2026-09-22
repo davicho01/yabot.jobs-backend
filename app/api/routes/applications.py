@@ -70,14 +70,25 @@ def update_application(
     if application is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found.")
 
-    if payload.status is not None:
+    # A genuine partial update: only touch a field the request actually
+    # included (exclude_unset), not whenever it happens to be non-None —
+    # otherwise follow_up_at: null (a deliberate "clear the reminder")
+    # would be indistinguishable from not mentioning it at all.
+    fields = payload.model_dump(exclude_unset=True)
+    if "status" in fields:
         if payload.status == ApplicationStatus.APPLIED and application.applied_at is None:
             application.applied_at = datetime.now(timezone.utc)
         application.status = payload.status
-    if payload.notes is not None:
+    if "notes" in fields:
         application.notes = payload.notes
-    if payload.is_archived is not None:
+    if "is_archived" in fields:
         application.is_archived = payload.is_archived
+    if "follow_up_at" in fields and payload.follow_up_at != application.follow_up_at:
+        application.follow_up_at = payload.follow_up_at
+        # A new (or newly-cleared) date needs its own fresh reminder check —
+        # not suppressed by a reminder already sent for whatever date this
+        # used to be. See app.services.follow_up_reminders.
+        application.follow_up_reminded_at = None
 
     db.flush()
     return application

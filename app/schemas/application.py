@@ -11,9 +11,15 @@ class ApplicationCreate(BaseModel):
 
 
 class ApplicationUpdate(BaseModel):
+    # A genuine partial update (see update_application) — a field is only
+    # touched when the request actually included it (exclude_unset), not
+    # whenever it's non-None. That distinction matters most for
+    # follow_up_at: sending it as null is a deliberate "clear the reminder",
+    # different from just not mentioning it.
     status: ApplicationStatus | None = None
     notes: str | None = None
     is_archived: bool | None = None
+    follow_up_at: date | None = None
 
 
 class ApplicationJobPostingRead(BaseModel):
@@ -54,6 +60,7 @@ class ApplicationRead(BaseModel):
     # When this row was first made — saving/applying to a job always adds one
     # (see create_application, ensure_user_applicant), so this is never null.
     created_at: datetime
+    follow_up_at: date | None
     job_posting: ApplicationJobPostingRead
     # Max of latest_score/latest_tailored_resume_score — see
     # UserJobApplication.best_score in app/models/job_application.py.

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -42,6 +42,18 @@ class UserJobApplication(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # history/notes/status — distinct from `status` (withdrawn/rejected
     # still describe an active pipeline stage; archiving just declutters).
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # A self-set "remind me about this one" date — a day, not a timestamp:
+    # this is "follow up sometime on the 5th", not a specific moment. Null
+    # means no reminder wanted. See app.services.follow_up_reminders, the
+    # only reader.
+    follow_up_at: Mapped[date | None] = mapped_column(Date)
+    # Set once a reminder email has actually gone out for the *current*
+    # follow_up_at — update_application resets this to null whenever
+    # follow_up_at itself changes (a new date means a new reminder is
+    # wanted), so this only ever suppresses re-sending for a date already
+    # reminded about, never a freshly (re)set one.
+    follow_up_reminded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Pointers to the most recent row in each history table (score/tailored
     # resume/cover letter can each be regenerated, so those tables keep
