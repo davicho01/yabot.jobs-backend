@@ -38,6 +38,10 @@ class JobPostingRead(BaseModel):
     posted_at: date | None
     scanned_at: datetime | None
     extraction_status: str
+    # How many other JobPostingUrls this same job was also found at (see
+    # app.services.job_dedup) — 0 for most postings. Only meaningful on a
+    # canonical posting; GET /jobs already only returns those.
+    also_posted_count: int
 
 
 class JobPostingUrlRead(BaseModel):

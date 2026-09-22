@@ -3,18 +3,20 @@ import json
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.rate_limit import RateLimitExceeded
 from app.models.enums import ApplicationStatus, EmploymentType, ScanStatus, WorkplaceType
 from app.models.job_application import UserJobApplication
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
 from app.services.crawl_sources import register_discovered_board
+from app.services.job_dedup import find_duplicate_primary, normalize_company_name, normalize_title
 from app.services.job_llm_extractor import LlmExtraction, extract_with_llm, html_to_text
 from app.services.geo import resolve_area_codes, resolve_places
 from app.services.job_locations import split_locations
@@ -39,6 +41,7 @@ def get_or_create_job_posting(
     submitted_by_user_id: uuid.UUID | None,
     crawl_source_id: uuid.UUID | None = None,
     enqueue: bool = True,
+    now: datetime | None = None,
 ) -> tuple[JobPosting, JobPostingUrl]:
     """Resolve a submitted URL to a (shared, app-wide) JobPosting.
 
@@ -55,12 +58,19 @@ def get_or_create_job_posting(
     that source's throttled lanes (see run_source_lane), which the crawler
     wakes once after it has recorded every URL, instead of publishing
     hundreds of independent messages at once.
+
+    `now` is only for tests (see _enforce_submission_rate_limit) — real
+    callers leave it unset and get the wall clock.
     """
     normalized = normalize_url(raw_url)
     hashed = url_hash(normalized)
 
     url_row = db.scalar(select(JobPostingUrl).where(JobPostingUrl.url_hash == hashed))
     if url_row is None:
+        if submitted_by_user_id is not None:
+            # Only a brand-new URL reaches here — re-submitting an already-known
+            # one is a cheap dedup lookup, not a new scan, so it's never throttled.
+            _enforce_submission_rate_limit(db, submitted_by_user_id, now=now)
         url_row = JobPostingUrl(
             url=raw_url,
             normalized_url=normalized,
@@ -92,6 +102,23 @@ def get_or_create_job_posting(
         posting = _create_pending_posting(db, url_row)
         db.flush()
     return posting, url_row
+
+
+def _enforce_submission_rate_limit(db: Session, user_id: uuid.UUID, now: datetime | None = None) -> None:
+    """Throttle brand-new job-URL submissions per user — each one creates a
+    JobPostingUrl row and queues a real LLM scan, so this caps runaway cost
+    rather than request volume in general (see get_or_create_job_posting,
+    the only caller).
+    """
+    now = now or datetime.now(timezone.utc)
+    window_start = now - timedelta(minutes=settings.job_submission_rate_limit_window_minutes)
+    count = db.scalar(
+        select(func.count())
+        .select_from(JobPostingUrl)
+        .where(JobPostingUrl.submitted_by_user_id == user_id, JobPostingUrl.created_at >= window_start)
+    )
+    if count >= settings.job_submission_rate_limit_max_new_urls:
+        raise RateLimitExceeded("Too many new job submissions. Try again later.")
 
 
 def _create_pending_posting(db: Session, url_row: JobPostingUrl) -> JobPosting:
@@ -173,24 +200,49 @@ def process_scan_job(db: Session, url_id: uuid.UUID) -> None:
     _apply_scan_result(db, url_row, scan_job_url(url_row.url))
 
 
+def _backoff_seconds(attempts: int) -> float:
+    """How long a FAILED row waits before it's next eligible for retry, given
+    `attempts` consecutive failures (1 = the first failure). Grows
+    scan_retry_backoff_multiplier-fold each time, capped at
+    scan_retry_max_seconds — see the settings' own docstring in
+    app.core.config for the resulting schedule."""
+    return min(
+        settings.scan_retry_base_seconds * settings.scan_retry_backoff_multiplier ** (attempts - 1),
+        settings.scan_retry_max_seconds,
+    )
+
+
 def _apply_scan_result(db: Session, url_row: JobPostingUrl, result: ScanResult) -> None:
     now = datetime.now(timezone.utc)
-    url_row.scan_status = ScanStatus.SUCCESS if result.success else ScanStatus.FAILED
     url_row.scan_error = _strip_nul(result.error)
     url_row.last_scanned_at = now
     url_row.scan_claimed_at = None
+
     if result.success:
+        url_row.scan_status = ScanStatus.SUCCESS
+        url_row.scan_attempts = 0
+        url_row.next_retry_at = None
         _upsert_posting(db, url_row, result, now)
     else:
+        url_row.scan_attempts += 1
+        if url_row.scan_attempts >= settings.scan_retry_max_attempts:
+            # Given up: a human has to rescan it (which resets scan_attempts)
+            # for it to be eligible again — see rescan_job_url/rescan_crawl_source.
+            url_row.scan_status = ScanStatus.NEEDS_REVIEW
+            url_row.next_retry_at = None
+        else:
+            url_row.scan_status = ScanStatus.FAILED
+            url_row.next_retry_at = now + timedelta(seconds=_backoff_seconds(url_row.scan_attempts))
         # A failed re-scan (transient WAF block, timeout, ...) must not
         # clobber a posting that already has good data from a previous
         # successful scan - same reasoning rescan_job_url already applies.
-        # Only flip a posting that's never actually succeeded to FAILED, so
-        # it's still visibly not-pending rather than stuck PENDING forever
-        # with no url_row left in PENDING to ever re-trigger it.
+        # Only flip a posting that's never actually succeeded, so it's still
+        # visibly not-pending rather than stuck PENDING forever with no
+        # url_row left in PENDING to ever re-trigger it. Mirrors whichever of
+        # FAILED/NEEDS_REVIEW the url_row above just got.
         posting = db.scalar(select(JobPosting).where(JobPosting.url_id == url_row.id))
         if posting is not None and posting.extraction_status != ScanStatus.SUCCESS:
-            posting.extraction_status = ScanStatus.FAILED
+            posting.extraction_status = url_row.scan_status
             posting.scanned_at = now
     db.flush()
 
@@ -288,11 +340,58 @@ def wake_sources_with_pending_scans(db: Session) -> int:
     return woken
 
 
+def wake_retryable_failed_scans(db: Session) -> int:
+    """Retry sweep (see retry_failed_scans.py, its hourly-cron entrypoint):
+    every FAILED row whose backoff window (next_retry_at) has elapsed is
+    flipped back to PENDING and re-enqueued, same as a human clicking
+    rescan, except automatic. NEEDS_REVIEW rows (out of retries) have no
+    next_retry_at and are never selected here — only a deliberate rescan
+    gets one moving again.
+
+    Committed before publishing, not just flushed — same race avoided as
+    get_or_create_job_posting: the worker reads these rows on a separate
+    connection, so publishing before the commit risks it finding nothing.
+    Returns how many rows were reset.
+    """
+    now = datetime.now(timezone.utc)
+    rows = db.scalars(
+        select(JobPostingUrl).where(
+            JobPostingUrl.scan_status == ScanStatus.FAILED,
+            JobPostingUrl.next_retry_at.is_not(None),
+            JobPostingUrl.next_retry_at <= now,
+        )
+    ).all()
+    for url_row in rows:
+        url_row.scan_status = ScanStatus.PENDING
+        url_row.scan_claimed_at = None
+        url_row.next_retry_at = None
+    db.commit()
+
+    for url_row in rows:
+        # Crawl-sourced rows are worked through their source's throttled
+        # lanes, not queued individually — the caller follows this with
+        # wake_sources_with_pending_scans (same split requeue_pending_scans.py
+        # already uses) to pick those up.
+        if url_row.crawl_source_id is None:
+            try:
+                enqueue_scan(url_row.id)
+            except Exception:
+                logger.exception("Failed to re-queue url_id=%s; skipping.", url_row.id)
+    return len(rows)
+
+
 def _mark_store_failed(db: Session, url_id: uuid.UUID, exc: Exception) -> None:
     """Record that a page was fetched but its result couldn't be stored, in a
     fresh transaction (the failed one is rolled back first), releasing the
-    claim so the URL doesn't hold one of its source's concurrency slots."""
+    claim so the URL doesn't hold one of its source's concurrency slots.
+
+    Goes through the same attempt-count/backoff/give-up logic as any other
+    scan failure (see _apply_scan_result) — a page whose data can't be stored
+    (a bad shape the DB rejects, say) would otherwise retry forever at the
+    sweep's cadence without ever reaching NEEDS_REVIEW.
+    """
     db.rollback()
+    now = datetime.now(timezone.utc)
     url_row = db.get(JobPostingUrl, url_id, with_for_update=True)
     if url_row is None or url_row.scan_status != ScanStatus.PENDING:
         db.rollback()
@@ -300,13 +399,20 @@ def _mark_store_failed(db: Session, url_id: uuid.UUID, exc: Exception) -> None:
     # First line only — a DB error's message embeds the whole failed statement.
     message = str(getattr(exc, "orig", None) or exc)
     detail = (message.splitlines() or [""])[0][:300]
-    url_row.scan_status = ScanStatus.FAILED
     url_row.scan_error = _strip_nul(f"Storing the scan result failed ({type(exc).__name__}): {detail}")
-    url_row.last_scanned_at = datetime.now(timezone.utc)
+    url_row.last_scanned_at = now
     url_row.scan_claimed_at = None
+    url_row.scan_attempts += 1
+    if url_row.scan_attempts >= settings.scan_retry_max_attempts:
+        url_row.scan_status = ScanStatus.NEEDS_REVIEW
+        url_row.next_retry_at = None
+    else:
+        url_row.scan_status = ScanStatus.FAILED
+        url_row.next_retry_at = now + timedelta(seconds=_backoff_seconds(url_row.scan_attempts))
     posting = db.scalar(select(JobPosting).where(JobPosting.url_id == url_id))
-    if posting is not None:
-        posting.extraction_status = ScanStatus.FAILED
+    if posting is not None and posting.extraction_status != ScanStatus.SUCCESS:
+        posting.extraction_status = url_row.scan_status
+        posting.scanned_at = now
     db.commit()
 
 
@@ -356,19 +462,17 @@ def rescan_job_url(db: Session, url_row: JobPostingUrl) -> JobPostingUrl:
     Pub/Sub's at-least-once delivery from re-running the *same* scan
     request, not to block a deliberate rescan. A failed rescan attempt
     leaves the last-good JobPosting in place (just records the failure on
-    the URL) rather than clobbering good data with a blank one.
+    the URL) rather than clobbering good data with a blank one — see
+    _apply_scan_result, which this delegates to.
+
+    A deliberate human rescan earns a fresh retry budget: reset scan_attempts
+    to 0 first, so a URL that had exhausted its automatic retries (NEEDS_REVIEW)
+    or was partway through backing off gets the full attempt count again
+    rather than picking up where the automatic sweep left off.
     """
+    url_row.scan_attempts = 0
     result = scan_job_url(url_row.url)
-    now = datetime.now(timezone.utc)
-    url_row.last_scanned_at = now
-    if result.success:
-        url_row.scan_status = ScanStatus.SUCCESS
-        url_row.scan_error = None
-        _upsert_posting(db, url_row, result, now)
-    else:
-        url_row.scan_status = ScanStatus.FAILED
-        url_row.scan_error = result.error
-    db.flush()
+    _apply_scan_result(db, url_row, result)
     return url_row
 
 
@@ -427,6 +531,10 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
     if posting is None:
         posting = JobPosting(url_id=url_row.id)
         db.add(posting)
+        # find_duplicate_primary (below) queries JobPosting by id — flush now
+        # (this session doesn't autoflush) so a brand-new posting has one
+        # before that query runs, instead of comparing against None.
+        db.flush()
 
     # Scraped text is untrusted: a stray NUL byte (Postgres rejects it in
     # text *and* JSONB) or a title longer than its varchar column makes the
@@ -458,6 +566,15 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
     posting.posted_at = fields["posted_at"]
     posting.scanned_at = now
     posting.extraction_status = ScanStatus.SUCCESS if result.success else ScanStatus.FAILED
+
+    # Cross-source dedup (see app.services.job_dedup): recomputed on every
+    # scan/rescan, so an adapter fix that changes a scraped title or company
+    # reclassifies the grouping automatically. Only meaningful once there's
+    # a title/company to match on, i.e. on a successful scan.
+    if result.success:
+        posting.company_key = normalize_company_name(posting.company_name)
+        posting.title_key = normalize_title(posting.title)
+        posting.primary_posting_id = find_duplicate_primary(db, posting)
     return posting
 
 

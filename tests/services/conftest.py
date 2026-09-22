@@ -8,6 +8,7 @@ tests cover the counting/claim logic that sits on top of it.
 """
 
 import itertools
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -75,6 +76,7 @@ def make_url(scan_db):
         status: str = ScanStatus.PENDING,
         claimed_ago: float | None = None,
         age_minutes: int | None = None,
+        submitted_by_user_id: uuid.UUID | None = None,
     ) -> m.JobPostingUrl:
         """`claimed_ago`: seconds before NOW the row was claimed (None = unclaimed).
         `age_minutes`: how long before NOW it was created (controls oldest-first order)."""
@@ -88,6 +90,7 @@ def make_url(scan_db):
             crawl_source_id=source.id if source is not None else None,
             scan_claimed_at=NOW - timedelta(seconds=claimed_ago) if claimed_ago is not None else None,
             created_at=NOW - timedelta(minutes=age_minutes if age_minutes is not None else n),
+            submitted_by_user_id=submitted_by_user_id,
         )
         scan_db.add(row)
         scan_db.commit()

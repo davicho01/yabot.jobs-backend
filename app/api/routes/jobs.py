@@ -3,9 +3,10 @@ from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import false, func, or_, select, true
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, get_db
+from app.core.rate_limit import RateLimitExceeded
 from app.models.enums import ScanStatus, WorkplaceType
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
@@ -30,7 +31,10 @@ def submit_job_url(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> JobDetailRead:
-    posting, url_row = get_or_create_job_posting(db, str(payload.url), current_user.id)
+    try:
+        posting, url_row = get_or_create_job_posting(db, str(payload.url), current_user.id)
+    except RateLimitExceeded as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc
     ensure_user_applicant(db, current_user.id, posting.id)
     if posting.extraction_status == ScanStatus.PENDING:
         # Scan queued (see app.services.job_queue) but not finished yet —
@@ -57,10 +61,18 @@ def list_job_urls(
     # Only postings that have been scanned: one still waiting on its scan (or that
     # failed) has no title to show, so it would just be an empty "Scanning posting…"
     # card, and — being newest first — a bulk crawl would fill whole pages with them.
+    # primary_posting_id IS NULL: only canonical rows — a posting matched to
+    # an existing one (see app.services.job_dedup) is the same job found at
+    # another URL, hidden here (see JobPosting.also_posted_count) but still
+    # independently reachable via GET /jobs/{url_id}.
     stmt = (
         select(JobPostingUrl)
         .join(JobPosting, JobPosting.url_id == JobPostingUrl.id)
-        .where(JobPosting.extraction_status == ScanStatus.SUCCESS, JobPosting.title.is_not(None))
+        .where(
+            JobPosting.extraction_status == ScanStatus.SUCCESS,
+            JobPosting.title.is_not(None),
+            JobPosting.primary_posting_id.is_(None),
+        )
     )
     order = [JobPostingUrl.created_at.desc()]
     search_area: SearchAreaRead | None = None
@@ -101,7 +113,15 @@ def list_job_urls(
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
 
-    stmt = stmt.order_by(*order).limit(page_size).offset((page - 1) * page_size)
+    # Batches both loads into one extra query each for the whole page, instead
+    # of to_job_detail's url_row.postings access and also_posted_count's
+    # posting.duplicates access lazy-loading per row (an N+1 each otherwise).
+    stmt = (
+        stmt.order_by(*order)
+        .limit(page_size)
+        .offset((page - 1) * page_size)
+        .options(selectinload(JobPostingUrl.postings).selectinload(JobPosting.duplicates))
+    )
     url_rows = db.scalars(stmt).all()
     return JobListRead(
         items=[to_job_detail(row) for row in url_rows],

@@ -23,7 +23,30 @@ env:
   REPO: yabot-jobs
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # Settings has a handful of required-with-no-default fields (real
+      # secrets in prod) that just need to be *present* for Settings() to
+      # construct at import time — nothing here is used for real encryption
+      # or cloud calls, the whole suite runs against in-memory SQLite and
+      # mocks (see tests/conftest.py, tests/services/conftest.py).
+      API_KEY_ENCRYPTION_KEY: "ci-placeholder-not-used-for-real-encryption-AAAA="
+      GCP_PROJECT_ID: "ci-test"
+      RESUME_STORAGE_ACCESS_KEY_ID: "ci-test"
+      RESUME_STORAGE_SECRET_ACCESS_KEY: "ci-test"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - run: pip install -r requirements-dev.txt
+      - run: pytest
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

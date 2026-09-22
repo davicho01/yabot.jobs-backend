@@ -1,11 +1,14 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.routes import admin, api_keys, applications, auth, auth_tokens, crawl_sources, jobs, oauth, resumes
 from app.core.config import settings
+from app.db.session import engine
 from app.services.resume_storage import ensure_bucket_exists
 
 logging.basicConfig(level=logging.INFO)
@@ -43,6 +46,11 @@ app.include_router(admin.router)
 
 @app.get("/health")
 def health() -> dict[str, str]:
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail="database unavailable") from exc
     return {"status": "ok"}
 
 

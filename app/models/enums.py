@@ -43,7 +43,14 @@ class EmploymentType(StrEnum):
 class ScanStatus(StrEnum):
     PENDING = "pending"
     SUCCESS = "success"
+    # Will be retried automatically (see app.services.jobs.wake_retryable_failed_scans)
+    # until scan_retry_max_attempts is reached, at which point it becomes NEEDS_REVIEW.
     FAILED = "failed"
+    # Gave up after scan_retry_max_attempts consecutive failures — distinct from
+    # FAILED so "still retrying" and "needs a human" aren't the same bucket in the
+    # admin dashboard. Only a deliberate rescan (which resets the attempt count)
+    # gets a row out of this state.
+    NEEDS_REVIEW = "needs_review"
 
 
 class AtsType(StrEnum):

@@ -1,10 +1,11 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.rate_limit import RateLimitExceeded
 from app.core.security import generate_token, hash_token
 from app.models.auth import MagicLinkToken, PersonalAccessToken, UserSession
 from app.models.enums import UserRole, UserStatus
@@ -30,7 +31,40 @@ def get_or_create_user(db: Session, email: str) -> User:
     return user
 
 
-def create_magic_link(db: Session, user: User) -> str:
+def enforce_magic_link_rate_limit(
+    db: Session, user: User, ip_address: str | None, now: datetime | None = None
+) -> None:
+    """Throttle magic-link requests before minting another one.
+
+    Counts existing MagicLinkToken rows rather than a separate counter
+    table. Per-email guards against spamming one inbox / running up SES
+    cost; per-IP guards against one client cycling through many addresses.
+    get_or_create_user always creates the user row regardless of whether
+    the email previously existed, so raising here doesn't add any
+    account-enumeration signal beyond what the endpoint already reveals.
+    """
+    now = now or datetime.now(timezone.utc)
+    window_start = now - timedelta(minutes=settings.magic_link_rate_limit_window_minutes)
+
+    email_count = db.scalar(
+        select(func.count())
+        .select_from(MagicLinkToken)
+        .where(MagicLinkToken.user_id == user.id, MagicLinkToken.created_at >= window_start)
+    )
+    if email_count >= settings.magic_link_rate_limit_max_per_email:
+        raise RateLimitExceeded("Too many login requests for this email. Try again later.")
+
+    if ip_address is not None:
+        ip_count = db.scalar(
+            select(func.count())
+            .select_from(MagicLinkToken)
+            .where(MagicLinkToken.requested_ip == ip_address, MagicLinkToken.created_at >= window_start)
+        )
+        if ip_count >= settings.magic_link_rate_limit_max_per_ip:
+            raise RateLimitExceeded("Too many login requests. Try again later.")
+
+
+def create_magic_link(db: Session, user: User, requested_ip: str | None = None) -> str:
     """Create a magic link token for the user and return the raw token
     (only ever available here — the DB stores just its hash).
     """
@@ -40,6 +74,7 @@ def create_magic_link(db: Session, user: User) -> str:
             user_id=user.id,
             token_hash=hash_token(raw_token),
             expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.magic_link_ttl_minutes),
+            requested_ip=requested_ip,
         )
     )
     return raw_token

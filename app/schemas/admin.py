@@ -32,6 +32,17 @@ class DashboardTotals(BaseModel):
     users: int
 
 
+class ScanStatusCounts(BaseModel):
+    """How many JobPostingUrls are in each ScanStatus right now (not
+    windowed, unlike WindowCounts — a point-in-time snapshot). `failed` will
+    retry automatically; `needs_review` gave up and needs a human rescan."""
+
+    pending: int
+    success: int
+    failed: int
+    needs_review: int
+
+
 class AdminDashboardRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -39,6 +50,7 @@ class AdminDashboardRead(BaseModel):
     users_joined: WindowCounts
     user_activity: WindowCounts
     application_scans: WindowCounts
+    scan_status_counts: ScanStatusCounts
 
 
 class CrawlSourceStatsRead(BaseModel):
@@ -48,3 +60,4 @@ class CrawlSourceStatsRead(BaseModel):
     total_listings: int
     listings_added: WindowCounts
     scans: WindowCounts
+    scan_status_counts: ScanStatusCounts

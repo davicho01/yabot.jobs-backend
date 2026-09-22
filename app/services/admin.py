@@ -6,6 +6,7 @@ from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 
 from app.models.crawl_source import CrawlSource
+from app.models.enums import ScanStatus
 from app.models.job_url import JobPostingUrl
 from app.models.user import User
 
@@ -34,6 +35,20 @@ def _window_counts(
     return counts
 
 
+def _scan_status_counts(db: Session, extra_filter: ColumnElement[bool] | None = None) -> dict[str, int]:
+    """How many JobPostingUrls are in each ScanStatus — zero-filled so a
+    status with no rows (hopefully needs_review) still shows as 0 rather
+    than being missing. Distinguishes "still retrying" (failed) from "gave
+    up" (needs_review), a split app.models.crawl_source.CrawlSource.last_error
+    alone never gave any visibility into."""
+    stmt = select(JobPostingUrl.scan_status, func.count()).group_by(JobPostingUrl.scan_status)
+    if extra_filter is not None:
+        stmt = stmt.where(extra_filter)
+    counts: dict[str, int] = {status.value: 0 for status in ScanStatus}
+    counts.update({status: count for status, count in db.execute(stmt).all()})
+    return counts
+
+
 def get_dashboard_stats(db: Session) -> dict:
     return {
         "totals": {
@@ -44,6 +59,7 @@ def get_dashboard_stats(db: Session) -> dict:
         "users_joined": _window_counts(db, User, User.created_at),
         "user_activity": _window_counts(db, User, User.last_login_at),
         "application_scans": _window_counts(db, JobPostingUrl, JobPostingUrl.last_scanned_at),
+        "scan_status_counts": _scan_status_counts(db),
     }
 
 
@@ -106,4 +122,5 @@ def get_crawl_source_stats(db: Session, source: CrawlSource) -> dict:
         "total_listings": db.scalar(select(func.count()).select_from(JobPostingUrl).where(scoped)) or 0,
         "listings_added": _window_counts(db, JobPostingUrl, JobPostingUrl.created_at, extra_filter=scoped),
         "scans": _window_counts(db, JobPostingUrl, JobPostingUrl.last_scanned_at, extra_filter=scoped),
+        "scan_status_counts": _scan_status_counts(db, extra_filter=scoped),
     }

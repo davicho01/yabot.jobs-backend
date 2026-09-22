@@ -57,6 +57,18 @@ class Settings(BaseSettings):
     scan_lane_deadline_seconds: float = 240.0
     scan_claim_ttl_seconds: float = 600.0
 
+    # Retry backoff for a FAILED scan (see app.services.jobs.wake_retryable_failed_scans
+    # and retry_failed_scans.py, its hourly-cron entrypoint). Each consecutive failure
+    # multiplies the previous wait, capped at scan_retry_max_seconds: base * multiplier
+    # ** (attempts - 1), so the default schedule is 1h, 4h, 16h, 24h(capped) — same-day
+    # recovery from a transient block, never faster than hourly regardless of sweep
+    # cadence. After scan_retry_max_attempts consecutive failures the row gives up
+    # (ScanStatus.NEEDS_REVIEW) rather than retrying forever.
+    scan_retry_base_seconds: float = 3600.0
+    scan_retry_backoff_multiplier: float = 4.0
+    scan_retry_max_seconds: float = 86400.0
+    scan_retry_max_attempts: int = 5
+
     # S3-compatible object storage for uploaded resumes / generated tailored
     # resume files. Point resume_storage_endpoint_url at a local MinIO (see
     # docker-compose.yml) for dev, or leave it unset to use real AWS S3.
@@ -84,6 +96,22 @@ class Settings(BaseSettings):
 
     magic_link_ttl_minutes: int = 15
     session_ttl_days: int = 30
+
+    # Throttles against magic-link abuse (SES send cost, spam to one inbox,
+    # one client cycling through many addresses) — see
+    # app.services.auth.enforce_magic_link_rate_limit. Counted straight from
+    # MagicLinkToken rows already in the table, no separate counter needed.
+    magic_link_rate_limit_window_minutes: float = 60.0
+    magic_link_rate_limit_max_per_email: int = 5
+    magic_link_rate_limit_max_per_ip: int = 20
+
+    # Per-user cap on brand-new job-URL submissions — the ones that create a
+    # JobPostingUrl row and trigger a real LLM scan (see
+    # app.services.jobs._enforce_submission_rate_limit). Re-submitting an
+    # already-known URL doesn't count: it's a cheap dedup lookup, not a new
+    # scan.
+    job_submission_rate_limit_window_minutes: float = 60.0
+    job_submission_rate_limit_max_new_urls: int = 20
 
     # Where the emailed magic link points the user's browser (a frontend
     # route that reads ?token=... and POSTs it to /auth/verify).

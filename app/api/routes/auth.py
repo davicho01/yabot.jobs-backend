@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
 from app.core.config import settings
+from app.core.rate_limit import RateLimitExceeded
 from app.models.user import User
 from app.schemas.auth import AuthResponse, MagicLinkRequest, MagicLinkVerifyRequest, UserUpdate
 from app.schemas.user import UserRead
@@ -25,9 +26,14 @@ def _set_session_cookie(response: Response, raw_token: str) -> None:
 
 
 @router.post("/request-link", status_code=status.HTTP_202_ACCEPTED)
-def request_magic_link(payload: MagicLinkRequest, db: Session = Depends(get_db)) -> dict[str, str]:
+def request_magic_link(payload: MagicLinkRequest, request: Request, db: Session = Depends(get_db)) -> dict[str, str]:
     user = auth_service.get_or_create_user(db, payload.email)
-    raw_token = auth_service.create_magic_link(db, user)
+    ip_address = request.client.host if request.client else None
+    try:
+        auth_service.enforce_magic_link_rate_limit(db, user, ip_address)
+    except RateLimitExceeded as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc
+    raw_token = auth_service.create_magic_link(db, user, requested_ip=ip_address)
     link = f"{settings.frontend_base_url}/auth/callback?token={raw_token}"
     send_magic_link_email(user.email, link)
     return {"detail": "If that email is valid, a login link has been sent."}

@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -36,6 +36,14 @@ class JobPostingUrl(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "scan_claimed_at",
             postgresql_where=text("scan_status = 'pending'"),
         ),
+        # Serves app.services.jobs.wake_retryable_failed_scans: "which FAILED
+        # rows are past their backoff window?" — scoped to FAILED so the sweep
+        # never has to scan every row regardless of status.
+        Index(
+            "ix_job_posting_urls_retry_due",
+            "next_retry_at",
+            postgresql_where=text("scan_status = 'failed'"),
+        ),
     )
 
     # Original URL as submitted, kept for display/debugging.
@@ -57,6 +65,14 @@ class JobPostingUrl(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # "pending" until it finishes). A claim older than the TTL is treated as
     # abandoned by a crashed lane — see app.services.scan_claims.
     scan_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Consecutive failures since the last SUCCESS. Reset to 0 on a success or
+    # on a deliberate human rescan (which earns a fresh retry budget) — see
+    # app.services.jobs._apply_scan_result / rescan_job_url.
+    scan_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    # When a FAILED row next becomes eligible for the retry sweep (see
+    # app.services.jobs.wake_retryable_failed_scans). Null once the row is
+    # SUCCESS, PENDING, or NEEDS_REVIEW (gave up — see ScanStatus).
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Attribution only ("who first brought this URL in") — not ownership.
     # The URL and its scraped postings are shared app-wide.

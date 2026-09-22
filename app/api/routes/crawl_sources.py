@@ -135,6 +135,11 @@ def rescan_crawl_source(source_id: uuid.UUID, db: Session = Depends(get_db)) -> 
         url_row.scan_status = ScanStatus.PENDING
         url_row.scan_error = None
         url_row.scan_claimed_at = None
+        # A deliberate admin rescan earns a fresh retry budget too — same
+        # reasoning as rescan_job_url — so a NEEDS_REVIEW row (out of
+        # automatic retries) gets picked up here rather than staying stuck.
+        url_row.scan_attempts = 0
+        url_row.next_retry_at = None
     db.commit()  # committed, not just flushed — the worker reads url_row on a separate connection
 
     # One wake-up per allowed lane, not one message per URL: the source's

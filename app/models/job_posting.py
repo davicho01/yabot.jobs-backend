@@ -87,7 +87,28 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
         String(20), default=ScanStatus.PENDING, nullable=False
     )
 
+    # Cross-source dedup (see app.services.job_dedup and _upsert_posting, which
+    # (re)compute all three on every successful scan/rescan). company_key/title_key
+    # are normalized-for-matching forms of company_name/title, not for display.
+    # primary_posting_id is null for a canonical row; set on a duplicate to point at
+    # the (older) canonical one. Presentation-only — GET /jobs hides non-canonical
+    # rows, but a duplicate keeps its own id and stays independently reachable via
+    # GET /jobs/{url_id} for applying/tailoring/scoring. SET NULL (not CASCADE): if
+    # the canonical row is ever deleted, a duplicate just becomes its own canonical
+    # again instead of being orphaned.
+    company_key: Mapped[str | None] = mapped_column(String(255), index=True)
+    title_key: Mapped[str | None] = mapped_column(String(255))
+    primary_posting_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("job_postings.id", ondelete="SET NULL"), index=True
+    )
+
     url: Mapped["JobPostingUrl"] = relationship(back_populates="postings")
+    primary_posting: Mapped["JobPosting | None"] = relationship(
+        remote_side="JobPosting.id", foreign_keys=[primary_posting_id], back_populates="duplicates"
+    )
+    duplicates: Mapped[list["JobPosting"]] = relationship(
+        back_populates="primary_posting", foreign_keys=[primary_posting_id]
+    )
     # passive_deletes: job_posting_id is NOT NULL, so without this the ORM's
     # default "null out the child FK" behavior on parent delete violates
     # that constraint — verified live via DELETE /admin/listings/{id} on a
@@ -106,6 +127,14 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
         Pydantic's from_attributes reads plain properties the same as
         columns."""
         return self.url.url
+
+    @property
+    def also_posted_count(self) -> int:
+        """How many other JobPostingUrls this same job was found at — see
+        company_key/title_key/primary_posting_id above. Always 0 on a
+        non-canonical row (it doesn't track its own siblings, only its
+        canonical points at it)."""
+        return len(self.duplicates)
 
     def __repr__(self) -> str:
         return f"<JobPosting title={self.title!r} company={self.company_name!r}>"
