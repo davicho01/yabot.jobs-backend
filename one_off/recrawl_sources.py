@@ -8,10 +8,10 @@ postings that were previously silently missed. Safe to run more than once:
 get_or_create_job_posting no-ops on already-known URLs.
 
 Usage:
-    python recrawl_sources.py                       # default: ashby, greenhouse, gem
-    python recrawl_sources.py --ats-type workday
-    python recrawl_sources.py --ats-type ashby --ats-type icims
-    python recrawl_sources.py --all-active           # every active source, any platform
+    python -m one_off.recrawl_sources                       # default: ashby, greenhouse, gem
+    python -m one_off.recrawl_sources --ats-type workday
+    python -m one_off.recrawl_sources --ats-type ashby --ats-type icims
+    python -m one_off.recrawl_sources --all-active           # every active source, any platform
 """
 
 import argparse

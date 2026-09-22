@@ -12,8 +12,8 @@ directly user-submitted URL with no corresponding crawl, or a platform
 still sitting in the "pending" queue).
 
 Usage:
-    python backfill_crawl_source_ids.py                # all matching rows
-    python backfill_crawl_source_ids.py --limit 200 --dry-run
+    python -m one_off.backfill_crawl_source_ids                # all matching rows
+    python -m one_off.backfill_crawl_source_ids --limit 200 --dry-run
 """
 
 import argparse

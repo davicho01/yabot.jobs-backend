@@ -9,9 +9,9 @@ without needing to be kept in sync by hand. Pass --domain to narrow to
 specific domain(s) instead (e.g. while testing a single-site fix).
 
 Usage:
-    python bulk_rescan.py                                  # all fixable rows
-    python bulk_rescan.py --domain job-boards.greenhouse.io # one domain
-    python bulk_rescan.py --limit 20 --dry-run              # preview only
+    python -m one_off.bulk_rescan                                  # all fixable rows
+    python -m one_off.bulk_rescan --domain job-boards.greenhouse.io # one domain
+    python -m one_off.bulk_rescan --limit 20 --dry-run              # preview only
 """
 
 import argparse

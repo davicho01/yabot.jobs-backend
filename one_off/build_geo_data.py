@@ -27,8 +27,8 @@ Outputs:
                          "IN - Hyderabad, India" is not Indiana)
 
 Usage:
-    python build_geo_data.py                    # download (cached) and rebuild
-    python build_geo_data.py --cache-dir /tmp/geo
+    python -m one_off.build_geo_data                    # download (cached) and rebuild
+    python -m one_off.build_geo_data --cache-dir /tmp/geo
 """
 
 import argparse
@@ -39,7 +39,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-OUT_DIR = Path(__file__).parent / "app" / "data" / "geo"
+OUT_DIR = Path(__file__).parent.parent / "app" / "data" / "geo"
 
 CITIES1000_URL = "https://download.geonames.org/export/dump/cities1000.zip"
 CITIES15000_URL = "https://download.geonames.org/export/dump/cities15000.zip"
@@ -222,7 +222,7 @@ def write(path: Path, rows: list[dict], fieldnames: list[str], delimiter: str) -
         writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter=delimiter, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
-    print(f"wrote {path.relative_to(Path(__file__).parent)}  ({len(rows)} rows, {path.stat().st_size / 1024:.0f} KB)")
+    print(f"wrote {path.relative_to(Path(__file__).parent.parent)}  ({len(rows)} rows, {path.stat().st_size / 1024:.0f} KB)")
 
 
 def main() -> None:

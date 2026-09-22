@@ -36,7 +36,7 @@ def main() -> None:
         retried = wake_retryable_failed_scans(db)
         logger.info("Reset %d failed url(s) back to pending for retry.", retried)
 
-        # Same two-step split requeue_pending_scans.py uses: user-submitted
+        # Same two-step split one_off/requeue_pending_scans.py uses: user-submitted
         # URLs (no crawl source) were just re-queued directly above;
         # crawl-sourced ones need their source's throttled lanes woken
         # instead.

@@ -189,7 +189,7 @@ def get_or_create_job_posting(
         # would find no row, log "unknown url_id", and ack the message
         # anyway, stranding url_row at PENDING forever with nothing left to
         # redeliver it (verified happening locally against the Pub/Sub
-        # emulator's low latency; see requeue_pending_scans.py for the
+        # emulator's low latency; see one_off/requeue_pending_scans.py for the
         # blunter recovery this replaces for the common case).
         db.commit()
         if enqueue:
@@ -494,7 +494,7 @@ def wake_retryable_failed_scans(db: Session) -> int:
     for url_row in rows:
         # Crawl-sourced rows are worked through their source's throttled
         # lanes, not queued individually — the caller follows this with
-        # wake_sources_with_pending_scans (same split requeue_pending_scans.py
+        # wake_sources_with_pending_scans (same split one_off/requeue_pending_scans.py
         # already uses) to pick those up.
         if url_row.crawl_source_id is None:
             try:

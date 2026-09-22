@@ -12,8 +12,8 @@ relies on live. Purely a DB computation (no network fetches), so unlike
 bulk_rescan.py this doesn't need a --delay between rows.
 
 Usage:
-    python backfill_dedup_keys.py                # all successfully-scanned postings
-    python backfill_dedup_keys.py --limit 20 --dry-run
+    python -m one_off.backfill_dedup_keys                # all successfully-scanned postings
+    python -m one_off.backfill_dedup_keys --limit 20 --dry-run
 """
 
 import argparse

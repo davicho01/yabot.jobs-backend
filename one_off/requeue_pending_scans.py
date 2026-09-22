@@ -12,7 +12,7 @@ idempotent (it checks for an existing JobPosting before doing any work), so
 re-enqueueing a URL that's already mid-processing or already done is a
 no-op, not a duplicate.
 
-Usage: python requeue_pending_scans.py
+Usage: python -m one_off.requeue_pending_scans
 """
 
 import logging

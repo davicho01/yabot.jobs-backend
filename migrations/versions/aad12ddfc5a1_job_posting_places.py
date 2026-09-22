@@ -22,7 +22,7 @@ def upgrade() -> None:
     """Upgrade schema."""
     # server_default only so existing rows satisfy NOT NULL while the column is
     # added; the model supplies the value on insert, so it's dropped again.
-    # Existing rows are populated afterwards by backfill_metros.py (resolving a
+    # Existing rows are populated afterwards by one_off/backfill_metros.py (resolving a
     # place to coordinates needs the bundled geography data, which a migration
     # shouldn't import from app code that keeps evolving). No index: a radius
     # search narrows with the `metros` GIN index first and computes distances on

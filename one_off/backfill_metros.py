@@ -23,10 +23,10 @@ Use --dry-run first: it writes nothing and logs how many rows would change,
 including a work-type transition matrix (e.g. "onsite -> remote: 1,234") to review.
 
 Usage:
-    python backfill_metros.py --dry-run                # report only
-    python backfill_metros.py                          # areas + work type, every posting
-    python backfill_metros.py --skip-workplace         # areas only
-    python backfill_metros.py --limit 2000 --dry-run
+    python -m one_off.backfill_metros --dry-run                # report only
+    python -m one_off.backfill_metros                          # areas + work type, every posting
+    python -m one_off.backfill_metros --skip-workplace         # areas only
+    python -m one_off.backfill_metros --limit 2000 --dry-run
 
 On prod, run it from the deployed image as a one-off Cloud Run job execution
 (the `backfill-metros` job: same image/secrets/env as `migrate`, command

@@ -5,7 +5,7 @@ The same place is spelled many ways ("Salt Lake City, UT, US" / "…, Utah" /
 "Home Services - Salt Lake City, …"), so people can't just search "Salt Lake
 City". Each entry is reduced to a US city + state, mapped to its county
 (GeoNames) and from there to the official CBSA that county belongs to (Census
-delineation) — see build_geo_data.py for where the bundled files under
+delineation) — see one_off/build_geo_data.py for where the bundled files under
 app/data/geo/ come from. Deterministic, offline, no network or LLM.
 
 Three questions, in order, for every entry:
