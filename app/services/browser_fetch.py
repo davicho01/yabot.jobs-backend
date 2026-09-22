@@ -26,7 +26,13 @@ from app.core.config import settings
 
 logger = logging.getLogger("app.browser_fetch")
 
-_TIMEOUT_SECONDS = 20.0
+# Must be at least as long as yabot-jobs-browser's own worst case (two
+# sequential 35s Playwright waits plus launch overhead, verified live
+# against careers.ibm.com's slow-to-clear AWS WAF challenge - see that
+# service's main.py) and its own 90s Cloud Run request timeout (deploy.yml)
+# - otherwise this client gives up and returns None before the render had
+# any chance to actually finish.
+_TIMEOUT_SECONDS = 90.0
 
 
 @dataclass
