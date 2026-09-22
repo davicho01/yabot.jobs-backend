@@ -301,6 +301,35 @@ care how it's invoked. Running multiple `crawl_worker.py` processes crawls
 multiple companies in parallel (same competing-consumer Pub/Sub pattern as
 `worker.py`), so this scales to many boards by just running more workers.
 
+## Saved searches
+
+`GET/POST/DELETE /saved-searches` let a signed-in user save a board search
+(any combination of `GET /jobs`'s filters) — capped at
+`saved_search_max_per_user` per user. Saving one doesn't do anything by
+itself; a saved search only ever gets checked when something runs
+`saved_search_alerts.py`.
+
+**Trigger an alert sweep** (emails a digest — see `app/services/email.py` —
+for every saved search with new matches since it was last checked, then
+exits):
+```bash
+python saved_search_alerts.py
+```
+
+Same "doesn't care how it's invoked" design as `crawl_dispatcher.py` above —
+cron, GCP Cloud Scheduler + a Cloud Run Job, whatever. Unlike the discovery
+crawl there's no natural "once a day" cadence (new postings show up
+continuously via scanning, not in a daily batch), so pick whatever email
+frequency feels right, e.g. hourly:
+
+```cron
+0 * * * * cd /path/to/yabot.jobs-backend && /path/to/.venv/bin/python saved_search_alerts.py
+```
+
+A search's `last_alerted_at` only advances when a digest is actually sent
+for it, so a sweep that finds nothing new is a no-op — safe to run as often
+as you like.
+
 ## Resumes
 
 Upload a resume, get it reviewed, score it against a job, and generate a
