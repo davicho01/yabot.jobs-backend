@@ -164,6 +164,39 @@ class TailoredResume(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         return f"<TailoredResume resume_id={self.resume_id} job_posting_id={self.job_posting_id}>"
 
 
+class InterviewPrep(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """LLM-generated interview prep for a resume against a specific
+    JobPosting: likely questions (each with a note on how this candidate
+    specifically should answer it), talking points worth proactively
+    raising, and questions worth asking the interviewer. Inline content,
+    like ResumeScore — no rendered file, nothing to download. A pair may be
+    generated more than once (history kept, same as ResumeScore); callers
+    fetch the latest.
+    """
+
+    __tablename__ = "interview_preps"
+
+    resume_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("resumes.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    job_posting_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("job_postings.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    # app.schemas.resume.InterviewPrepContent's shape — {"likely_questions":
+    # [{"question": str, "category": str, "approach": str}, ...],
+    # "talking_points": [str, ...], "questions_to_ask": [str, ...]}.
+    content: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    raw_response: Mapped[dict | None] = mapped_column(JSONB)
+
+    job_posting: Mapped["JobPosting"] = relationship()
+
+    def __repr__(self) -> str:
+        return f"<InterviewPrep resume_id={self.resume_id} job_posting_id={self.job_posting_id}>"
+
+
 class CoverLetter(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A cover letter generated for one specific JobPosting, generated from
     a source Resume — structured content plus a rendered, downloadable

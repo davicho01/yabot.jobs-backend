@@ -8,8 +8,9 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.models as m
-from app.api.routes.resumes import _resolve_resume, get_resume_score_history
+from app.api.routes.resumes import _resolve_resume, get_main_interview_prep, get_resume_score_history
 from app.db.base import Base
+from app.models.resume import InterviewPrep
 
 _counter = itertools.count()
 
@@ -18,7 +19,8 @@ _counter = itertools.count()
 def db() -> Session:
     # Local db fixture (not tests/api/conftest.py's, which only has
     # SavedSearch) — _resolve_resume/get_resume_score_history need Resume,
-    # ResumeScore and (for the score history's job title/company) JobPosting.
+    # ResumeScore and (for the score history's job title/company) JobPosting;
+    # get_main_interview_prep also needs InterviewPrep.
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(
         engine,
@@ -27,6 +29,7 @@ def db() -> Session:
             m.ResumeScore.__table__,
             m.JobPostingUrl.__table__,
             m.JobPosting.__table__,
+            InterviewPrep.__table__,
         ],
     )
     with engine.begin() as conn:
@@ -203,3 +206,66 @@ def test_get_resume_score_history_does_not_double_count_a_repeat_within_one_scor
     result = get_resume_score_history(resume.id, current_user=m.User(id=user_id), db=db)
 
     assert result.recurring_missing_keywords == []
+
+
+# --------------------------------------------------------- interview prep
+
+
+def _make_interview_prep(db, resume: m.Resume, posting: m.JobPosting) -> InterviewPrep:
+    prep = InterviewPrep(
+        resume_id=resume.id,
+        user_id=resume.user_id,
+        job_posting_id=posting.id,
+        content={
+            "likely_questions": [{"question": "Q", "category": "technical", "approach": "A"}],
+            "talking_points": ["Led the migration"],
+            "questions_to_ask": ["What does success look like?"],
+        },
+    )
+    db.add(prep)
+    db.commit()
+    return prep
+
+
+def test_get_main_interview_prep_404s_when_none_generated_yet(db):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    posting = _make_job_posting(db)
+
+    with pytest.raises(HTTPException) as exc_info:
+        get_main_interview_prep(posting.id, current_user=m.User(id=user_id), db=db)
+    assert exc_info.value.status_code == 404
+
+
+def test_get_main_interview_prep_returns_the_latest_one(db):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    posting = _make_job_posting(db)
+    older = _make_interview_prep(db, resume, posting)
+    older.created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    newer = _make_interview_prep(db, resume, posting)
+    newer.created_at = datetime(2026, 2, 1, tzinfo=timezone.utc)
+    db.commit()
+
+    result = get_main_interview_prep(posting.id, current_user=m.User(id=user_id), db=db)
+
+    # Called directly as a plain function (not through the real FastAPI
+    # app), so this is the raw ORM row, not response_model-validated —
+    # .content is still a plain dict, not InterviewPrepContent.
+    assert result.id == newer.id
+    assert result.content["talking_points"] == ["Led the migration"]
+
+
+def test_get_main_interview_prep_uses_the_given_resume_id(db):
+    user_id = uuid.uuid4()
+    main_resume = _make_resume(db, user_id, is_main=True)
+    other_resume = _make_resume(db, user_id, is_main=False)
+    posting = _make_job_posting(db)
+    for_other = _make_interview_prep(db, other_resume, posting)
+
+    # No prep exists for the main resume — omitting resume_id 404s...
+    with pytest.raises(HTTPException):
+        get_main_interview_prep(posting.id, current_user=m.User(id=user_id), db=db)
+    # ...but passing the other resume's id finds its prep.
+    result = get_main_interview_prep(posting.id, resume_id=other_resume.id, current_user=m.User(id=user_id), db=db)
+    assert result.id == for_other.id

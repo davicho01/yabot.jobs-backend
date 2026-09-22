@@ -8,12 +8,21 @@ from sqlalchemy.orm import Session, selectinload
 from app.api.deps import get_current_user, get_db
 from app.models.job_application import UserJobApplication
 from app.models.job_posting import JobPosting
-from app.models.resume import CoverLetter, Resume, ResumeReview, ResumeScore, TailoredResume, TailoredResumeScore
+from app.models.resume import (
+    CoverLetter,
+    InterviewPrep,
+    Resume,
+    ResumeReview,
+    ResumeScore,
+    TailoredResume,
+    TailoredResumeScore,
+)
 from app.models.user import User
 from app.schemas.resume import (
     ContactInfo,
     CoverLetterRead,
     CoverLetterUpload,
+    InterviewPrepRead,
     RecurringMissingKeywordRead,
     ResumeDetailRead,
     ResumeRead,
@@ -32,6 +41,7 @@ from app.schemas.resume import (
 from app.services.llm_client import LlmError
 from app.services.resume_llm import (
     generate_cover_letter_with_llm,
+    generate_interview_prep_with_llm,
     generate_tailored_resume_with_llm,
     get_users_default_llm_key,
     review_resume_with_llm,
@@ -786,3 +796,63 @@ def download_cover_letter(
         media_type=_TAILORED_CONTENT_TYPE,
         headers={"Content-Disposition": f'attachment; filename="{cover_letter.filename}"'},
     )
+
+
+@router.post("/main/interview-prep", response_model=InterviewPrepRead, status_code=status.HTTP_201_CREATED)
+def generate_main_interview_prep(
+    job_posting_id: uuid.UUID,
+    resume_id: uuid.UUID | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> InterviewPrep:
+    resume = _resolve_resume(db, current_user.id, resume_id)
+    posting = _get_job_posting(db, job_posting_id)
+    key = get_users_default_llm_key(db, current_user.id)
+
+    try:
+        generated = generate_interview_prep_with_llm(
+            resume.parsed_text,
+            posting.description or "",
+            provider=key.provider,
+            model=key.model,
+            api_key=key.get_plaintext_key(),
+            base_url=key.base_url,
+        )
+    except LlmError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM request failed: {exc}") from exc
+
+    prep = InterviewPrep(
+        resume_id=resume.id,
+        user_id=current_user.id,
+        job_posting_id=posting.id,
+        content={
+            "likely_questions": generated.likely_questions,
+            "talking_points": generated.talking_points,
+            "questions_to_ask": generated.questions_to_ask,
+        },
+        raw_response=generated.raw_response,
+    )
+    db.add(prep)
+    db.flush()
+    return prep
+
+
+@router.get("/main/interview-prep", response_model=InterviewPrepRead)
+def get_main_interview_prep(
+    job_posting_id: uuid.UUID,
+    resume_id: uuid.UUID | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> InterviewPrep:
+    resume = _resolve_resume(db, current_user.id, resume_id)
+    prep = db.scalar(
+        select(InterviewPrep)
+        .where(InterviewPrep.resume_id == resume.id, InterviewPrep.job_posting_id == job_posting_id)
+        .order_by(InterviewPrep.created_at.desc())
+    )
+    if prep is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No interview prep yet for this job — POST /resumes/main/interview-prep first.",
+        )
+    return prep

@@ -200,3 +200,43 @@ Job description:
 {job_description}
 \"\"\"
 """
+
+INTERVIEW_PREP_PROMPT = """You are an expert interview coach preparing a candidate for a specific job interview.
+
+Read the resume and job description below and respond with ONLY a single \
+JSON object (no markdown fences, no commentary) with exactly these keys:
+
+{{
+  "likely_questions": [
+    {{"question": string, "category": one of "behavioral", "technical", "role_specific", \
+"approach": string}}
+  ],
+  "talking_points": [string, ...],
+  "questions_to_ask": [string, ...]
+}}
+
+"likely_questions" is 6-10 questions this exact candidate should realistically \
+expect for this exact role, drawn from what the job description asks for and \
+whatever the resume shows as a strength or a gap — a mix of "behavioral", \
+"technical", and "role_specific" (about this company/team/product specifically). \
+"approach" is a short (1-2 sentence) note on how this specific candidate should \
+answer it, referencing real experience from the resume where relevant — never \
+invent experience they don't have; if the resume doesn't support a strong \
+answer, say so plainly instead of fabricating one.
+"talking_points" is 4-8 concrete achievements or experiences from the resume \
+worth proactively bringing up because they map directly to what this job wants.
+"questions_to_ask" is 4-6 good questions this candidate could ask the \
+interviewer, grounded in specifics from the job description (the team, the \
+role's scope, the stated challenges) rather than generic ones that would fit \
+any interview.
+
+Resume text:
+\"\"\"
+{resume_text}
+\"\"\"
+
+Job description:
+\"\"\"
+{job_description}
+\"\"\"
+"""
