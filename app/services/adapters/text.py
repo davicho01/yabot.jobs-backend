@@ -17,8 +17,14 @@ MAX_LOCATION_LENGTH = 255
 # thing that isn't otherwise structured anywhere (Gem's job page never
 # names the company at all; only its *board* page's og:title does, as
 # "{Company} Careers").
+# The content attribute's quote is captured (group 1) and back-referenced
+# to close it (\1), not just re-matched against ["\'] — otherwise an
+# apostrophe inside a double-quoted value (e.g. "we're hiring") closes the
+# match early, truncating everything after it. Verified live on a
+# SmartRecruiters posting whose meta description ("...Hey, g'day...") was
+# getting cut off right before the apostrophe.
 OG_TITLE_RE = re.compile(
-    r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\'](.*?)["\']', re.IGNORECASE | re.DOTALL
+    r'<meta[^>]+property=["\']og:title["\'][^>]+content=(["\'])(.*?)\1', re.IGNORECASE | re.DOTALL
 )
 
 # Requires the char right after "<"/"</" to be a real tag-name start (a

@@ -159,7 +159,7 @@ def _fetch_company_name(url: str) -> str | None:
     except httpx.HTTPError:
         return None
     match = OG_TITLE_RE.search(response.text)
-    title = clean_text(match.group(1)) if match else None
+    title = clean_text(match.group(2)) if match else None
     if title is None:
         return None
     return _BOARD_TITLE_TRAILER_RE.sub("", title).strip() or None

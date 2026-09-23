@@ -360,8 +360,14 @@ def fetch_html(url: str) -> FetchedPage:
 # borrow data across two different *platforms*.
 
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+# The content attribute's quote is captured (group 1) and back-referenced to
+# close it (\1), not just re-matched against ["\'] — otherwise an apostrophe
+# inside a double-quoted value (e.g. "we're hiring") closes the match early,
+# truncating everything after it. Verified live on a SmartRecruiters posting
+# whose meta description ("...Hey, g'day...") was getting cut off right
+# before the apostrophe.
 _META_DESC_RE = re.compile(
-    r'<meta[^>]+name=["\']description["\'][^>]+content=["\'](.*?)["\']', re.IGNORECASE | re.DOTALL
+    r'<meta[^>]+name=["\']description["\'][^>]+content=(["\'])(.*?)\1', re.IGNORECASE | re.DOTALL
 )
 _JSON_LD_RE = re.compile(
     r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', re.IGNORECASE | re.DOTALL
@@ -372,7 +378,7 @@ _JSON_LD_RE = re.compile(
 # a terse "Location | WorkplaceType" (e.g. "Utah | Hybrid") or just a
 # workplace type on its own.
 _OG_DESC_RE = re.compile(
-    r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\'](.*?)["\']', re.IGNORECASE | re.DOTALL
+    r'<meta[^>]+property=["\']og:description["\'][^>]+content=(["\'])(.*?)\1', re.IGNORECASE | re.DOTALL
 )
 # og:site_name is usually the site/company's own display name (e.g. a small
 # custom-built or BambooHR-hosted careers page with no other structured
@@ -380,7 +386,7 @@ _OG_DESC_RE = re.compile(
 # more specific extractor (JSON-LD, Greenhouse's embedded JSON, the fixed
 # single-company domains) has already come up empty.
 _OG_SITE_NAME_RE = re.compile(
-    r'<meta[^>]+property=["\']og:site_name["\'][^>]+content=["\'](.*?)["\']', re.IGNORECASE | re.DOTALL
+    r'<meta[^>]+property=["\']og:site_name["\'][^>]+content=(["\'])(.*?)\1', re.IGNORECASE | re.DOTALL
 )
 
 # Workplace-type words as they commonly appear in an og:description tag
@@ -402,17 +408,17 @@ def fallback_title(html: str) -> str | None:
 
 def fallback_description(html: str) -> str | None:
     match = _META_DESC_RE.search(html)
-    return html_to_formatted_text(match.group(1)) if match else None
+    return html_to_formatted_text(match.group(2)) if match else None
 
 
 def og_title(html: str) -> str | None:
     match = OG_TITLE_RE.search(html)
-    return clean_text(match.group(1)) if match else None
+    return clean_text(match.group(2)) if match else None
 
 
 def og_site_name(html: str) -> str | None:
     match = _OG_SITE_NAME_RE.search(html)
-    return clean_text(match.group(1)) if match else None
+    return clean_text(match.group(2)) if match else None
 
 
 def og_description_raw(html: str) -> str | None:
@@ -421,12 +427,12 @@ def og_description_raw(html: str) -> str | None:
     multi-line) Markdown og_description below.
     """
     match = _OG_DESC_RE.search(html)
-    return clean_text(match.group(1)) if match else None
+    return clean_text(match.group(2)) if match else None
 
 
 def og_description(html: str) -> str | None:
     match = _OG_DESC_RE.search(html)
-    return html_to_formatted_text(match.group(1)) if match else None
+    return html_to_formatted_text(match.group(2)) if match else None
 
 
 def _parse_location_workplace_segment(segment: str) -> tuple[str | None, str]:
