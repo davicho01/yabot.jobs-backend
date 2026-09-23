@@ -328,15 +328,20 @@ def find_existing_application(db: Session, user_id: uuid.UUID, job_posting_id: u
 
 
 def ensure_user_applicant(db: Session, user_id: uuid.UUID, job_posting_id: uuid.UUID) -> None:
-    """Mark `user_id` as an applicant on `job_posting_id`, if not already linked
-    (see find_existing_application — this also catches a cross-posted
-    duplicate of a job they're already linked to under a different URL).
+    """Track `job_posting_id` for `user_id`, if not already linked (see
+    find_existing_application — this also catches a cross-posted duplicate
+    of a job they're already linked to under a different URL).
 
     Called wherever a user's own submission resolves to a JobPosting — either
     immediately (submit_job_url, when the URL was already scanned) or later
     (process_scan_job, once a brand-new submission's scan completes) — so
     submitting a job always adds it to the submitter's applications instead
     of requiring a separate POST /applications call.
+
+    Starts at "saved", same as create_application — submitting a URL means
+    the candidate is tracking the job, not that they've already applied to
+    it; that's still a deliberate, separate step (see update_application's
+    applied_at handling).
     """
     existing = find_existing_application(db, user_id, job_posting_id)
     if existing is None:
@@ -344,8 +349,7 @@ def ensure_user_applicant(db: Session, user_id: uuid.UUID, job_posting_id: uuid.
             UserJobApplication(
                 user_id=user_id,
                 job_posting_id=job_posting_id,
-                status=ApplicationStatus.APPLIED,
-                applied_at=datetime.now(timezone.utc),
+                status=ApplicationStatus.SAVED,
             )
         )
         # The session (SessionLocal, app/db/session.py) is autoflush=False, so

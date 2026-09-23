@@ -210,6 +210,20 @@ def test_find_existing_application_is_none_for_an_unknown_posting(scan_db):
     assert find_existing_application(scan_db, uuid.uuid4(), uuid.uuid4()) is None
 
 
+def test_ensure_user_applicant_starts_at_saved_not_applied(scan_db):
+    # Submitting a job URL means "track this," not "I've already applied" —
+    # that's still a deliberate, separate step via update_application.
+    user_id = uuid.uuid4()
+    posting = _make_posting(scan_db)
+
+    ensure_user_applicant(scan_db, user_id, posting.id)
+    scan_db.commit()
+
+    application = scan_db.scalar(select(m.UserJobApplication).where(m.UserJobApplication.user_id == user_id))
+    assert application.status == "saved"
+    assert application.applied_at is None
+
+
 def test_ensure_user_applicant_does_not_duplicate_across_a_cross_posted_duplicate(scan_db):
     user_id = uuid.uuid4()
     canonical = _make_posting(scan_db)
