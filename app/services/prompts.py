@@ -196,15 +196,16 @@ follows below — use it to directly address the concerns it raises:
   it clearly and reword toward the job's own terms. Never fabricate \
   experience just to close a gap the assessment found — a gap that's \
   genuinely not there stays out.
-- If the assessment includes an overqualification risk note, look at how \
-  many years of experience the job description asks for and aim the \
-  resume's prominent, detailed experience at roughly that many years plus \
-  a few more — not the candidate's full career length. Keep the most \
-  recent/relevant roles that add up to about that range as full, detailed \
-  entries; condense older, less-relevant roles beyond that into brief \
-  one-line entries (title, company, dates, no bullets) rather than \
-  deleting them. Never omit a role entirely or alter dates/titles — this \
-  is about proportional emphasis, not concealing experience.
+- If the assessment includes an overqualification risk note, this must \
+  never come at the cost of demonstrating the job's required skills and \
+  responsibilities — preserving that evidence always wins. Only condense \
+  an older role into a brief one-line entry (title, company, dates, no \
+  bullets) if it is NOT where any required skill or responsibility is \
+  demonstrated. If an older role is the only place a required skill or \
+  responsibility shows up, keep its detail intact rather than trimming it \
+  for the sake of years. Never omit a role entirely or alter dates/titles \
+  — this is about de-emphasizing genuinely irrelevant tenure, not \
+  concealing or removing job-relevant experience.
 If no fitness assessment is available (see below), tailor based on the \
 resume and job description alone, as usual.
 
