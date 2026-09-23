@@ -178,6 +178,12 @@ class AtsType(StrEnum):
     # Elasticsearch proxy with no per-tenant URL scoping (filtered by
     # brandId instead — see adapters/talentreef.py).
     TALENTREEF = "talentreef"
+    # UltiPro/UKG Pro's Ignite recruiting portal — multi-tenant at
+    # recruiting[2].ultipro.com/{tenant}/JobBoard/{boardId}/. Every job-
+    # detail field renders inside a Web Component shadow root, so scanning
+    # requires the browser-render service's pierce_shadow option (see
+    # adapters/ultipro.py and app.services.browser_fetch).
+    ULTIPRO = "ultipro"
     # Sportsman's Warehouse (careers.sportsmans.com) — a custom career
     # module on their own SAP Hybris storefront, not any shared ATS
     # platform (see adapters/sportsmans_warehouse.py).

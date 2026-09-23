@@ -51,6 +51,7 @@ from app.services.adapters import (
     talentbrew,
     talentreef,
     toss,
+    ultipro,
     walmart,
     workable,
     workday,
@@ -114,4 +115,5 @@ ADAPTERS: list[AtsAdapter] = [
     rippling.ADAPTER,
     talentreef.ADAPTER,
     sportsmans_warehouse.ADAPTER,
+    ultipro.ADAPTER,
 ]

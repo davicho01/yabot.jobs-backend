@@ -60,7 +60,9 @@ def _identity_token_headers(audience: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def fetch_rendered_page(url: str, *, wait_for_selector: str | None = None) -> RenderedPage | None:
+def fetch_rendered_page(
+    url: str, *, wait_for_selector: str | None = None, pierce_shadow: bool = False
+) -> RenderedPage | None:
     """Render `url` in headless Chromium (via browser_fetch_service) and
     return the fully hydrated HTML plus the final post-redirect URL, or None
     on any failure whatsoever (service not configured, unreachable, browser
@@ -68,6 +70,15 @@ def fetch_rendered_page(url: str, *, wait_for_selector: str | None = None) -> Re
     every caller treats this exactly like the other best-effort fallbacks in
     this codebase (e.g. detect_embedded_ats_source): a None just means "this
     enhancement isn't available right now," not an error to surface.
+
+    pierce_shadow: pass True for tenants whose real content only exists
+    inside an open shadow root (verified live: UltiPro/UKG Pro's "Ignite"
+    design system) — plain page.content() serializes the light DOM only, so
+    those come back as an empty custom-element shell no matter how long you
+    wait. The service walks the live DOM tree instead when this is set,
+    inlining shadow content so regex-based adapters see it like any other
+    markup. Leave False (the default) for everything else — it's slower and
+    unnecessary when there's no shadow DOM to pierce.
     """
     if not settings.browser_fetch_service_url:
         logger.info("Browser fetch service not configured; skipping rendered fetch of %s", url)
@@ -76,7 +87,7 @@ def fetch_rendered_page(url: str, *, wait_for_selector: str | None = None) -> Re
     try:
         response = httpx.post(
             f"{settings.browser_fetch_service_url}/fetch",
-            json={"url": url, "wait_for_selector": wait_for_selector},
+            json={"url": url, "wait_for_selector": wait_for_selector, "pierce_shadow": pierce_shadow},
             headers=_identity_token_headers(settings.browser_fetch_service_url),
             timeout=_TIMEOUT_SECONDS,
         )
@@ -90,7 +101,9 @@ def fetch_rendered_page(url: str, *, wait_for_selector: str | None = None) -> Re
         return None
 
 
-def fetch_rendered_html(url: str, *, wait_for_selector: str | None = None) -> str | None:
+def fetch_rendered_html(
+    url: str, *, wait_for_selector: str | None = None, pierce_shadow: bool = False
+) -> str | None:
     """Same as fetch_rendered_page, but for callers that only need the HTML."""
-    rendered = fetch_rendered_page(url, wait_for_selector=wait_for_selector)
+    rendered = fetch_rendered_page(url, wait_for_selector=wait_for_selector, pierce_shadow=pierce_shadow)
     return rendered.html if rendered else None
