@@ -169,6 +169,19 @@ class AtsType(StrEnum):
     # Oracle Taleo — a multi-tenant ATS at {tenant}.taleo.net, one tenant
     # hosting several independent "career sections" (see adapters/taleo.py).
     TALEO = "taleo"
+    # Rippling ATS — a multi-tenant ATS at ats.rippling.com/{slug}, jobs
+    # server-rendered into a Next.js __NEXT_DATA__ blob, no public REST API
+    # found (see adapters/rippling.py).
+    RIPPLING = "rippling"
+    # TalentReef — a career-site CMS white-labeled onto each customer's own
+    # domain (e.g. jackintheboxjobs.com), backed by a shared public
+    # Elasticsearch proxy with no per-tenant URL scoping (filtered by
+    # brandId instead — see adapters/talentreef.py).
+    TALENTREEF = "talentreef"
+    # Sportsman's Warehouse (careers.sportsmans.com) — a custom career
+    # module on their own SAP Hybris storefront, not any shared ATS
+    # platform (see adapters/sportsmans_warehouse.py).
+    SPORTSMANS_WAREHOUSE = "sportsmans_warehouse"
 
 
 class CrawlSourceStatus(StrEnum):
