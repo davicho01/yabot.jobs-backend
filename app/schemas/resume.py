@@ -87,6 +87,21 @@ class ResumeReviewRead(BaseModel):
     created_at: datetime
 
 
+class ScoreCategoryBreakdown(BaseModel):
+    # One rubric category's contribution to overall_score — see
+    # app.services.resume_llm._CATEGORY_MAX for the fixed category list and
+    # point ranges. job_requirements/strengths/weaknesses here are scoped to
+    # this category, distinct from the flat/global matched_keywords/
+    # missing_keywords on the containing ResumeScore/TailoredResumeScore.
+    category: str
+    score: int
+    max_score: int
+    why: str
+    job_requirements: list[str] = []
+    strengths: list[str] = []
+    weaknesses: list[str] = []
+
+
 class ResumeScoreUpload(BaseModel):
     # Same shape as ResumeScoreRead's LLM-derived fields — for callers (e.g.
     # an MCP client's own LLM) who've already evaluated fit themselves and
@@ -95,6 +110,8 @@ class ResumeScoreUpload(BaseModel):
     matched_keywords: list[str]
     missing_keywords: list[str]
     summary: str
+    category_scores: list[ScoreCategoryBreakdown] = []
+    overqualification_note: str = ""
 
 
 class ResumeScoreRead(BaseModel):
@@ -107,6 +124,8 @@ class ResumeScoreRead(BaseModel):
     matched_keywords: list[str]
     missing_keywords: list[str]
     summary: str
+    category_scores: list[ScoreCategoryBreakdown] = []
+    overqualification_note: str = ""
     created_at: datetime
 
 
@@ -158,6 +177,8 @@ class TailoredResumeScoreUpload(BaseModel):
     matched_keywords: list[str]
     missing_keywords: list[str]
     summary: str
+    category_scores: list[ScoreCategoryBreakdown] = []
+    overqualification_note: str = ""
 
 
 class TailoredResumeScoreRead(BaseModel):
@@ -170,6 +191,8 @@ class TailoredResumeScoreRead(BaseModel):
     matched_keywords: list[str]
     missing_keywords: list[str]
     summary: str
+    category_scores: list[ScoreCategoryBreakdown] = []
+    overqualification_note: str = ""
     created_at: datetime
 
 

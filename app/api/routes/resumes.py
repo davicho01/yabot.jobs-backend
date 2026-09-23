@@ -394,6 +394,8 @@ def score_main_resume(
         matched_keywords=result.matched_keywords,
         missing_keywords=result.missing_keywords,
         summary=result.summary,
+        category_scores=result.category_scores,
+        overqualification_note=result.overqualification_note,
         raw_response=result.raw_response,
     )
     db.add(score)
@@ -425,6 +427,8 @@ def upload_main_resume_score(
         matched_keywords=payload.matched_keywords,
         missing_keywords=payload.missing_keywords,
         summary=payload.summary,
+        category_scores=[item.model_dump() for item in payload.category_scores],
+        overqualification_note=payload.overqualification_note,
         raw_response=None,
     )
     db.add(score)
@@ -505,6 +509,29 @@ def _store_tailored_resume(
     return tailored
 
 
+def _latest_resume_score_dict(db: Session, resume_id: uuid.UUID, job_posting_id: uuid.UUID) -> dict | None:
+    """The latest ResumeScore for this resume+job, as a plain dict for
+    passing into generate_tailored_resume_with_llm — None if the user
+    hasn't scored this pairing yet (tailoring still works, just without
+    that context).
+    """
+    score = db.scalar(
+        select(ResumeScore)
+        .where(ResumeScore.resume_id == resume_id, ResumeScore.job_posting_id == job_posting_id)
+        .order_by(ResumeScore.created_at.desc())
+    )
+    if score is None:
+        return None
+    return {
+        "overall_score": score.overall_score,
+        "matched_keywords": score.matched_keywords,
+        "missing_keywords": score.missing_keywords,
+        "summary": score.summary,
+        "category_scores": score.category_scores,
+        "overqualification_note": score.overqualification_note,
+    }
+
+
 @router.post("/main/tailored", response_model=TailoredResumeRead, status_code=status.HTTP_201_CREATED)
 def generate_main_tailored_resume(
     job_posting_id: uuid.UUID,
@@ -515,6 +542,7 @@ def generate_main_tailored_resume(
     resume = _resolve_resume(db, current_user.id, resume_id)
     posting = _get_job_posting(db, job_posting_id)
     key = get_users_default_llm_key(db, current_user.id)
+    fitness_score = _latest_resume_score_dict(db, resume.id, posting.id)
 
     try:
         generated = generate_tailored_resume_with_llm(
@@ -524,6 +552,7 @@ def generate_main_tailored_resume(
             model=key.model,
             api_key=key.get_plaintext_key(),
             base_url=key.base_url,
+            fitness_score=fitness_score,
         )
     except LlmError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM request failed: {exc}") from exc
@@ -605,6 +634,8 @@ def score_tailored_resume(
         matched_keywords=result.matched_keywords,
         missing_keywords=result.missing_keywords,
         summary=result.summary,
+        category_scores=result.category_scores,
+        overqualification_note=result.overqualification_note,
         raw_response=result.raw_response,
     )
     db.add(score)
@@ -638,6 +669,8 @@ def upload_tailored_resume_score(
         matched_keywords=payload.matched_keywords,
         missing_keywords=payload.missing_keywords,
         summary=payload.summary,
+        category_scores=[item.model_dump() for item in payload.category_scores],
+        overqualification_note=payload.overqualification_note,
         raw_response=None,
     )
     db.add(score)

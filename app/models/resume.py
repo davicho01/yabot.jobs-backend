@@ -92,6 +92,13 @@ class ResumeScore(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     matched_keywords: Mapped[list] = mapped_column(JSONB, nullable=False)
     missing_keywords: Mapped[list] = mapped_column(JSONB, nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
+    # Per-rubric-category breakdown — see app.services.resume_llm._CATEGORY_MAX
+    # for the fixed category list and point ranges. Always 4 entries.
+    category_scores: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    # Informational only — a heads-up about real-world overqualification/
+    # age-perception bias risk. Never factored into overall_score or
+    # category_scores, which stay purely merit-based.
+    overqualification_note: Mapped[str] = mapped_column(Text, nullable=False, default="")
     raw_response: Mapped[dict | None] = mapped_column(JSONB)
 
     job_posting: Mapped["JobPosting"] = relationship()
@@ -122,6 +129,13 @@ class TailoredResumeScore(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     matched_keywords: Mapped[list] = mapped_column(JSONB, nullable=False)
     missing_keywords: Mapped[list] = mapped_column(JSONB, nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
+    # Per-rubric-category breakdown — see app.services.resume_llm._CATEGORY_MAX
+    # for the fixed category list and point ranges. Always 4 entries.
+    category_scores: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    # Informational only — a heads-up about real-world overqualification/
+    # age-perception bias risk. Never factored into overall_score or
+    # category_scores, which stay purely merit-based.
+    overqualification_note: Mapped[str] = mapped_column(Text, nullable=False, default="")
     raw_response: Mapped[dict | None] = mapped_column(JSONB)
 
     job_posting: Mapped["JobPosting"] = relationship()

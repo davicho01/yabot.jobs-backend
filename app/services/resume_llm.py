@@ -100,6 +100,66 @@ def review_resume_with_llm(
 
 # --- Score ---------------------------------------------------------------
 
+# Points available per rubric category (see SCORE_PROMPT) — authoritative in
+# code so a model that echoes back the wrong max_score can't corrupt it.
+_CATEGORY_MAX = {
+    "required_skills": 50,
+    "responsibilities": 30,
+    "seniority": 15,
+    "preferred_qualifications": 5,
+}
+
+
+def _as_category_scores_list(value: Any, overall_score: int) -> list[dict[str, Any]]:
+    """Build the 4-category breakdown, reconciled to sum to exactly
+    `overall_score` — the model's own gut number, trusted as-is. The model is
+    asked to make its per-category scores add up to it, but isn't reliably
+    consistent, so any leftover/excess is deterministically shifted onto
+    categories (in rubric order) that have room to absorb it. Each category
+    is still capped at its own fixed point range (_CATEGORY_MAX), and since
+    those caps sum to 100 and overall_score is always <= 100, reconciliation
+    can always succeed.
+    """
+    items = value if isinstance(value, list) else []
+    by_category = {item.get("category"): item for item in items if isinstance(item, dict)}
+
+    scores: dict[str, int] = {}
+    for category, max_score in _CATEGORY_MAX.items():
+        item = by_category.get(category, {})
+        try:
+            scores[category] = max(0, min(max_score, int(item.get("score"))))
+        except (TypeError, ValueError):
+            scores[category] = 0
+
+    delta = overall_score - sum(scores.values())
+    for category, max_score in _CATEGORY_MAX.items():
+        if delta == 0:
+            break
+        if delta > 0:
+            add = min(max_score - scores[category], delta)
+            scores[category] += add
+            delta -= add
+        else:
+            take = min(scores[category], -delta)
+            scores[category] -= take
+            delta += take
+
+    breakdown = []
+    for category, max_score in _CATEGORY_MAX.items():
+        item = by_category.get(category, {})
+        breakdown.append(
+            {
+                "category": category,
+                "score": scores[category],
+                "max_score": max_score,
+                "why": item.get("why") if isinstance(item.get("why"), str) else "",
+                "job_requirements": _as_str_list(item.get("job_requirements")),
+                "strengths": _as_str_list(item.get("strengths")),
+                "weaknesses": _as_str_list(item.get("weaknesses")),
+            }
+        )
+    return breakdown
+
 
 @dataclass
 class ResumeScoreResult:
@@ -107,6 +167,10 @@ class ResumeScoreResult:
     matched_keywords: list[str] = field(default_factory=list)
     missing_keywords: list[str] = field(default_factory=list)
     summary: str = ""
+    category_scores: list[dict[str, Any]] = field(default_factory=list)
+    # Informational only — does not affect overall_score/category_scores,
+    # which stay purely merit-based. See SCORE_PROMPT.
+    overqualification_note: str = ""
     raw_response: dict[str, Any] | None = None
 
 
@@ -128,17 +192,23 @@ def score_resume_with_llm(
     except json.JSONDecodeError as exc:
         raise LlmError(f"Model response was not valid JSON: {exc}") from exc
 
-    score = data.get("overall_score")
     try:
-        score = max(0, min(100, int(score)))
+        score = max(0, min(100, int(data.get("overall_score"))))
     except (TypeError, ValueError):
         score = 0
+    # category_scores is reconciled to sum to exactly `score` — see
+    # _as_category_scores_list — rather than trusted verbatim from the model.
+    category_scores = _as_category_scores_list(data.get("category_scores"), score)
 
     return ResumeScoreResult(
         overall_score=score,
         matched_keywords=_as_str_list(data.get("matched_keywords")),
         missing_keywords=_as_str_list(data.get("missing_keywords")),
         summary=data.get("summary") if isinstance(data.get("summary"), str) else "",
+        category_scores=category_scores,
+        overqualification_note=(
+            data.get("overqualification_note") if isinstance(data.get("overqualification_note"), str) else ""
+        ),
         raw_response=data,
     )
 
@@ -186,6 +256,35 @@ class TailoredResumeContent:
     raw_response: dict[str, Any] | None = None
 
 
+def _format_fitness_assessment(fitness_score: dict[str, Any] | None) -> str:
+    """Render a prior ResumeScore as plain text for TAILOR_PROMPT — just the
+    parts relevant to closing gaps (scores, missing keywords, per-category
+    weaknesses, overqualification risk), not the full raw record.
+    """
+    if not fitness_score:
+        return "No fitness assessment available yet."
+
+    lines = [f"Overall fit score: {fitness_score.get('overall_score', 0)}/100"]
+    if fitness_score.get("summary"):
+        lines.append(f"Summary: {fitness_score['summary']}")
+
+    for category in fitness_score.get("category_scores") or []:
+        line = f"- {category.get('category')}: {category.get('score', 0)}/{category.get('max_score', 0)}"
+        weaknesses = category.get("weaknesses") or []
+        if weaknesses:
+            line += " — weaknesses: " + "; ".join(weaknesses)
+        lines.append(line)
+
+    missing = fitness_score.get("missing_keywords") or []
+    if missing:
+        lines.append("Missing keywords/qualifications: " + ", ".join(missing))
+
+    if fitness_score.get("overqualification_note"):
+        lines.append(f"Overqualification risk note: {fitness_score['overqualification_note']}")
+
+    return "\n".join(lines)
+
+
 def generate_tailored_resume_with_llm(
     resume_text: str,
     job_description: str,
@@ -194,9 +293,12 @@ def generate_tailored_resume_with_llm(
     model: str | None,
     api_key: str,
     base_url: str | None,
+    fitness_score: dict[str, Any] | None = None,
 ) -> TailoredResumeContent:
     prompt = TAILOR_PROMPT.format(
-        resume_text=resume_text[:_MAX_TEXT_CHARS], job_description=job_description[:_MAX_TEXT_CHARS]
+        resume_text=resume_text[:_MAX_TEXT_CHARS],
+        job_description=job_description[:_MAX_TEXT_CHARS],
+        fitness_assessment=_format_fitness_assessment(fitness_score),
     )
     raw = call_llm(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
     try:
