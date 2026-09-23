@@ -26,9 +26,14 @@ class ApplicationUpdate(BaseModel):
     selected_resume_id: uuid.UUID | None = None
 
 
-class ApplicationBulkStatusUpdate(BaseModel):
+class ApplicationBulkUpdate(BaseModel):
+    # Neither field needs follow_up_at/selected_resume_id-style null-vs-
+    # omitted tracking (see ApplicationUpdate) — a bulk action only ever
+    # sets status or flips is_archived, never deliberately clears either
+    # back to "unset", so a plain None-means-"leave alone" default is enough.
     ids: list[uuid.UUID]
-    status: ApplicationStatus
+    status: ApplicationStatus | None = None
+    is_archived: bool | None = None
 
 
 class ApplicationJobPostingRead(BaseModel):

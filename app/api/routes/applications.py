@@ -11,7 +11,7 @@ from app.models.job_application import UserJobApplication
 from app.models.job_posting import JobPosting
 from app.models.resume import Resume
 from app.models.user import User
-from app.schemas.application import ApplicationBulkStatusUpdate, ApplicationCreate, ApplicationRead, ApplicationUpdate
+from app.schemas.application import ApplicationBulkUpdate, ApplicationCreate, ApplicationRead, ApplicationUpdate
 from app.services.jobs import find_existing_application, get_or_create_job_posting
 
 router = APIRouter(prefix="/applications", tags=["applications"])
@@ -67,19 +67,20 @@ def create_application(
     return application
 
 
-@router.patch("/bulk-status", response_model=list[ApplicationRead])
-def bulk_update_application_status(
-    payload: ApplicationBulkStatusUpdate,
+@router.patch("/bulk-update", response_model=list[ApplicationRead])
+def bulk_update_applications(
+    payload: ApplicationBulkUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[ApplicationRead]:
-    """Set the same status on several applications in one call — the
-    backend counterpart to the apply-page's bulk-actions bar, which
-    previously just fanned individual PATCH /{id} calls out client-side.
-    ids not owned by the current user (or unknown) are silently skipped
-    rather than erroring the whole batch — the frontend only ever sends ids
-    from its own already-filtered list, so a mismatch here isn't a normal
-    path worth failing loudly over.
+    """Apply status and/or is_archived to several applications in one call —
+    the backend counterpart to the apply-page's bulk-actions bar, which
+    previously fanned individual PATCH /{id} calls out client-side (one
+    request per selected row) for every bulk action. ids not owned by the
+    current user (or unknown) are silently skipped rather than erroring the
+    whole batch — the frontend only ever sends ids from its own
+    already-filtered list, so a mismatch here isn't a normal path worth
+    failing loudly over.
     """
     applications = db.scalars(
         select(UserJobApplication)
@@ -87,7 +88,10 @@ def bulk_update_application_status(
         .options(*_APPLICATION_READ_RELATIONS)
     ).all()
     for application in applications:
-        _apply_status(application, payload.status)
+        if payload.status is not None:
+            _apply_status(application, payload.status)
+        if payload.is_archived is not None:
+            application.is_archived = payload.is_archived
     db.flush()
     return applications
 

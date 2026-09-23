@@ -8,11 +8,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.models as m
-from app.api.routes.applications import bulk_update_application_status, update_application
+from app.api.routes.applications import bulk_update_applications, update_application
 from app.db.base import Base
 from app.models.enums import ScanStatus
 from app.models.user import User
-from app.schemas.application import ApplicationBulkStatusUpdate, ApplicationUpdate
+from app.schemas.application import ApplicationBulkUpdate, ApplicationUpdate
 
 _url_counter = itertools.count()
 
@@ -178,16 +178,16 @@ def test_update_application_404s_for_an_unknown_id(db):
     assert exc_info.value.status_code == 404
 
 
-# ------------------------------------------------------------ bulk status
+# ------------------------------------------------------------ bulk update
 
 
-def test_bulk_update_application_status_sets_status_on_every_matching_id(db):
+def test_bulk_update_applications_sets_status_on_every_matching_id(db):
     user = _user()
     a = _make_application(db, user)
     b = _make_application(db, user)
 
-    result = bulk_update_application_status(
-        ApplicationBulkStatusUpdate(ids=[a.id, b.id], status="interviewing"), current_user=user, db=db
+    result = bulk_update_applications(
+        ApplicationBulkUpdate(ids=[a.id, b.id], status="interviewing"), current_user=user, db=db
     )
 
     assert {r.id for r in result} == {a.id, b.id}
@@ -195,24 +195,52 @@ def test_bulk_update_application_status_sets_status_on_every_matching_id(db):
     assert b.status == "interviewing"
 
 
-def test_bulk_update_application_status_marking_applied_sets_applied_at(db):
+def test_bulk_update_applications_marking_applied_sets_applied_at(db):
     user = _user()
     a = _make_application(db, user)
     assert a.applied_at is None
 
-    bulk_update_application_status(ApplicationBulkStatusUpdate(ids=[a.id], status="applied"), current_user=user, db=db)
+    bulk_update_applications(ApplicationBulkUpdate(ids=[a.id], status="applied"), current_user=user, db=db)
 
     assert a.applied_at is not None
 
 
-def test_bulk_update_application_status_silently_skips_ids_owned_by_someone_else(db):
+def test_bulk_update_applications_sets_is_archived_on_every_matching_id(db):
+    user = _user()
+    a = _make_application(db, user)
+    b = _make_application(db, user)
+
+    result = bulk_update_applications(
+        ApplicationBulkUpdate(ids=[a.id, b.id], is_archived=True), current_user=user, db=db
+    )
+
+    assert {r.id for r in result} == {a.id, b.id}
+    assert a.is_archived is True
+    assert b.is_archived is True
+    # status untouched — not part of this call
+    assert a.status == "saved"
+
+
+def test_bulk_update_applications_can_set_status_and_is_archived_together(db):
+    user = _user()
+    a = _make_application(db, user)
+
+    bulk_update_applications(
+        ApplicationBulkUpdate(ids=[a.id], status="withdrawn", is_archived=True), current_user=user, db=db
+    )
+
+    assert a.status == "withdrawn"
+    assert a.is_archived is True
+
+
+def test_bulk_update_applications_silently_skips_ids_owned_by_someone_else(db):
     owner = _user()
     other_user = _user()
     mine = _make_application(db, owner)
     theirs = _make_application(db, other_user)
 
-    result = bulk_update_application_status(
-        ApplicationBulkStatusUpdate(ids=[mine.id, theirs.id], status="rejected"), current_user=owner, db=db
+    result = bulk_update_applications(
+        ApplicationBulkUpdate(ids=[mine.id, theirs.id], status="rejected"), current_user=owner, db=db
     )
 
     assert [r.id for r in result] == [mine.id]
@@ -220,20 +248,18 @@ def test_bulk_update_application_status_silently_skips_ids_owned_by_someone_else
     assert theirs.status == "saved"  # untouched — not this user's row
 
 
-def test_bulk_update_application_status_silently_skips_unknown_ids(db):
+def test_bulk_update_applications_silently_skips_unknown_ids(db):
     user = _user()
     a = _make_application(db, user)
 
-    result = bulk_update_application_status(
-        ApplicationBulkStatusUpdate(ids=[a.id, uuid.uuid4()], status="withdrawn"), current_user=user, db=db
+    result = bulk_update_applications(
+        ApplicationBulkUpdate(ids=[a.id, uuid.uuid4()], status="withdrawn"), current_user=user, db=db
     )
 
     assert [r.id for r in result] == [a.id]
     assert a.status == "withdrawn"
 
 
-def test_bulk_update_application_status_with_empty_ids_is_a_no_op(db):
-    result = bulk_update_application_status(
-        ApplicationBulkStatusUpdate(ids=[], status="applied"), current_user=_user(), db=db
-    )
+def test_bulk_update_applications_with_empty_ids_is_a_no_op(db):
+    result = bulk_update_applications(ApplicationBulkUpdate(ids=[], status="applied"), current_user=_user(), db=db)
     assert result == []
