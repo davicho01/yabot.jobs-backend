@@ -8,7 +8,12 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.models as m
-from app.api.routes.resumes import _resolve_resume, get_main_interview_prep, get_resume_score_history
+from app.api.routes.resumes import (
+    _resolve_resume,
+    _tailored_resume_text,
+    get_main_interview_prep,
+    get_resume_score_history,
+)
 from app.db.base import Base
 from app.models.resume import InterviewPrep
 
@@ -273,3 +278,37 @@ def test_get_main_interview_prep_uses_the_given_resume_id(db):
     # ...but passing the other resume's id finds its prep.
     result = get_main_interview_prep(posting.id, resume_id=other_resume.id, current_user=m.User(id=user_id), db=db)
     assert result.id == for_other.id
+
+
+def test_tailored_resume_text_renders_entries_not_just_flat_bullets():
+    # Regression test: a section using "entries" (e.g. "Professional
+    # Experience" — the normal shape for a jobs/degrees section, see
+    # TAILOR_PROMPT) used to render as just its heading with nothing under
+    # it, since this only read "bullets". That made a real, detailed
+    # tailored resume look empty to the rescoring LLM (no dates, no
+    # employers, no accomplishment bullets), tanking its score.
+    content = {
+        "summary": "Backend engineer.",
+        "sections": [
+            {"heading": "Skills", "bullets": ["Python", "SQL"], "entries": []},
+            {
+                "heading": "Professional Experience",
+                "bullets": [],
+                "entries": [
+                    {
+                        "title": "Senior Engineer",
+                        "subtitle": "Acme Corp · 2020 - Present",
+                        "bullets": ["Led the API migration", "Mentored 3 engineers"],
+                    },
+                    {"title": "Engineer", "subtitle": None, "bullets": []},
+                ],
+            },
+        ],
+    }
+    text = _tailored_resume_text(content)
+    assert "Backend engineer." in text
+    assert "- Python" in text
+    assert "Senior Engineer — Acme Corp · 2020 - Present" in text
+    assert "- Led the API migration" in text
+    assert "- Mentored 3 engineers" in text
+    assert "Engineer" in text  # no subtitle, no bullets — title alone still renders

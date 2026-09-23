@@ -107,10 +107,23 @@ def _get_owned_tailored_resume(db: Session, user_id: uuid.UUID, tailored_id: uui
 
 
 def _tailored_resume_text(content: dict) -> str:
+    """Flatten a TailoredResume's structured content (see TailoredResumeUpload)
+    back into plain text for re-scoring. A section uses exactly one of
+    "bullets" or "entries" (see TAILOR_PROMPT) — entries (one per job/degree/
+    project, e.g. "Professional Experience") must be rendered too, or the
+    scorer sees nothing but section headings for any resume with real work
+    history and drastically under-scores it.
+    """
     lines = [content.get("summary", "")]
     for section in content.get("sections", []):
         lines.append(section.get("heading", ""))
         lines.extend(f"- {b}" for b in section.get("bullets", []))
+        for entry in section.get("entries", []):
+            header = entry.get("title", "")
+            if entry.get("subtitle"):
+                header = f"{header} — {entry['subtitle']}"
+            lines.append(header)
+            lines.extend(f"- {b}" for b in entry.get("bullets", []))
     return "\n".join(lines)
 
 
