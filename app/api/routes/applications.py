@@ -9,6 +9,7 @@ from app.api.deps import get_current_user, get_db
 from app.models.enums import ApplicationStatus
 from app.models.job_application import UserJobApplication
 from app.models.job_posting import JobPosting
+from app.models.resume import Resume
 from app.models.user import User
 from app.schemas.application import ApplicationCreate, ApplicationRead, ApplicationUpdate
 from app.services.jobs import find_existing_application, get_or_create_job_posting
@@ -90,6 +91,16 @@ def update_application(
         # not suppressed by a reminder already sent for whatever date this
         # used to be. See app.services.follow_up_reminders.
         application.follow_up_reminded_at = None
+    if "selected_resume_id" in fields:
+        if payload.selected_resume_id is not None:
+            resume = db.scalar(
+                select(Resume).where(
+                    Resume.id == payload.selected_resume_id, Resume.user_id == current_user.id
+                )
+            )
+            if resume is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
+        application.selected_resume_id = payload.selected_resume_id
 
     db.flush()
     return application

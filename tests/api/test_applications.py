@@ -21,10 +21,11 @@ _url_counter = itertools.count()
 def db() -> Session:
     # Local db fixture (not tests/api/conftest.py's, which only has
     # SavedSearch) — applications need JobPostingUrl/JobPosting too, for
-    # UserJobApplication's FK.
+    # UserJobApplication's FK. Resume is needed too, for selected_resume_id.
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(
-        engine, tables=[m.JobPostingUrl.__table__, m.JobPosting.__table__, m.UserJobApplication.__table__]
+        engine,
+        tables=[m.JobPostingUrl.__table__, m.JobPosting.__table__, m.UserJobApplication.__table__, m.Resume.__table__],
     )
     session = sessionmaker(bind=engine, autoflush=False)()
     yield session
@@ -106,6 +107,69 @@ def test_update_application_resaving_the_same_follow_up_at_does_not_reset_the_re
     update_application(application.id, ApplicationUpdate(follow_up_at=today), current_user=user, db=db)
 
     assert application.follow_up_reminded_at == reminded_at  # unchanged — same date, no new reminder needed
+
+
+def test_update_application_marking_applied_sets_applied_at(db):
+    user = _user()
+    application = _make_application(db, user)
+    assert application.applied_at is None
+
+    result = update_application(
+        application.id, ApplicationUpdate(status="applied"), current_user=user, db=db
+    )
+
+    assert result.applied_at is not None
+
+
+def test_update_application_sets_selected_resume_id(db):
+    user = _user()
+    application = _make_application(db, user)
+    resume = m.Resume(user_id=user.id, filename="resume.pdf", content_type="application/pdf", storage_key="k", parsed_text="x")
+    db.add(resume)
+    db.flush()
+
+    result = update_application(
+        application.id, ApplicationUpdate(selected_resume_id=resume.id), current_user=user, db=db
+    )
+
+    assert result.selected_resume_id == resume.id
+
+
+def test_update_application_rejects_another_users_resume_as_selected_resume_id(db):
+    user = _user()
+    other_user = _user()
+    application = _make_application(db, user)
+    other_resume = m.Resume(
+        user_id=other_user.id, filename="resume.pdf", content_type="application/pdf", storage_key="k", parsed_text="x"
+    )
+    db.add(other_resume)
+    db.flush()
+
+    with pytest.raises(HTTPException) as exc_info:
+        update_application(
+            application.id, ApplicationUpdate(selected_resume_id=other_resume.id), current_user=user, db=db
+        )
+    assert exc_info.value.status_code == 404
+
+
+def test_update_application_clearing_selected_resume_id_is_distinct_from_omitting_it(db):
+    user = _user()
+    application = _make_application(db, user)
+    resume = m.Resume(user_id=user.id, filename="resume.pdf", content_type="application/pdf", storage_key="k", parsed_text="x")
+    db.add(resume)
+    db.flush()
+    application.selected_resume_id = resume.id
+    db.flush()
+
+    result = update_application(
+        application.id, ApplicationUpdate(selected_resume_id=None), current_user=user, db=db
+    )
+    assert result.selected_resume_id is None
+
+    application.selected_resume_id = resume.id
+    db.flush()
+    result = update_application(application.id, ApplicationUpdate(notes="just notes"), current_user=user, db=db)
+    assert result.selected_resume_id == resume.id
 
 
 def test_update_application_404s_for_an_unknown_id(db):

@@ -20,6 +20,10 @@ class ApplicationUpdate(BaseModel):
     notes: str | None = None
     is_archived: bool | None = None
     follow_up_at: date | None = None
+    # Same partial-update rule as follow_up_at: explicit null clears the
+    # pick (falls back to is_main again), omitting the field leaves
+    # whatever's already stored alone.
+    selected_resume_id: uuid.UUID | None = None
 
 
 class ApplicationJobPostingRead(BaseModel):
@@ -60,7 +64,14 @@ class ApplicationRead(BaseModel):
     # When this row was first made — saving/applying to a job always adds one
     # (see create_application, ensure_user_applicant), so this is never null.
     created_at: datetime
+    # Set the moment status first transitions to "applied" (see
+    # update_application) — null until then. Lets the apply page tell the
+    # candidate exactly when they marked this applied.
+    applied_at: datetime | None
     follow_up_at: date | None
+    # Which resume the apply page's picker is set to for this application —
+    # null means no explicit pick (frontend falls back to is_main).
+    selected_resume_id: uuid.UUID | None
     job_posting: ApplicationJobPostingRead
     # Max of latest_score/latest_tailored_resume_score — see
     # UserJobApplication.best_score in app/models/job_application.py.

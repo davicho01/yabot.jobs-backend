@@ -48,6 +48,17 @@ class UserJobApplication(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # means no reminder wanted. See app.services.follow_up_reminders, the
     # only reader.
     follow_up_at: Mapped[date | None] = mapped_column(Date)
+
+    # Which of the user's resumes the apply page's resume picker is set to
+    # for this application — persisted server-side (rather than left as
+    # local component state) so it survives a page refresh, not just the
+    # candidate's in-memory pick. Null means "no explicit pick", which the
+    # frontend falls back to is_main for, same as before this existed.
+    # SET NULL on delete: removing the resume shouldn't take the
+    # application down with it, just fall back to main again.
+    selected_resume_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("resumes.id", ondelete="SET NULL")
+    )
     # Set once a reminder email has actually gone out for the *current*
     # follow_up_at — update_application resets this to null whenever
     # follow_up_at itself changes (a new date means a new reminder is
