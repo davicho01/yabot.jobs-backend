@@ -26,6 +26,11 @@ class ApplicationUpdate(BaseModel):
     selected_resume_id: uuid.UUID | None = None
 
 
+class ApplicationBulkStatusUpdate(BaseModel):
+    ids: list[uuid.UUID]
+    status: ApplicationStatus
+
+
 class ApplicationJobPostingRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

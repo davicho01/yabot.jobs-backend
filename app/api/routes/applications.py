@@ -11,10 +11,26 @@ from app.models.job_application import UserJobApplication
 from app.models.job_posting import JobPosting
 from app.models.resume import Resume
 from app.models.user import User
-from app.schemas.application import ApplicationCreate, ApplicationRead, ApplicationUpdate
+from app.schemas.application import ApplicationBulkStatusUpdate, ApplicationCreate, ApplicationRead, ApplicationUpdate
 from app.services.jobs import find_existing_application, get_or_create_job_posting
 
 router = APIRouter(prefix="/applications", tags=["applications"])
+
+# Shared _APPLICATION_READ_RELATIONS so a bulk fetch doesn't N+1 on
+# job_posting/best_score the way a single-row lookup can afford to.
+_APPLICATION_READ_RELATIONS = (
+    selectinload(UserJobApplication.job_posting).selectinload(JobPosting.url),
+    selectinload(UserJobApplication.latest_score),
+    selectinload(UserJobApplication.latest_tailored_resume),
+    selectinload(UserJobApplication.latest_cover_letter),
+    selectinload(UserJobApplication.latest_tailored_resume_score),
+)
+
+
+def _apply_status(application: UserJobApplication, new_status: ApplicationStatus) -> None:
+    if new_status == ApplicationStatus.APPLIED and application.applied_at is None:
+        application.applied_at = datetime.now(timezone.utc)
+    application.status = new_status
 
 
 @router.get("", response_model=list[ApplicationRead])
@@ -24,13 +40,7 @@ def list_applications(
     applications = db.scalars(
         select(UserJobApplication)
         .where(UserJobApplication.user_id == current_user.id)
-        .options(
-            selectinload(UserJobApplication.job_posting).selectinload(JobPosting.url),
-            selectinload(UserJobApplication.latest_score),
-            selectinload(UserJobApplication.latest_tailored_resume),
-            selectinload(UserJobApplication.latest_cover_letter),
-            selectinload(UserJobApplication.latest_tailored_resume_score),
-        )
+        .options(*_APPLICATION_READ_RELATIONS)
         .order_by(UserJobApplication.created_at.desc())
     ).all()
     return applications
@@ -57,6 +67,31 @@ def create_application(
     return application
 
 
+@router.patch("/bulk-status", response_model=list[ApplicationRead])
+def bulk_update_application_status(
+    payload: ApplicationBulkStatusUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[ApplicationRead]:
+    """Set the same status on several applications in one call — the
+    backend counterpart to the apply-page's bulk-actions bar, which
+    previously just fanned individual PATCH /{id} calls out client-side.
+    ids not owned by the current user (or unknown) are silently skipped
+    rather than erroring the whole batch — the frontend only ever sends ids
+    from its own already-filtered list, so a mismatch here isn't a normal
+    path worth failing loudly over.
+    """
+    applications = db.scalars(
+        select(UserJobApplication)
+        .where(UserJobApplication.id.in_(payload.ids), UserJobApplication.user_id == current_user.id)
+        .options(*_APPLICATION_READ_RELATIONS)
+    ).all()
+    for application in applications:
+        _apply_status(application, payload.status)
+    db.flush()
+    return applications
+
+
 @router.patch("/{application_id}", response_model=ApplicationRead)
 def update_application(
     application_id: uuid.UUID,
@@ -78,9 +113,7 @@ def update_application(
     # would be indistinguishable from not mentioning it at all.
     fields = payload.model_dump(exclude_unset=True)
     if "status" in fields:
-        if payload.status == ApplicationStatus.APPLIED and application.applied_at is None:
-            application.applied_at = datetime.now(timezone.utc)
-        application.status = payload.status
+        _apply_status(application, payload.status)
     if "notes" in fields:
         application.notes = payload.notes
     if "is_archived" in fields:
