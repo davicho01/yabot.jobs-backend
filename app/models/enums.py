@@ -184,6 +184,11 @@ class AtsType(StrEnum):
     # requires the browser-render service's pierce_shadow option (see
     # adapters/ultipro.py and app.services.browser_fetch).
     ULTIPRO = "ultipro"
+    # Oracle SelectMinds — a multi-tenant employee-referral/careers platform
+    # at {tenant}.referrals.selectminds.com. The root and most of the site
+    # are SSO-gated, but individual job postings and /latest-jobs are
+    # genuinely public (see adapters/selectminds.py).
+    SELECTMINDS = "selectminds"
     # Sportsman's Warehouse (careers.sportsmans.com) — a custom career
     # module on their own SAP Hybris storefront, not any shared ATS
     # platform (see adapters/sportsmans_warehouse.py).

@@ -43,6 +43,7 @@ from app.services.adapters import (
     pinpoint,
     recruitee,
     rippling,
+    selectminds,
     sportsmans_warehouse,
     stripe,
     successfactors,
@@ -116,4 +117,5 @@ ADAPTERS: list[AtsAdapter] = [
     talentreef.ADAPTER,
     sportsmans_warehouse.ADAPTER,
     ultipro.ADAPTER,
+    selectminds.ADAPTER,
 ]
