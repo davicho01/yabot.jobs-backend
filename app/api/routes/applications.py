@@ -28,7 +28,7 @@ _APPLICATION_READ_RELATIONS = (
 
 
 def _apply_status(application: UserJobApplication, new_status: ApplicationStatus) -> None:
-    if new_status == ApplicationStatus.APPLIED and application.applied_at is None:
+    if new_status == ApplicationStatus.APPLIED:
         application.applied_at = datetime.now(timezone.utc)
     application.status = new_status
 
