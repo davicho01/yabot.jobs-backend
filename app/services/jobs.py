@@ -32,9 +32,17 @@ from app.schemas.job import JobDetailRead, SearchAreaRead
 logger = logging.getLogger("app.jobs")
 
 
-def to_job_detail(url_row: JobPostingUrl) -> JobDetailRead:
+def to_job_detail(url_row: JobPostingUrl, *, include_url: bool = True) -> JobDetailRead:
     latest_posting = url_row.postings[0] if url_row.postings else None
-    return JobDetailRead(url=url_row, posting=latest_posting)
+    detail = JobDetailRead(url=url_row, posting=latest_posting)
+    if not include_url:
+        # The original posting URL is only for logged-in users — strip both
+        # copies of it (JobPostingUrl.url and JobPosting.apply_url, a
+        # computed property mirroring the same value) for anonymous callers.
+        detail.url.url = None
+        if detail.posting:
+            detail.posting.apply_url = None
+    return detail
 
 
 def parse_search_query(q: str) -> tuple[str | None, list[str]]:

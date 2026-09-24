@@ -24,7 +24,9 @@ class JobPostingRead(BaseModel):
 
     id: uuid.UUID
     url_id: uuid.UUID
-    apply_url: str
+    # None when the response was built for an anonymous caller — see
+    # to_job_detail's include_url flag.
+    apply_url: str | None
     title: str | None
     company_name: str | None
     location: str | None
@@ -48,7 +50,9 @@ class JobPostingUrlRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    url: str
+    # None when the response was built for an anonymous caller — see
+    # to_job_detail's include_url flag.
+    url: str | None
     domain: str
     scan_status: str
     scan_error: str | None

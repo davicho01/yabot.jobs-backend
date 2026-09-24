@@ -21,6 +21,7 @@ from app.services.jobs import (
     find_similar_job_urls,
     get_or_create_job_posting,
     parse_search_query,
+    to_job_detail,
 )
 
 _url_counter = itertools.count()
@@ -349,3 +350,24 @@ def test_find_similar_job_urls_ignores_non_canonical_postings(scan_db):
     _same_company, similar_title = find_similar_job_urls(scan_db, posting)
 
     assert [row.id for row in similar_title] == [canonical.url_id]
+
+
+def test_to_job_detail_includes_the_url_by_default(scan_db):
+    posting = _make_posting(scan_db)
+
+    detail = to_job_detail(posting.url)
+
+    assert detail.url.url == posting.url.url
+    assert detail.posting.apply_url == posting.url.url
+
+
+def test_to_job_detail_strips_the_url_for_anonymous_callers(scan_db):
+    posting = _make_posting(scan_db)
+
+    detail = to_job_detail(posting.url, include_url=False)
+
+    assert detail.url.url is None
+    assert detail.posting.apply_url is None
+    # Everything else is untouched.
+    assert detail.posting.title == posting.title
+    assert detail.posting.company_name == posting.company_name

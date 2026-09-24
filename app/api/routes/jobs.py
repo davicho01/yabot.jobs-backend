@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_current_user, get_current_user_optional, get_db
 from app.core.rate_limit import RateLimitExceeded
 from app.models.enums import ScanStatus, WorkplaceType
 from app.models.job_posting import JobPosting
@@ -64,6 +64,7 @@ def list_job_urls(
     salary_max: int | None = Query(None, ge=0),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    current_user: User | None = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ) -> JobListRead:
     # Only postings that have been scanned, canonical ones only, plus whatever
@@ -94,7 +95,7 @@ def list_job_urls(
     )
     url_rows = db.scalars(stmt).all()
     return JobListRead(
-        items=[to_job_detail(row) for row in url_rows],
+        items=[to_job_detail(row, include_url=current_user is not None) for row in url_rows],
         total=total,
         page=page,
         page_size=page_size,
@@ -158,15 +159,23 @@ def list_job_metros(
 
 
 @router.get("/{url_id}", response_model=JobDetailRead)
-def get_job_url(url_id: uuid.UUID, db: Session = Depends(get_db)) -> JobDetailRead:
+def get_job_url(
+    url_id: uuid.UUID,
+    current_user: User | None = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+) -> JobDetailRead:
     url_row = db.get(JobPostingUrl, url_id)
     if url_row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job URL not found.")
-    return to_job_detail(url_row)
+    return to_job_detail(url_row, include_url=current_user is not None)
 
 
 @router.get("/{url_id}/similar", response_model=SimilarJobsRead)
-def similar_jobs(url_id: uuid.UUID, db: Session = Depends(get_db)) -> SimilarJobsRead:
+def similar_jobs(
+    url_id: uuid.UUID,
+    current_user: User | None = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+) -> SimilarJobsRead:
     """Other postings related to this one, for a "similar jobs" panel on its
     case file — see find_similar_job_urls. Empty on both sides (rather than
     404) for a posting that hasn't scanned yet or has no title, since
@@ -178,9 +187,10 @@ def similar_jobs(url_id: uuid.UUID, db: Session = Depends(get_db)) -> SimilarJob
     if posting is None or posting.extraction_status != ScanStatus.SUCCESS or not posting.title:
         return SimilarJobsRead(same_company=[], similar_title=[])
     same_company, similar_title = find_similar_job_urls(db, posting)
+    include_url = current_user is not None
     return SimilarJobsRead(
-        same_company=[to_job_detail(row) for row in same_company],
-        similar_title=[to_job_detail(row) for row in similar_title],
+        same_company=[to_job_detail(row, include_url=include_url) for row in same_company],
+        similar_title=[to_job_detail(row, include_url=include_url) for row in similar_title],
     )
 
 
