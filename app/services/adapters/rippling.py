@@ -119,7 +119,19 @@ def extract(html: str) -> ExtractedJobFields | None:
     if not isinstance(job_post, dict):
         return None
 
-    description_html = (job_post.get("description") or {}).get("company")
+    # "description" splits the posting's own body content into two fields:
+    # "company" (the generic "About {Company}" blurb, e.g. mission/values)
+    # and "role" (the job-specific content: location, responsibilities,
+    # requirements) — company renders first on the page, so joined in that
+    # order. A past bug here read only "company", silently dropping the
+    # entire job-specific "role" section (verified live against a PDQ
+    # posting whose stored description ended at "Our Core Values" with
+    # everything after — Location, About the role, Responsibilities,
+    # Requirements — missing).
+    description_parts = job_post.get("description") or {}
+    description_html = "".join(
+        part for part in (description_parts.get("company"), description_parts.get("role")) if isinstance(part, str)
+    )
     locations = job_post.get("workLocations") or []
     employment_label = (job_post.get("employmentType") or {}).get("label")
 
