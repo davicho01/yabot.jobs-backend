@@ -63,26 +63,46 @@ _BOLD_CLOSE_RE = re.compile(r"</(?:strong|b)\s*>", re.IGNORECASE)
 _EM_OPEN_RE = re.compile(r"<(?:em|i)\b[^>]*>", re.IGNORECASE)
 _EM_CLOSE_RE = re.compile(r"</(?:em|i)\s*>", re.IGNORECASE)
 
-_DIV_TAG_RE = re.compile(r"<(/?)div\b[^>]*>", re.IGNORECASE)
+# Elements with no closing tag — a balanced-tag search for one of these
+# would scan past its intended boundary looking for a </close> that will
+# never appear, so it's handled as a zero-content special case instead.
+_VOID_TAGS = {
+    "meta", "link", "img", "br", "input", "hr", "source", "area", "base", "col", "embed", "param", "track", "wbr",
+}
 
 
-def extract_balanced_div(html: str, div_start: int) -> str | None:
-    """Return the inner HTML of the <div ...> opening at index `div_start`,
-    found by tracking nested div depth to its true matching close tag — a
-    simple non-greedy regex would stop at the first nested </div> instead,
-    truncating the content after only its first child element. Shared by
-    the Greenhouse and Stripe adapters, both of which need to pull one
-    div's full subtree out of a larger page rather than the whole page.
+def extract_balanced_tag(html: str, tag_start: int, tag_name: str) -> str | None:
+    """Return the inner HTML of the <tag_name ...> opening at index
+    `tag_start`, found by tracking nested same-name-tag depth to its true
+    matching close tag — a simple non-greedy regex would stop at the first
+    nested </tag_name> instead, truncating the content after only its
+    first same-named child element. Used both directly (microdata
+    itemscope/itemprop blocks in app.services.adapters.base, which nest
+    arbitrary tag names) and via extract_balanced_div below (the div-only
+    case originally used by the Greenhouse and Stripe adapters).
     """
-    open_end = html.find(">", div_start)
+    open_end = html.find(">", tag_start)
     if open_end == -1:
         return None
+    if html[open_end - 1] == "/" or tag_name.lower() in _VOID_TAGS:
+        return ""
+    tag_re = re.compile(rf"<(/?){re.escape(tag_name)}\b[^>]*>", re.IGNORECASE)
     depth = 1
-    for m in _DIV_TAG_RE.finditer(html, open_end + 1):
+    for m in tag_re.finditer(html, open_end + 1):
         depth += -1 if m.group(1) else 1
         if depth == 0:
             return html[open_end + 1 : m.start()]
     return None
+
+
+def extract_balanced_div(html: str, div_start: int) -> str | None:
+    """Return the inner HTML of the <div ...> opening at index `div_start`.
+    Shared by the Greenhouse and Stripe adapters, both of which need to
+    pull one div's full subtree out of a larger page rather than the
+    whole page. See extract_balanced_tag for how the matching close tag
+    is actually found.
+    """
+    return extract_balanced_tag(html, div_start, "div")
 
 
 def clean_text(value: Any) -> str | None:

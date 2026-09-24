@@ -1,5 +1,6 @@
 from app.services import job_scanner
 from app.services.adapters import base
+from app.services.adapters.text import extract_balanced_tag as _extract_balanced_tag
 from app.services.adapters.text import html_to_formatted_text as _html_to_formatted_text
 from tests.conftest import FakeResponse
 
@@ -36,6 +37,21 @@ def test_html_to_formatted_text_none_for_non_string():
 
 def test_html_to_formatted_text_none_for_blank_result():
     assert _html_to_formatted_text("   ") is None
+
+
+def test_extract_balanced_tag_finds_true_matching_close_for_non_div_tag():
+    # A non-greedy regex would stop at the first nested </li> instead of
+    # this <li>'s own close tag, truncating everything after the nested
+    # element — same failure mode extract_balanced_div already guards
+    # against for div, generalized here to an arbitrary tag name.
+    html = '<li itemprop="jobLocation"><li>Sydney</li> extra text</li> after'
+    result = _extract_balanced_tag(html, 0, "li")
+    assert result == "<li>Sydney</li> extra text"
+
+
+def test_extract_balanced_tag_empty_for_void_element():
+    html = '<meta itemprop="addressLocality" content="Sydney">'
+    assert _extract_balanced_tag(html, 0, "meta") == ""
 
 
 def test_salary_from_text_parses_k_suffix_range():
@@ -97,3 +113,35 @@ def test_scan_job_url_falls_back_to_default_scanner_when_no_adapter_matches(monk
     result = job_scanner.scan_job_url("https://example.com/careers/1")
     assert result.success
     assert result.title == "Staff Engineer"
+
+
+def test_scan_job_url_uses_microdata_when_no_json_ld_present(monkeypatch):
+    # SmartRecruiters-style pages: no application/ld+json block at all, just
+    # schema.org JobPosting data as page microdata — verifies the default
+    # scanner's microdata fallback actually recovers location/employment
+    # type instead of leaving them null/unknown, as it would with only the
+    # weaker og:description-parsing path below it.
+    html = """
+    <main itemscope itemtype="http://schema.org/JobPosting">
+      <h1 itemprop="title">Senior Frontend Software Engineer</h1>
+      <li itemprop="jobLocation" itemscope itemtype="http://schema.org/Place">
+        <span itemprop="address" itemscope itemtype="http://schema.org/PostalAddress">
+          <meta itemprop="addressLocality" content="Sydney">
+          <meta itemprop="addressCountry" content="Australia">
+        </span>
+      </li>
+      <li itemprop="employmentType">Full-time</li>
+      <div itemprop="hiringOrganization" itemscope itemtype="http://schema.org/Organization">
+        <meta itemprop="name" content="Canva">
+      </div>
+      <div itemprop="description"><p>Join the team. We're hiring!</p></div>
+    </main>
+    """
+    monkeypatch.setattr(base, "fetch_html", lambda _url: FakeResponse(text=html, url="https://example.com/careers/1"))
+    result = job_scanner.scan_job_url("https://example.com/careers/1")
+    assert result.success
+    assert result.title == "Senior Frontend Software Engineer"
+    assert result.company_name == "Canva"
+    assert result.location == "Sydney, Australia"
+    assert result.employment_type == "full_time"
+    assert "We're hiring" in (result.description or "")

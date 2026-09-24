@@ -64,10 +64,11 @@ def scan_job_url(url: str) -> ScanResult:
 def _default_scan_job_url(url: str) -> ScanResult:
     """Generic scanner for any URL no platform-specific adapter claims:
     schema.org JobPosting JSON-LD when present (LinkedIn, Indeed, and most
-    ATS-hosted listings publish it), otherwise a plain <title>/meta-
-    description/Open-Graph baseline so the submit-a-URL flow still works
-    end-to-end. Deliberately platform-agnostic — never imports or calls
-    into any app.services.adapters.* module.
+    ATS-hosted listings publish it), page microdata when it's published
+    that way instead (e.g. SmartRecruiters), otherwise a plain <title>/
+    meta-description/Open-Graph baseline so the submit-a-URL flow still
+    works end-to-end. Deliberately platform-agnostic — never imports or
+    calls into any app.services.adapters.* module.
     """
     try:
         page = base.fetch_html(url)
@@ -77,6 +78,11 @@ def _default_scan_job_url(url: str) -> ScanResult:
     html = page.text
     job_postings = base.extract_json_ld_postings(html)
     job_ld = job_postings[0] if job_postings else None
+    if job_ld is None:
+        # Some ATS pages (e.g. SmartRecruiters) publish structured job data
+        # as schema.org microdata attributes on the visible page instead of
+        # an application/ld+json block — same shape, different source.
+        job_ld = base.extract_microdata_posting(html)
 
     fallback_title = base.fallback_title(html)
     fallback_description = base.fallback_description(html)

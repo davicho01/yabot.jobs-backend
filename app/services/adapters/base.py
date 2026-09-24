@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 
 from app.models.enums import EmploymentType, WorkplaceType
-from app.services.adapters.text import OG_TITLE_RE, clean_text, html_to_formatted_text
+from app.services.adapters.text import OG_TITLE_RE, clean_text, extract_balanced_tag, html_to_formatted_text
 from app.services.browser_fetch import fetch_rendered_page
 
 TIMEOUT = 30.0
@@ -520,6 +520,123 @@ def extract_json_ld_postings(html: str) -> list[dict[str, Any]]:
                 continue
         postings.extend(_iter_job_postings(data))
     return postings
+
+
+# schema.org JobPosting as page microdata (itemscope/itemtype/itemprop
+# HTML attributes) rather than an application/ld+json block — verified
+# live on SmartRecruiters-hosted postings (e.g. jobs.smartrecruiters.com),
+# which publish full structured data this way and nothing in JSON-LD at
+# all. Built into the same dict shape extract_json_ld_postings produces
+# (title/description/hiringOrganization/jobLocation/employmentType/
+# datePosted) so job_scanner.py's existing job_ld_* result-building code
+# can consume either source without caring which one it got.
+_TAG_OPEN_RE = re.compile(r"<([a-zA-Z][\w-]*)\b([^>]*)>", re.IGNORECASE | re.DOTALL)
+
+
+def _find_itemprop_tag(html: str, prop: str) -> tuple[str, str, int] | None:
+    """Find the first <tag ...> in `html` whose attributes include
+    itemprop="prop" (or itemprop='prop'), returning (tag_name, attrs,
+    tag_start_index) for the caller to resolve into a value or a block.
+    """
+    prop_re = re.compile(rf'itemprop=["\']{re.escape(prop)}["\']', re.IGNORECASE)
+    for m in _TAG_OPEN_RE.finditer(html):
+        if prop_re.search(m.group(2)):
+            return m.group(1), m.group(2), m.start()
+    return None
+
+
+def _itemprop_content_or_text(html: str, prop: str) -> str | None:
+    """A microdata itemprop's value: a content="..." attribute when present
+    (the usual shape for <meta itemprop="...">), otherwise the tagged
+    element's own text (e.g. <h1 itemprop="title">...</h1> or
+    <li itemprop="employmentType">Full-time</li>).
+    """
+    found = _find_itemprop_tag(html, prop)
+    if found is None:
+        return None
+    tag, attrs, start = found
+    content_m = re.search(r'content=["\']([^"\']*)["\']', attrs, re.IGNORECASE)
+    if content_m is not None:
+        return clean_text(content_m.group(1))
+    inner = extract_balanced_tag(html, start, tag)
+    return clean_text(inner) if inner else None
+
+
+def _itemprop_block(html: str, prop: str) -> str | None:
+    """Like _itemprop_content_or_text, but returns the element's raw inner
+    HTML instead of cleaned text — for a nested itemscope (jobLocation,
+    hiringOrganization, address) whose own itemprops still need parsing,
+    or for description, which needs html_to_formatted_text rather than
+    clean_text (same treatment job_scanner.py already gives a JSON-LD
+    description).
+    """
+    found = _find_itemprop_tag(html, prop)
+    if found is None:
+        return None
+    tag, _attrs, start = found
+    return extract_balanced_tag(html, start, tag) or None
+
+
+_MICRODATA_JOBPOSTING_RE = re.compile(
+    r'<([a-zA-Z][\w-]*)\b(?=[^>]*\bitemscope\b)(?=[^>]*itemtype=["\']https?://schema\.org/JobPosting["\'])[^>]*>',
+    re.IGNORECASE,
+)
+
+
+def extract_microdata_posting(html: str) -> dict[str, Any] | None:
+    """Parse a page's schema.org JobPosting microdata (itemscope/itemtype/
+    itemprop attributes) into the same dict shape extract_json_ld_postings
+    produces. Returns None if the page has no JobPosting itemscope at all;
+    otherwise a dict with only the keys actually found on the page — the
+    job_ld_* helpers already tolerate missing keys.
+    """
+    match = _MICRODATA_JOBPOSTING_RE.search(html)
+    if match is None:
+        return None
+    block = extract_balanced_tag(html, match.start(), match.group(1))
+    if not block:
+        return None
+
+    result: dict[str, Any] = {}
+
+    title = _itemprop_content_or_text(block, "title")
+    if title:
+        result["title"] = title
+
+    description = _itemprop_block(block, "description")
+    if description:
+        result["description"] = description
+
+    employment_type = _itemprop_content_or_text(block, "employmentType")
+    if employment_type:
+        result["employmentType"] = employment_type
+
+    date_posted = _itemprop_content_or_text(block, "datePosted")
+    if date_posted:
+        result["datePosted"] = date_posted
+
+    org_block = _itemprop_block(block, "hiringOrganization")
+    if org_block:
+        org_name = _itemprop_content_or_text(org_block, "name")
+        if org_name:
+            result["hiringOrganization"] = {"name": org_name}
+
+    location_block = _itemprop_block(block, "jobLocation")
+    if location_block:
+        address_block = _itemprop_block(location_block, "address") or location_block
+        address = {
+            key: value
+            for key, value in {
+                "addressLocality": _itemprop_content_or_text(address_block, "addressLocality"),
+                "addressRegion": _itemprop_content_or_text(address_block, "addressRegion"),
+                "addressCountry": _itemprop_content_or_text(address_block, "addressCountry"),
+            }.items()
+            if value
+        }
+        if address:
+            result["jobLocation"] = {"address": address}
+
+    return result or None
 
 
 def job_ld_location(job_ld: dict[str, Any]) -> str | None:
