@@ -27,6 +27,7 @@ from app.services.adapters import (
     google,
     greenhouse,
     gupy,
+    happydance,
     hirehive,
     hiringroom,
     icims,
@@ -104,6 +105,10 @@ ADAPTERS: list[AtsAdapter] = [
     successfactors.ADAPTER,
     attrax.ADAPTER,
     phenom.ADAPTER,
+    # Sitemap-fallback embedded_match reasoning is the same as clinch's
+    # (see the note above icims.ADAPTER) — no observed collision candidate
+    # yet, placed with the other white-label CMS adapters regardless.
+    happydance.ADAPTER,
     avature.ADAPTER,
     paradox.ADAPTER,
     gupy.ADAPTER,

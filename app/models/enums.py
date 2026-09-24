@@ -198,6 +198,16 @@ class AtsType(StrEnum):
     # anchors on a listing endpoint, each detail page a full schema.org
     # JobPosting JSON-LD block (see adapters/applicantpro.py).
     APPLICANTPRO = "applicantpro"
+    # HappyDance — a career-site CMS white-labeled onto each customer's own
+    # domain via a CNAME to careers.happydance.website (e.g. jobs.dominos.com),
+    # feeding an underlying ATS (SuccessFactors, per HappyDance's own
+    # marketing) it doesn't expose. Some tenants front every path with a
+    # Cloudflare managed challenge that blocks plain httpx entirely (verified
+    # live: jobs.dominos.com) but leave sitemap.xml unprotected, same
+    # reasoning as clinch.py/phenom.py — job detail pages carry full
+    # schema.org JobPosting JSON-LD once rendered past the challenge (see
+    # adapters/happydance.py).
+    HAPPYDANCE = "happydance"
 
 
 class CrawlSourceStatus(StrEnum):
