@@ -84,6 +84,16 @@ def _default_scan_job_url(url: str) -> ScanResult:
         # an application/ld+json block — same shape, different source.
         job_ld = base.extract_microdata_posting(html)
 
+    if job_ld is not None and base.job_ld_is_expired(job_ld):
+        # e.g. a SmartRecruiters posting past its validThrough date: the
+        # title/location/company microdata is still on the page, but the
+        # real content is replaced with "This job has expired" and a
+        # disabled apply button. Reporting that as a successful scan with
+        # an empty description would look like our own extraction broke,
+        # not like the posting itself is gone — same treatment Greenhouse's
+        # is_error_redirect gives a removed/filled posting.
+        return ScanResult(success=False, error=f"Job posting has expired (validThrough {job_ld['validThrough']}).")
+
     fallback_title = base.fallback_title(html)
     fallback_description = base.fallback_description(html)
 

@@ -103,3 +103,35 @@ def test_extract_microdata_posting_omits_missing_fields():
     result = base.extract_microdata_posting(html)
 
     assert result == {"title": "Staff Engineer"}
+
+
+def test_extract_microdata_posting_reads_valid_through():
+    html = """
+    <main itemscope itemtype="http://schema.org/JobPosting">
+      <h1 itemprop="title">Staff Software Engineer</h1>
+      <meta itemprop="validThrough" content="2026-09-21T23:27:15.829Z">
+    </main>
+    """
+    result = base.extract_microdata_posting(html)
+
+    assert result["validThrough"] == "2026-09-21T23:27:15.829Z"
+
+
+def test_job_ld_is_expired_true_for_past_valid_through():
+    # A real SmartRecruiters posting past its validThrough date: the
+    # title/location microdata is still intact, but the real job content
+    # is replaced with "This job has expired" — the scanner needs this
+    # signal to avoid reporting that as an ordinary successful scan.
+    assert base.job_ld_is_expired({"validThrough": "2026-09-21T23:27:15.829Z"}) is True
+
+
+def test_job_ld_is_expired_false_for_future_valid_through():
+    assert base.job_ld_is_expired({"validThrough": "2099-01-01T00:00:00.000Z"}) is False
+
+
+def test_job_ld_is_expired_false_when_missing():
+    assert base.job_ld_is_expired({}) is False
+
+
+def test_job_ld_is_expired_false_when_unparseable():
+    assert base.job_ld_is_expired({"validThrough": "not a date"}) is False

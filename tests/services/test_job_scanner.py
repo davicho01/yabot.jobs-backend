@@ -145,3 +145,21 @@ def test_scan_job_url_uses_microdata_when_no_json_ld_present(monkeypatch):
     assert result.location == "Sydney, Australia"
     assert result.employment_type == "full_time"
     assert "We're hiring" in (result.description or "")
+
+
+def test_scan_job_url_fails_for_expired_posting(monkeypatch):
+    # A real SmartRecruiters posting past its validThrough date keeps its
+    # title/location microdata but replaces the actual content with "This
+    # job has expired" and a disabled apply button — reporting that as an
+    # ordinary success (with description/employment_type just empty) would
+    # look like our own extraction broke rather than the posting expiring.
+    html = """
+    <main itemscope itemtype="http://schema.org/JobPosting">
+      <h1 itemprop="title">Staff Software Engineer</h1>
+      <meta itemprop="validThrough" content="2026-09-21T23:27:15.829Z">
+    </main>
+    """
+    monkeypatch.setattr(base, "fetch_html", lambda _url: FakeResponse(text=html, url="https://example.com/careers/2"))
+    result = job_scanner.scan_job_url("https://example.com/careers/2")
+    assert not result.success
+    assert "expired" in (result.error or "").lower()

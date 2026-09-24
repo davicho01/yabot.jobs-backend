@@ -615,6 +615,10 @@ def extract_microdata_posting(html: str) -> dict[str, Any] | None:
     if date_posted:
         result["datePosted"] = date_posted
 
+    valid_through = _itemprop_content_or_text(block, "validThrough")
+    if valid_through:
+        result["validThrough"] = valid_through
+
     org_block = _itemprop_block(block, "hiringOrganization")
     if org_block:
         org_name = _itemprop_content_or_text(org_block, "name")
@@ -751,6 +755,22 @@ def job_ld_posted_at(job_ld: dict[str, Any]) -> date | None:
         return date.fromisoformat(date_posted[:10])
     except ValueError:
         return None
+
+
+def job_ld_is_expired(job_ld: dict[str, Any]) -> bool:
+    """True when the posting's own schema.org validThrough date has
+    already passed — verified live on a SmartRecruiters posting that kept
+    its title/location/hiringOrganization microdata intact but replaced
+    the actual job content with "This job has expired" and a disabled
+    apply button once validThrough passed, which would otherwise look
+    like a normal (if description-less) successful scan. A missing or
+    unparseable validThrough is not treated as expired — only an
+    unambiguous past date is.
+    """
+    valid_through = posting_date(job_ld.get("validThrough"))
+    if valid_through is None:
+        return False
+    return valid_through < datetime.now(timezone.utc).date()
 
 
 # $ is ambiguous (USD/CAD/AUD/...) so we default it to USD, which is right
