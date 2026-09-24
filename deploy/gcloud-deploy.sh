@@ -14,6 +14,8 @@
 #                       + Cloud Scheduler cron trigger
 #   - follow-up-reminders  Cloud Function 2nd gen (follow_up_reminders.py:dispatch)
 #                       + Cloud Scheduler cron trigger
+#   - retry-failed-scans  Cloud Function 2nd gen (retry_failed_scans.py:dispatch)
+#                       + Cloud Scheduler cron trigger
 #   - browser-fetch   already deployed separately; see BROWSER_FETCH_SERVICE_URL below
 #
 # Prereqs this script assumes already exist (create once, not here):
@@ -385,6 +387,52 @@ gcloud scheduler jobs create http follow-up-reminders-daily \
   --oidc-token-audience="$FOLLOW_UP_REMINDERS_FUNCTION_URL"
 
 # ---------------------------------------------------------------------------
+# 9. retry-failed-scans — Cloud Function (2nd gen), triggered hourly by
+#    Scheduler. Deploys from source (this repo), entry point is dispatch()
+#    in retry_failed_scans.py — same shape as saved-search-alerts above in
+#    every respect (HTTP-triggered, no-allow-unauthenticated, OIDC-invoked
+#    by Scheduler, Cloud SQL attached to the underlying Cloud Run service
+#    afterward since `gcloud functions deploy` has no --set-cloudsql-instances
+#    flag). Hourly matches the shortest backoff window a FAILED row can have
+#    (scan_retry_base_seconds — see app.core.config) — checking more often
+#    couldn't retry anything sooner, and a sweep that finds nothing due is a
+#    no-op (see wake_retryable_failed_scans).
+# ---------------------------------------------------------------------------
+
+gcloud functions deploy retry-failed-scans \
+  --gen2 \
+  --region="$REGION" \
+  --runtime=python313 \
+  --source=. \
+  --entry-point=dispatch \
+  --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=retry_failed_scans.py \
+  --trigger-http \
+  --no-allow-unauthenticated \
+  --set-env-vars="$COMMON_ENV" \
+  --set-secrets="$COMMON_SECRETS" \
+  --memory=512Mi \
+  --timeout=540s
+
+gcloud run services update retry-failed-scans \
+  --region="$REGION" \
+  --add-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION"
+
+RETRY_FAILED_SCANS_FUNCTION_URL="$(gcloud functions describe retry-failed-scans --gen2 --region="$REGION" --format='value(serviceConfig.uri)')"
+
+gcloud functions add-invoker-policy-binding retry-failed-scans \
+  --gen2 \
+  --region="$REGION" \
+  --member="serviceAccount:${PROJECT_ID}@appspot.gserviceaccount.com"
+
+gcloud scheduler jobs create http retry-failed-scans-hourly \
+  --location="$REGION" \
+  --schedule="0 * * * *" \
+  --uri="$RETRY_FAILED_SCANS_FUNCTION_URL" \
+  --http-method=POST \
+  --oidc-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com" \
+  --oidc-token-audience="$RETRY_FAILED_SCANS_FUNCTION_URL"
+
+# ---------------------------------------------------------------------------
 # Redeploys after this point (new image/source, no infra changes) — this is
 # also exactly what .github/workflows/deploy.yml runs on every push to main:
 #   gcloud builds submit --tag "${IMAGE}:$(git rev-parse --short HEAD)" --project="$PROJECT_ID" .
@@ -401,4 +449,6 @@ gcloud scheduler jobs create http follow-up-reminders-daily \
 #     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=saved_search_alerts.py
 #   gcloud functions deploy follow-up-reminders --gen2 --region="$REGION" --project="$PROJECT_ID" \
 #     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=follow_up_reminders.py
+#   gcloud functions deploy retry-failed-scans --gen2 --region="$REGION" --project="$PROJECT_ID" \
+#     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=retry_failed_scans.py
 # ---------------------------------------------------------------------------

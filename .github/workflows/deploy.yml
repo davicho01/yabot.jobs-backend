@@ -1,14 +1,23 @@
 name: Deploy
 
 # Redeploys api/worker/crawl-worker/crawl-dispatcher/saved-search-alerts/
-# follow-up-reminders with the new image/source on every push to main.
-# worker and crawl-worker are Cloud Functions (2nd gen, Pub/Sub-triggered)
-# redeployed from source, same as crawl-dispatcher, saved-search-alerts, and
-# follow-up-reminders (HTTP-triggered, Scheduler-invoked) — not from the
-# built image below. One-time setup (API enablement,
+# follow-up-reminders/retry-failed-scans with the new image/source on every
+# push to main. worker and crawl-worker are Cloud Functions (2nd gen,
+# Pub/Sub-triggered) redeployed from source, same as crawl-dispatcher,
+# saved-search-alerts, follow-up-reminders, and retry-failed-scans
+# (HTTP-triggered, Scheduler-invoked) — not from the built image below.
+# One-time setup (API enablement,
 # Cloud SQL instance, secrets, IAM bindings, Scheduler jobs, the functions'
 # Pub/Sub triggers) lives in deploy/gcloud-deploy.sh and is NOT part of this
 # workflow — see that script's comments before changing infra, not just code.
+#
+# Job graph: test -> build (image + migrations) -> the seven deploy-*
+# jobs, which all depend only on build and nothing else, so GitHub Actions
+# runs them concurrently instead of one long serial chain. Each deploy-*
+# job re-authenticates on its own fresh runner (no state carries over
+# between jobs) — image_tag is the one thing api's job needs from build,
+# passed via job outputs since env vars set in one job aren't visible in
+# another.
 
 on:
   push:
@@ -53,8 +62,79 @@ jobs:
       # sys.path some other way; a clean CI checkout has nothing to rely on.
       - run: python -m pytest
 
-  deploy:
+  build:
     needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.image_tag.outputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/487584214286/locations/global/workloadIdentityPools/github/providers/github-provider
+          service_account: github-deployer@yabotjobs.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: latest
+
+      - id: image_tag
+        name: Set image tag
+        run: echo "image_tag=${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/backend:${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      # Native docker build/push instead of `gcloud builds submit`: Cloud
+      # Build's client-side source upload to the auto-created
+      # ${PROJECT_ID}_cloudbuild staging bucket kept failing for the
+      # WIF-impersonated service account ("forbidden from accessing the
+      # bucket") even after granting cloudbuild.builds.editor,
+      # serviceusage.serviceUsageConsumer, and bucket-level
+      # storage.objectAdmin — the same failure a human owner also hits
+      # locally unless their ADC quota project is set, which doesn't apply
+      # to WIF-issued tokens. Building directly on the runner sidesteps that
+      # staging bucket entirely and only needs artifactregistry.writer.
+      - run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+      - name: Build and push image
+        env:
+          IMAGE_TAG: ${{ steps.image_tag.outputs.image_tag }}
+        run: |
+          docker build -t "$IMAGE_TAG" .
+          docker push "$IMAGE_TAG"
+
+      # Runs here, before any deploy-* job starts, so every service/function
+      # that comes up in parallel below sees a schema they're all compatible
+      # with — none of them wait on each other, only on this.
+      - name: Run database migrations
+        env:
+          IMAGE_TAG: ${{ steps.image_tag.outputs.image_tag }}
+        run: |
+          gcloud run jobs deploy migrate --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID"
+          gcloud run jobs execute migrate --region="$REGION" --project="$PROJECT_ID" --wait
+
+  deploy-api:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/487584214286/locations/global/workloadIdentityPools/github/providers/github-provider
+          service_account: github-deployer@yabotjobs.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: latest
+
+      - name: Deploy api
+        run: gcloud run deploy api --image="${{ needs.build.outputs.image_tag }}" --region="$REGION" --project="$PROJECT_ID"
+
+  # Cloud Functions redeploy from source, not the container image built
+  # above — each of these six jobs checks out the repo itself and only
+  # needs `build` to have finished (migrations done), not its image.
+
+  deploy-worker:
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -69,36 +149,8 @@ jobs:
         with:
           version: latest
 
-      - name: Set image tag
-        run: echo "IMAGE_TAG=${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/backend:${GITHUB_SHA::7}" >> "$GITHUB_ENV"
-
-      # Native docker build/push instead of `gcloud builds submit`: Cloud
-      # Build's client-side source upload to the auto-created
-      # ${PROJECT_ID}_cloudbuild staging bucket kept failing for the
-      # WIF-impersonated service account ("forbidden from accessing the
-      # bucket") even after granting cloudbuild.builds.editor,
-      # serviceusage.serviceUsageConsumer, and bucket-level
-      # storage.objectAdmin — the same failure a human owner also hits
-      # locally unless their ADC quota project is set, which doesn't apply
-      # to WIF-issued tokens. Building directly on the runner sidesteps that
-      # staging bucket entirely and only needs artifactregistry.writer.
-      - run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
-      - name: Build and push image
-        run: |
-          docker build -t "$IMAGE_TAG" .
-          docker push "$IMAGE_TAG"
-
-      - name: Run database migrations
-        run: |
-          gcloud run jobs deploy migrate --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID"
-          gcloud run jobs execute migrate --region="$REGION" --project="$PROJECT_ID" --wait
-
-      - name: Deploy api
-        run: gcloud run deploy api --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID"
-
-      # Cloud Functions redeploy from source, not the container image built
-      # above. GOOGLE_FUNCTION_SOURCE is required because this repo's own
-      # main.py is the FastAPI app, not the worker entry points.
+      # GOOGLE_FUNCTION_SOURCE is required because this repo's own main.py
+      # is the FastAPI app, not the worker entry points.
       - name: Deploy worker
         run: |
           gcloud functions deploy worker \
@@ -109,6 +161,22 @@ jobs:
             --source=. \
             --entry-point=handle_scan_request \
             --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=worker.py
+
+  deploy-crawl-worker:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/487584214286/locations/global/workloadIdentityPools/github/providers/github-provider
+          service_account: github-deployer@yabotjobs.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: latest
 
       - name: Deploy crawl-worker
         run: |
@@ -121,9 +189,24 @@ jobs:
             --entry-point=handle_crawl_request \
             --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=crawl_worker.py
 
-      # Cloud Functions redeploys from source, not the container image built
-      # above. GOOGLE_FUNCTION_SOURCE is required because this repo's own
-      # main.py is the FastAPI app, not the dispatcher entry point.
+  deploy-crawl-dispatcher:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/487584214286/locations/global/workloadIdentityPools/github/providers/github-provider
+          service_account: github-deployer@yabotjobs.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: latest
+
+      # GOOGLE_FUNCTION_SOURCE is required because this repo's own main.py
+      # is the FastAPI app, not the dispatcher entry point.
       - name: Deploy crawl-dispatcher
         run: |
           gcloud functions deploy crawl-dispatcher \
@@ -134,6 +217,22 @@ jobs:
             --source=. \
             --entry-point=dispatch \
             --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=crawl_dispatcher.py
+
+  deploy-saved-search-alerts:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/487584214286/locations/global/workloadIdentityPools/github/providers/github-provider
+          service_account: github-deployer@yabotjobs.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: latest
 
       # Same shape as crawl-dispatcher above — its own dispatch() entry point
       # in saved_search_alerts.py, not this repo's main.py.
@@ -148,6 +247,22 @@ jobs:
             --entry-point=dispatch \
             --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=saved_search_alerts.py
 
+  deploy-follow-up-reminders:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/487584214286/locations/global/workloadIdentityPools/github/providers/github-provider
+          service_account: github-deployer@yabotjobs.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: latest
+
       # Same shape as saved-search-alerts above — its own dispatch() entry
       # point in follow_up_reminders.py, not this repo's main.py.
       - name: Deploy follow-up-reminders
@@ -160,3 +275,33 @@ jobs:
             --source=. \
             --entry-point=dispatch \
             --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=follow_up_reminders.py
+
+  deploy-retry-failed-scans:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/487584214286/locations/global/workloadIdentityPools/github/providers/github-provider
+          service_account: github-deployer@yabotjobs.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: latest
+
+      # Same shape as saved-search-alerts/follow-up-reminders above — its
+      # own dispatch() entry point in retry_failed_scans.py, not this
+      # repo's main.py.
+      - name: Deploy retry-failed-scans
+        run: |
+          gcloud functions deploy retry-failed-scans \
+            --gen2 \
+            --region="$REGION" \
+            --project="$PROJECT_ID" \
+            --runtime=python313 \
+            --source=. \
+            --entry-point=dispatch \
+            --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=retry_failed_scans.py
