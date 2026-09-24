@@ -34,6 +34,19 @@ logger = logging.getLogger("app.browser_fetch")
 # any chance to actually finish.
 _TIMEOUT_SECONDS = 90.0
 
+# Some WAF/bot-management fronts (verified live: jobs.dominos.com's
+# Cloudflare managed challenge) don't block every request outright - they
+# score each render attempt independently, so a single failed render often
+# just means this particular headless launch drew a harder challenge, not
+# that the site is unreachable. Measured live against Domino's: ~59% of
+# individual render attempts failed outright, but a fresh attempt right
+# after routinely succeeds - a second try roughly squares that failure
+# rate (~59% -> ~35%), and the caller's own outer scan-attempt backoff (see
+# jobs.py's scan_retry_max_attempts) only kicks in after this whole
+# function gives up, so retrying here catches the case that backoff alone
+# leaves as a broken-looking page for hours.
+_RENDER_ATTEMPTS = 2
+
 
 @dataclass
 class RenderedPage:
@@ -84,21 +97,28 @@ def fetch_rendered_page(
         logger.info("Browser fetch service not configured; skipping rendered fetch of %s", url)
         return None
 
-    try:
-        response = httpx.post(
-            f"{settings.browser_fetch_service_url}/fetch",
-            json={"url": url, "wait_for_selector": wait_for_selector, "pierce_shadow": pierce_shadow},
-            headers=_identity_token_headers(settings.browser_fetch_service_url),
-            timeout=_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        data = response.json()
-        if data["html"] is None:
-            return None
-        return RenderedPage(html=data["html"], url=data.get("final_url") or url)
-    except Exception:
-        logger.warning("Rendered fetch of %s failed; falling back to no enhancement.", url, exc_info=True)
-        return None
+    for attempt in range(1, _RENDER_ATTEMPTS + 1):
+        try:
+            response = httpx.post(
+                f"{settings.browser_fetch_service_url}/fetch",
+                json={"url": url, "wait_for_selector": wait_for_selector, "pierce_shadow": pierce_shadow},
+                headers=_identity_token_headers(settings.browser_fetch_service_url),
+                timeout=_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            data = response.json()
+            if data["html"] is not None:
+                return RenderedPage(html=data["html"], url=data.get("final_url") or url)
+            logger.info(
+                "Rendered fetch of %s came back empty (attempt %d/%d).", url, attempt, _RENDER_ATTEMPTS
+            )
+        except Exception:
+            logger.warning(
+                "Rendered fetch of %s failed (attempt %d/%d).", url, attempt, _RENDER_ATTEMPTS, exc_info=True
+            )
+
+    logger.warning("Rendered fetch of %s exhausted every attempt; falling back to no enhancement.", url)
+    return None
 
 
 def fetch_rendered_html(
