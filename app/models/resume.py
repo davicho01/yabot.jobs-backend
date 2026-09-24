@@ -75,6 +75,10 @@ class ResumeReview(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class ResumeScore(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """How well a resume matches a specific JobPosting, per the LLM. A pair
     may be scored more than once (history kept); callers fetch the latest.
+    A row starts out as a quick score (category_scores empty) and may later
+    be mutated in place — not superseded by a new row — once the candidate
+    requests the comprehensive category breakdown; see
+    app.api.routes.resumes's evaluation endpoint.
     """
 
     __tablename__ = "resume_scores"
@@ -111,7 +115,10 @@ class TailoredResumeScore(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """How well a TailoredResume matches the JobPosting it was generated
     for, per the LLM — the tailored-resume analogue of ResumeScore. A
     tailored resume may be scored more than once (history kept); callers
-    fetch the latest.
+    fetch the latest. A row starts out as a quick score (category_scores
+    empty) and may later be mutated in place — not superseded by a new row
+    — once the candidate requests the comprehensive category breakdown; see
+    app.api.routes.resumes's evaluation endpoint.
     """
 
     __tablename__ = "tailored_resume_scores"

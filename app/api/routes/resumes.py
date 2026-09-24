@@ -40,12 +40,13 @@ from app.schemas.resume import (
 )
 from app.services.llm_client import LlmError
 from app.services.resume_llm import (
+    evaluate_resume_with_llm,
     generate_cover_letter_with_llm,
     generate_interview_prep_with_llm,
     generate_tailored_resume_with_llm,
     get_users_default_llm_key,
+    quick_score_resume_with_llm,
     review_resume_with_llm,
-    score_resume_with_llm,
 )
 from app.services.resume_parser import SUPPORTED_CONTENT_TYPES, extract_text
 from app.services.resume_renderer import render_cover_letter_docx, render_tailored_resume_docx
@@ -388,7 +389,7 @@ def score_main_resume(
     key = get_users_default_llm_key(db, current_user.id)
 
     try:
-        result = score_resume_with_llm(
+        result = quick_score_resume_with_llm(
             resume.parsed_text,
             posting.description or "",
             provider=key.provider,
@@ -407,13 +408,58 @@ def score_main_resume(
         matched_keywords=result.matched_keywords,
         missing_keywords=result.missing_keywords,
         summary=result.summary,
-        category_scores=result.category_scores,
         overqualification_note=result.overqualification_note,
-        raw_response=result.raw_response,
+        raw_response={"score": result.raw_response},
     )
     db.add(score)
     db.flush()
     _stamp_application_pointer(db, current_user.id, posting.id, latest_score_id=score.id)
+    return score
+
+
+@router.post("/main/evaluation", response_model=ResumeScoreRead)
+def evaluate_main_resume(
+    job_posting_id: uuid.UUID,
+    resume_id: uuid.UUID | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResumeScore:
+    """Comprehensive, opt-in follow-up to POST /resumes/main/score: fills in
+    the latest score's per-category breakdown in place (same row — see
+    ResumeScore's docstring), pinned to that score's already-decided
+    overall_score so the two calls can never disagree on the number.
+    """
+    resume = _resolve_resume(db, current_user.id, resume_id)
+    posting = _get_job_posting(db, job_posting_id)
+    key = get_users_default_llm_key(db, current_user.id)
+
+    score = db.scalar(
+        select(ResumeScore)
+        .where(ResumeScore.resume_id == resume.id, ResumeScore.job_posting_id == posting.id)
+        .order_by(ResumeScore.created_at.desc())
+    )
+    if score is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No score yet for this job — POST /resumes/main/score first.",
+        )
+
+    try:
+        result = evaluate_resume_with_llm(
+            resume.parsed_text,
+            posting.description or "",
+            score.overall_score,
+            provider=key.provider,
+            model=key.model,
+            api_key=key.get_plaintext_key(),
+            base_url=key.base_url,
+        )
+    except LlmError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM request failed: {exc}") from exc
+
+    score.category_scores = result.category_scores
+    score.raw_response = {**(score.raw_response or {}), "evaluation": result.raw_response}
+    db.flush()
     return score
 
 
@@ -628,7 +674,7 @@ def score_tailored_resume(
     key = get_users_default_llm_key(db, current_user.id)
 
     try:
-        result = score_resume_with_llm(
+        result = quick_score_resume_with_llm(
             _tailored_resume_text(tailored.content),
             posting.description or "",
             provider=key.provider,
@@ -647,13 +693,55 @@ def score_tailored_resume(
         matched_keywords=result.matched_keywords,
         missing_keywords=result.missing_keywords,
         summary=result.summary,
-        category_scores=result.category_scores,
         overqualification_note=result.overqualification_note,
-        raw_response=result.raw_response,
+        raw_response={"score": result.raw_response},
     )
     db.add(score)
     db.flush()
     _stamp_application_pointer(db, current_user.id, posting.id, latest_tailored_resume_score_id=score.id)
+    return score
+
+
+@router.post("/tailored/{tailored_id}/evaluation", response_model=TailoredResumeScoreRead)
+def evaluate_tailored_resume(
+    tailored_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> TailoredResumeScore:
+    """Comprehensive, opt-in follow-up to POST /resumes/tailored/{id}/score
+    — the tailored-resume analogue of evaluate_main_resume above.
+    """
+    tailored = _get_owned_tailored_resume(db, current_user.id, tailored_id)
+    posting = _get_job_posting(db, tailored.job_posting_id)
+    key = get_users_default_llm_key(db, current_user.id)
+
+    score = db.scalar(
+        select(TailoredResumeScore)
+        .where(TailoredResumeScore.tailored_resume_id == tailored.id)
+        .order_by(TailoredResumeScore.created_at.desc())
+    )
+    if score is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No score yet for this tailored resume — POST /resumes/tailored/{id}/score first.",
+        )
+
+    try:
+        result = evaluate_resume_with_llm(
+            _tailored_resume_text(tailored.content),
+            posting.description or "",
+            score.overall_score,
+            provider=key.provider,
+            model=key.model,
+            api_key=key.get_plaintext_key(),
+            base_url=key.base_url,
+        )
+    except LlmError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM request failed: {exc}") from exc
+
+    score.category_scores = result.category_scores
+    score.raw_response = {**(score.raw_response or {}), "evaluation": result.raw_response}
+    db.flush()
     return score
 
 

@@ -12,9 +12,10 @@ from app.models.api_key import UserApiKey
 from app.services.llm_client import LlmError, call_llm
 from app.services.prompts import (
     COVER_LETTER_PROMPT,
+    EVALUATION_PROMPT,
     INTERVIEW_PREP_PROMPT,
+    QUICK_SCORE_PROMPT,
     REVIEW_PROMPT,
-    SCORE_PROMPT,
     TAILOR_PROMPT,
 )
 
@@ -100,8 +101,9 @@ def review_resume_with_llm(
 
 # --- Score ---------------------------------------------------------------
 
-# Points available per rubric category (see SCORE_PROMPT) — authoritative in
-# code so a model that echoes back the wrong max_score can't corrupt it.
+# Points available per rubric category (see EVALUATION_PROMPT) —
+# authoritative in code so a model that echoes back the wrong max_score
+# can't corrupt it.
 _CATEGORY_MAX = {
     "required_skills": 50,
     "responsibilities": 30,
@@ -162,19 +164,18 @@ def _as_category_scores_list(value: Any, overall_score: int) -> list[dict[str, A
 
 
 @dataclass
-class ResumeScoreResult:
+class ResumeQuickScoreResult:
     overall_score: int = 0
     matched_keywords: list[str] = field(default_factory=list)
     missing_keywords: list[str] = field(default_factory=list)
     summary: str = ""
-    category_scores: list[dict[str, Any]] = field(default_factory=list)
-    # Informational only — does not affect overall_score/category_scores,
-    # which stay purely merit-based. See SCORE_PROMPT.
+    # Informational only — does not affect overall_score, which stays
+    # purely merit-based. See QUICK_SCORE_PROMPT.
     overqualification_note: str = ""
     raw_response: dict[str, Any] | None = None
 
 
-def score_resume_with_llm(
+def quick_score_resume_with_llm(
     resume_text: str,
     job_description: str,
     *,
@@ -182,8 +183,12 @@ def score_resume_with_llm(
     model: str | None,
     api_key: str,
     base_url: str | None,
-) -> ResumeScoreResult:
-    prompt = SCORE_PROMPT.format(
+) -> ResumeQuickScoreResult:
+    """Fast fit check: just the number, matched/missing keywords, and a
+    short summary — no per-category breakdown. See evaluate_resume_with_llm
+    for the slower, opt-in comprehensive follow-up.
+    """
+    prompt = QUICK_SCORE_PROMPT.format(
         resume_text=resume_text[:_MAX_TEXT_CHARS], job_description=job_description[:_MAX_TEXT_CHARS]
     )
     raw = call_llm(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
@@ -196,21 +201,56 @@ def score_resume_with_llm(
         score = max(0, min(100, int(data.get("overall_score"))))
     except (TypeError, ValueError):
         score = 0
-    # category_scores is reconciled to sum to exactly `score` — see
-    # _as_category_scores_list — rather than trusted verbatim from the model.
-    category_scores = _as_category_scores_list(data.get("category_scores"), score)
 
-    return ResumeScoreResult(
+    return ResumeQuickScoreResult(
         overall_score=score,
         matched_keywords=_as_str_list(data.get("matched_keywords")),
         missing_keywords=_as_str_list(data.get("missing_keywords")),
         summary=data.get("summary") if isinstance(data.get("summary"), str) else "",
-        category_scores=category_scores,
         overqualification_note=(
             data.get("overqualification_note") if isinstance(data.get("overqualification_note"), str) else ""
         ),
         raw_response=data,
     )
+
+
+@dataclass
+class ResumeEvaluationResult:
+    category_scores: list[dict[str, Any]] = field(default_factory=list)
+    raw_response: dict[str, Any] | None = None
+
+
+def evaluate_resume_with_llm(
+    resume_text: str,
+    job_description: str,
+    overall_score: int,
+    *,
+    provider: str,
+    model: str | None,
+    api_key: str,
+    base_url: str | None,
+) -> ResumeEvaluationResult:
+    """Comprehensive, opt-in follow-up to quick_score_resume_with_llm: given
+    an already-decided overall_score, produces the 4-category rubric
+    breakdown explaining it. Slower (much larger output) than the quick
+    score, which is why it's a separate, user-requested call.
+    """
+    prompt = EVALUATION_PROMPT.format(
+        resume_text=resume_text[:_MAX_TEXT_CHARS],
+        job_description=job_description[:_MAX_TEXT_CHARS],
+        overall_score=overall_score,
+    )
+    raw = call_llm(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
+    try:
+        data = _parse_response(raw)
+    except json.JSONDecodeError as exc:
+        raise LlmError(f"Model response was not valid JSON: {exc}") from exc
+
+    # category_scores is reconciled to sum to exactly `overall_score` — see
+    # _as_category_scores_list — rather than trusted verbatim from the model.
+    category_scores = _as_category_scores_list(data.get("category_scores"), overall_score)
+
+    return ResumeEvaluationResult(category_scores=category_scores, raw_response=data)
 
 
 # --- Tailored generation ---------------------------------------------------
