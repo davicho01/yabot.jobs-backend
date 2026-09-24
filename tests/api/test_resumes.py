@@ -11,11 +11,17 @@ import app.models as m
 from app.api.routes.resumes import (
     _resolve_resume,
     _tailored_resume_text,
+    apply_resume_skill_additions,
+    delete_resume_skill_addition,
     get_main_interview_prep,
+    get_missing_keywords_summary,
     get_resume_score_history,
+    list_resume_skill_additions,
+    upsert_resume_skill_addition,
 )
 from app.db.base import Base
 from app.models.resume import InterviewPrep
+from app.schemas.resume import ResumeSkillAdditionUpsert
 
 _counter = itertools.count()
 
@@ -25,13 +31,15 @@ def db() -> Session:
     # Local db fixture (not tests/api/conftest.py's, which only has
     # SavedSearch) — _resolve_resume/get_resume_score_history need Resume,
     # ResumeScore and (for the score history's job title/company) JobPosting;
-    # get_main_interview_prep also needs InterviewPrep.
+    # get_main_interview_prep also needs InterviewPrep; the skill-addition
+    # routes need ResumeSkillAddition.
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(
         engine,
         tables=[
             m.Resume.__table__,
             m.ResumeScore.__table__,
+            m.ResumeSkillAddition.__table__,
             m.JobPostingUrl.__table__,
             m.JobPosting.__table__,
             InterviewPrep.__table__,
@@ -215,6 +223,195 @@ def test_get_resume_score_history_does_not_double_count_a_repeat_within_one_scor
     result = get_resume_score_history(resume.id, current_user=m.User(id=user_id), db=db)
 
     assert result.recurring_missing_keywords == []
+
+
+# ---------------------------------------------------- missing-keywords summary
+
+
+def test_missing_keywords_summary_defaults_to_the_main_resume(db):
+    user_id = uuid.uuid4()
+    main = _make_resume(db, user_id, is_main=True)
+    other = _make_resume(db, user_id, is_main=False)
+    # SQL recurs across 2 jobs scored against the main resume; the other
+    # resume's own recurring gap ("Kubernetes") must not bleed in when no
+    # resume_id is given — each resume's scoring history is its own thing.
+    _make_score(db, main, _make_job_posting(db), missing_keywords=["SQL", "Docker"])
+    _make_score(db, main, _make_job_posting(db), missing_keywords=["sql"])
+    _make_score(db, other, _make_job_posting(db), missing_keywords=["Kubernetes"])
+    _make_score(db, other, _make_job_posting(db), missing_keywords=["Kubernetes"])
+
+    result = get_missing_keywords_summary(current_user=m.User(id=user_id), db=db)
+
+    by_keyword = {e.keyword: e.count for e in result.entries}
+    assert by_keyword == {"SQL": 2}
+
+
+def test_missing_keywords_summary_uses_the_given_resume_id(db):
+    user_id = uuid.uuid4()
+    main = _make_resume(db, user_id, is_main=True)
+    other = _make_resume(db, user_id, is_main=False)
+    _make_score(db, main, _make_job_posting(db), missing_keywords=["SQL"])
+    _make_score(db, other, _make_job_posting(db), missing_keywords=["Kubernetes"])
+    _make_score(db, other, _make_job_posting(db), missing_keywords=["Kubernetes"])
+
+    result = get_missing_keywords_summary(resume_id=other.id, current_user=m.User(id=user_id), db=db)
+
+    by_keyword = {e.keyword: e.count for e in result.entries}
+    assert by_keyword == {"Kubernetes": 2}
+
+
+def test_missing_keywords_summary_does_not_double_count_a_repeat_within_one_score(db):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    _make_score(db, resume, _make_job_posting(db), missing_keywords=["SQL", "SQL"])
+
+    result = get_missing_keywords_summary(current_user=m.User(id=user_id), db=db)
+
+    assert result.entries == []
+
+
+def test_missing_keywords_summary_does_not_inflate_count_when_the_same_job_is_rescored(db):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    job = _make_job_posting(db, title="Backend Engineer", company_name="Acme")
+    other_job = _make_job_posting(db, title="Platform Engineer", company_name="Globex")
+    _make_score(db, resume, job, missing_keywords=["SQL"])
+    _make_score(db, resume, job, missing_keywords=["SQL"])  # rescored — same job
+    _make_score(db, resume, other_job, missing_keywords=["SQL"])
+
+    result = get_missing_keywords_summary(current_user=m.User(id=user_id), db=db)
+
+    assert len(result.entries) == 1
+    entry = result.entries[0]
+    assert entry.keyword == "SQL"
+    assert entry.count == 2  # 2 distinct jobs, not 3 scores
+    assert {j.job_posting_id for j in entry.jobs} == {job.id, other_job.id}
+
+
+def test_missing_keywords_summary_includes_job_refs_for_linking(db):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    job_a = _make_job_posting(db, title="Backend Engineer", company_name="Acme")
+    job_b = _make_job_posting(db, title="Platform Engineer", company_name="Globex")
+    _make_score(db, resume, job_a, missing_keywords=["Kubernetes"])
+    _make_score(db, resume, job_b, missing_keywords=["Kubernetes"])
+
+    result = get_missing_keywords_summary(current_user=m.User(id=user_id), db=db)
+
+    assert len(result.entries) == 1
+    jobs_by_title = {j.job_title: j for j in result.entries[0].jobs}
+    assert jobs_by_title["Backend Engineer"].company_name == "Acme"
+    assert jobs_by_title["Backend Engineer"].url_id == job_a.url_id
+    assert jobs_by_title["Platform Engineer"].company_name == "Globex"
+
+
+def test_missing_keywords_summary_never_leaks_another_users_scores(db):
+    user_id = uuid.uuid4()
+    other_user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    other_resume = _make_resume(db, other_user_id, is_main=True)
+    _make_score(db, other_resume, _make_job_posting(db), missing_keywords=["SQL"])
+    _make_score(db, other_resume, _make_job_posting(db), missing_keywords=["SQL"])
+    _make_score(db, resume, _make_job_posting(db), missing_keywords=["Docker"])
+
+    result = get_missing_keywords_summary(current_user=m.User(id=user_id), db=db)
+
+    assert result.entries == []  # this user only has one job scored, no recurrence
+
+
+def test_missing_keywords_summary_404s_for_a_resume_owned_by_someone_else(db):
+    owner_id = uuid.uuid4()
+    resume = _make_resume(db, owner_id, is_main=True)
+
+    with pytest.raises(HTTPException) as exc_info:
+        get_missing_keywords_summary(resume_id=resume.id, current_user=m.User(id=uuid.uuid4()), db=db)
+    assert exc_info.value.status_code == 404
+
+
+# ----------------------------------------------------------- skill additions
+
+
+def _upsert(db, resume_id, user_id, *, keyword="Kubernetes", target_role="General / Skills", explanation="Used it."):
+    return upsert_resume_skill_addition(
+        resume_id,
+        ResumeSkillAdditionUpsert(keyword=keyword, target_role=target_role, explanation=explanation),
+        current_user=m.User(id=user_id),
+        db=db,
+    )
+
+
+def test_upsert_skill_addition_creates_a_draft(db):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+
+    addition = _upsert(db, resume.id, user_id, keyword="Kubernetes", target_role="DevOps Engineer — Acme")
+
+    assert addition.resume_id == resume.id
+    assert addition.keyword == "Kubernetes"
+    assert addition.target_role == "DevOps Engineer — Acme"
+
+
+def test_upsert_skill_addition_edits_the_existing_draft_for_the_same_keyword(db):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    first = _upsert(db, resume.id, user_id, keyword="SQL", explanation="Wrote reporting queries.")
+
+    second = _upsert(db, resume.id, user_id, keyword="SQL", explanation="Owned the analytics schema.")
+
+    assert second.id == first.id  # same row, not a duplicate
+    all_drafts = list_resume_skill_additions(resume.id, current_user=m.User(id=user_id), db=db)
+    assert len(all_drafts) == 1
+    assert all_drafts[0].explanation == "Owned the analytics schema."
+
+
+def test_upsert_skill_addition_404s_for_a_resume_owned_by_someone_else(db):
+    owner_id = uuid.uuid4()
+    resume = _make_resume(db, owner_id, is_main=True)
+
+    with pytest.raises(HTTPException) as exc_info:
+        _upsert(db, resume.id, uuid.uuid4())
+    assert exc_info.value.status_code == 404
+
+
+def test_list_skill_additions_only_returns_this_resumes_drafts(db):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    other_resume = _make_resume(db, user_id, is_main=False)
+    _upsert(db, resume.id, user_id, keyword="SQL")
+    _upsert(db, other_resume.id, user_id, keyword="Docker")
+
+    result = list_resume_skill_additions(resume.id, current_user=m.User(id=user_id), db=db)
+
+    assert [a.keyword for a in result] == ["SQL"]
+
+
+def test_delete_skill_addition_removes_it(db):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    addition = _upsert(db, resume.id, user_id, keyword="SQL")
+
+    delete_resume_skill_addition(resume.id, addition.id, current_user=m.User(id=user_id), db=db)
+
+    assert list_resume_skill_additions(resume.id, current_user=m.User(id=user_id), db=db) == []
+
+
+def test_delete_skill_addition_404s_for_one_owned_by_someone_else(db):
+    owner_id = uuid.uuid4()
+    resume = _make_resume(db, owner_id, is_main=True)
+    addition = _upsert(db, resume.id, owner_id, keyword="SQL")
+
+    with pytest.raises(HTTPException) as exc_info:
+        delete_resume_skill_addition(resume.id, addition.id, current_user=m.User(id=uuid.uuid4()), db=db)
+    assert exc_info.value.status_code == 404
+
+
+def test_apply_skill_additions_422s_when_there_are_no_drafts(db):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+
+    with pytest.raises(HTTPException) as exc_info:
+        apply_resume_skill_additions(resume.id, current_user=m.User(id=user_id), db=db)
+    assert exc_info.value.status_code == 422
 
 
 # --------------------------------------------------------- interview prep

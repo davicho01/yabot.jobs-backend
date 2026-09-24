@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -109,6 +109,37 @@ class ResumeScore(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     def __repr__(self) -> str:
         return f"<ResumeScore resume_id={self.resume_id} job_posting_id={self.job_posting_id} score={self.overall_score}>"
+
+
+class ResumeSkillAddition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A candidate's draft explanation of a missing skill (see ResumeScore.
+    missing_keywords) they actually have real experience with — staged
+    against one resume, saved immediately on entry so filling these in
+    across several skills survives a refresh. Only consumed (read, then
+    deleted) when the candidate applies them all at once via
+    POST /resumes/{resume_id}/skill-additions/apply, which turns each into
+    a bullet point on a brand-new Resume row.
+    """
+
+    __tablename__ = "resume_skill_additions"
+    __table_args__ = (UniqueConstraint("resume_id", "keyword", name="uq_resume_skill_additions_resume_keyword"),)
+
+    resume_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("resumes.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    keyword: Mapped[str] = mapped_column(String(255), nullable=False)
+    # A label from GET /resumes/{resume_id}/roles (a specific work-history
+    # entry) or the frontend's fixed "General / Skills section" catch-all —
+    # tells apply_skill_additions_with_llm where in the resume to place the
+    # new bullet.
+    target_role: Mapped[str] = mapped_column(String(255), nullable=False)
+    explanation: Mapped[str] = mapped_column(Text, nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<ResumeSkillAddition resume_id={self.resume_id} keyword={self.keyword!r}>"
 
 
 class TailoredResumeScore(UUIDPrimaryKeyMixin, TimestampMixin, Base):

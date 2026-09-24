@@ -15,6 +15,8 @@ from app.services.prompts import (
     EVALUATION_PROMPT,
     INTERVIEW_PREP_PROMPT,
     QUICK_SCORE_PROMPT,
+    RESUME_ROLES_PROMPT,
+    RESUME_SKILL_ADDITIONS_PROMPT,
     REVIEW_PROMPT,
     TAILOR_PROMPT,
 )
@@ -339,6 +341,79 @@ def generate_tailored_resume_with_llm(
         resume_text=resume_text[:_MAX_TEXT_CHARS],
         job_description=job_description[:_MAX_TEXT_CHARS],
         fitness_assessment=_format_fitness_assessment(fitness_score),
+    )
+    raw = call_llm(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
+    try:
+        data = _parse_response(raw)
+    except json.JSONDecodeError as exc:
+        raise LlmError(f"Model response was not valid JSON: {exc}") from exc
+
+    return TailoredResumeContent(
+        summary=data.get("summary") if isinstance(data.get("summary"), str) else "",
+        sections=_as_sections_list(data.get("sections")),
+        contact=_as_contact_dict(data.get("contact")),
+        raw_response=data,
+    )
+
+
+# --- Resume roles / skill additions -----------------------------------------
+
+
+@dataclass
+class ResumeRolesResult:
+    roles: list[str] = field(default_factory=list)
+    raw_response: dict[str, Any] | None = None
+
+
+def extract_resume_roles_with_llm(
+    resume_text: str, *, provider: str, model: str | None, api_key: str, base_url: str | None
+) -> ResumeRolesResult:
+    """Short labels for this resume's own work-history entries (e.g.
+    "Senior Engineer — Acme Corp (2020–Present)") — populates the "which job
+    does this belong to" dropdown on a ResumeSkillAddition. Computed fresh on
+    each call rather than cached; cheap enough, and the frontend's own
+    react-query cache already avoids repeat calls within one page session.
+    """
+    prompt = RESUME_ROLES_PROMPT.format(resume_text=resume_text[:_MAX_TEXT_CHARS])
+    raw = call_llm(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
+    try:
+        data = _parse_response(raw)
+    except json.JSONDecodeError as exc:
+        raise LlmError(f"Model response was not valid JSON: {exc}") from exc
+
+    return ResumeRolesResult(roles=_as_str_list(data.get("roles")), raw_response=data)
+
+
+def _format_skill_additions(additions: list[dict[str, Any]]) -> str:
+    lines = []
+    for addition in additions:
+        lines.append(
+            f"- Skill: {addition['keyword']}\n"
+            f"  Belongs under: {addition['target_role']}\n"
+            f"  Candidate's explanation: {addition['explanation']}"
+        )
+    return "\n".join(lines)
+
+
+def apply_skill_additions_with_llm(
+    resume_text: str,
+    additions: list[dict[str, Any]],
+    *,
+    provider: str,
+    model: str | None,
+    api_key: str,
+    base_url: str | None,
+) -> TailoredResumeContent:
+    """Turns a batch of ResumeSkillAddition drafts into resume bullets,
+    reproducing the rest of the resume unchanged — see
+    RESUME_SKILL_ADDITIONS_PROMPT. Same output shape (and the same
+    TailoredResumeContent/parsing helpers) as tailoring, since it's the same
+    kind of structured resume rewrite, just additive rather than
+    job-targeted.
+    """
+    prompt = RESUME_SKILL_ADDITIONS_PROMPT.format(
+        resume_text=resume_text[:_MAX_TEXT_CHARS],
+        skill_additions=_format_skill_additions(additions),
     )
     raw = call_llm(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
     try:

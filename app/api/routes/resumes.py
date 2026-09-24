@@ -1,5 +1,5 @@
 import uuid
-from collections import Counter
+from collections import Counter, defaultdict
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy import func, select, update
@@ -14,6 +14,7 @@ from app.models.resume import (
     Resume,
     ResumeReview,
     ResumeScore,
+    ResumeSkillAddition,
     TailoredResume,
     TailoredResumeScore,
 )
@@ -23,15 +24,21 @@ from app.schemas.resume import (
     CoverLetterRead,
     CoverLetterUpload,
     InterviewPrepRead,
+    MissingSkillJobRef,
+    MissingSkillSummaryEntry,
+    MissingSkillsSummaryRead,
     RecurringMissingKeywordRead,
     ResumeDetailRead,
     ResumeRead,
     ResumeReviewRead,
+    ResumeRolesRead,
     ResumeScoreHistoryEntryRead,
     ResumeScoreHistoryRead,
     ResumeScoreRead,
     ResumeScoreUpload,
     ResumeSectionContent,
+    ResumeSkillAdditionRead,
+    ResumeSkillAdditionUpsert,
     ResumeUpdate,
     TailoredResumeRead,
     TailoredResumeScoreRead,
@@ -40,7 +47,9 @@ from app.schemas.resume import (
 )
 from app.services.llm_client import LlmError
 from app.services.resume_llm import (
+    apply_skill_additions_with_llm,
     evaluate_resume_with_llm,
+    extract_resume_roles_with_llm,
     generate_cover_letter_with_llm,
     generate_interview_prep_with_llm,
     generate_tailored_resume_with_llm,
@@ -324,6 +333,220 @@ def get_resume_score_history(
     ][:15]
 
     return ResumeScoreHistoryRead(entries=entries, recurring_missing_keywords=recurring)
+
+
+@router.get("/missing-keywords", response_model=MissingSkillsSummaryRead)
+def get_missing_keywords_summary(
+    resume_id: uuid.UUID | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> MissingSkillsSummaryRead:
+    """The richer analogue of get_resume_score_history's
+    recurring_missing_keywords above, for one resume (main resume by
+    default, same _resolve_resume convention as every other resume
+    endpoint) — attaches the jobs that asked for each skill so a recurring
+    gap is easy to trace back to what to add and why. Scoped per-resume
+    rather than across all of a user's resumes since scoring itself is
+    always done against one selected resume — a candidate running several
+    resumes for different tracks would otherwise get gaps blended together
+    from roles that have nothing to do with each other.
+    """
+    resume = _resolve_resume(db, current_user.id, resume_id)
+    scores = db.scalars(
+        select(ResumeScore)
+        .where(ResumeScore.resume_id == resume.id)
+        .options(selectinload(ResumeScore.job_posting))
+    ).all()
+
+    # Keyed by job_posting_id (not a running count) so rescoring the same
+    # job repeatedly doesn't inflate a keyword's job count — mirrors the
+    # within-score dedup above, extended to within-job.
+    keyword_jobs: dict[str, dict[uuid.UUID, MissingSkillJobRef]] = defaultdict(dict)
+    display_form: dict[str, str] = {}
+    for score in scores:
+        seen_in_this_score: set[str] = set()
+        for keyword in score.missing_keywords:
+            cleaned = (keyword or "").strip()
+            if not cleaned:
+                continue
+            key = cleaned.lower()
+            if key in seen_in_this_score:
+                continue
+            seen_in_this_score.add(key)
+            display_form.setdefault(key, cleaned)
+            keyword_jobs[key][score.job_posting_id] = MissingSkillJobRef(
+                job_posting_id=score.job_posting_id,
+                url_id=score.job_posting.url_id,
+                job_title=score.job_posting.title,
+                company_name=score.job_posting.company_name,
+            )
+
+    entries = sorted(
+        (
+            MissingSkillSummaryEntry(keyword=display_form[key], count=len(jobs), jobs=list(jobs.values()))
+            for key, jobs in keyword_jobs.items()
+            if len(jobs) >= 2
+        ),
+        key=lambda e: (-e.count, e.keyword.lower()),
+    )[:20]
+    return MissingSkillsSummaryRead(entries=entries)
+
+
+@router.get("/{resume_id}/roles", response_model=ResumeRolesRead)
+def get_resume_roles(
+    resume_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> ResumeRolesRead:
+    """Labels for this resume's own work-history entries, for the "which job
+    does this belong to" dropdown on a ResumeSkillAddition (see below).
+    """
+    resume = _resolve_resume(db, current_user.id, resume_id)
+    key = get_users_default_llm_key(db, current_user.id)
+
+    try:
+        result = extract_resume_roles_with_llm(
+            resume.parsed_text,
+            provider=key.provider,
+            model=key.model,
+            api_key=key.get_plaintext_key(),
+            base_url=key.base_url,
+        )
+    except LlmError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM request failed: {exc}") from exc
+
+    return ResumeRolesRead(roles=result.roles)
+
+
+@router.get("/{resume_id}/skill-additions", response_model=list[ResumeSkillAdditionRead])
+def list_resume_skill_additions(
+    resume_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> list[ResumeSkillAddition]:
+    resume = _resolve_resume(db, current_user.id, resume_id)
+    return list(
+        db.scalars(
+            select(ResumeSkillAddition)
+            .where(ResumeSkillAddition.resume_id == resume.id)
+            .order_by(ResumeSkillAddition.created_at)
+        ).all()
+    )
+
+
+@router.post(
+    "/{resume_id}/skill-additions", response_model=ResumeSkillAdditionRead, status_code=status.HTTP_201_CREATED
+)
+def upsert_resume_skill_addition(
+    resume_id: uuid.UUID,
+    payload: ResumeSkillAdditionUpsert,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResumeSkillAddition:
+    """Saved immediately (not just held in frontend state) so working
+    through several skills survives a refresh — see
+    ResumeSkillAddition's own docstring. One row per (resume_id, keyword);
+    calling this again for a keyword already drafted edits that draft
+    in place rather than creating a second one.
+    """
+    resume = _resolve_resume(db, current_user.id, resume_id)
+    addition = db.scalar(
+        select(ResumeSkillAddition).where(
+            ResumeSkillAddition.resume_id == resume.id, ResumeSkillAddition.keyword == payload.keyword
+        )
+    )
+    if addition is None:
+        addition = ResumeSkillAddition(resume_id=resume.id, user_id=current_user.id, keyword=payload.keyword)
+        db.add(addition)
+    addition.target_role = payload.target_role
+    addition.explanation = payload.explanation
+    db.flush()
+    return addition
+
+
+@router.delete("/{resume_id}/skill-additions/{addition_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_resume_skill_addition(
+    resume_id: uuid.UUID,
+    addition_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    resume = _resolve_resume(db, current_user.id, resume_id)
+    addition = db.scalar(
+        select(ResumeSkillAddition).where(
+            ResumeSkillAddition.id == addition_id, ResumeSkillAddition.resume_id == resume.id
+        )
+    )
+    if addition is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill addition not found.")
+    db.delete(addition)
+    db.flush()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{resume_id}/skill-additions/apply", response_model=ResumeRead, status_code=status.HTTP_201_CREATED)
+def apply_resume_skill_additions(
+    resume_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> Resume:
+    """The batch action behind "Add missing skills to resume": turns every
+    staged ResumeSkillAddition for this resume into a bullet point and
+    produces a brand-new Resume (is_main=False — additive and reversible;
+    the candidate reviews and promotes it themselves from "My resume")
+    rather than editing the existing one in place. Consumes (deletes) the
+    drafts on success so the page returns to a clean slate.
+    """
+    resume = _resolve_resume(db, current_user.id, resume_id)
+    additions = list(
+        db.scalars(select(ResumeSkillAddition).where(ResumeSkillAddition.resume_id == resume.id)).all()
+    )
+    if not additions:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Add at least one skill first — POST /resumes/{resume_id}/skill-additions.",
+        )
+    key = get_users_default_llm_key(db, current_user.id)
+
+    try:
+        result = apply_skill_additions_with_llm(
+            resume.parsed_text,
+            [
+                {"keyword": a.keyword, "target_role": a.target_role, "explanation": a.explanation}
+                for a in additions
+            ],
+            provider=key.provider,
+            model=key.model,
+            api_key=key.get_plaintext_key(),
+            base_url=key.base_url,
+        )
+    except LlmError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM request failed: {exc}") from exc
+
+    content = TailoredResumeUpload(
+        summary=result.summary,
+        sections=[ResumeSectionContent(**section) for section in result.sections],
+        contact=ContactInfo(**result.contact) if result.contact else None,
+    )
+    docx_bytes = render_tailored_resume_docx(
+        content.summary,
+        [
+            (section.heading, section.bullets, [entry.model_dump() for entry in section.entries])
+            for section in content.sections
+        ],
+        _resolve_contact(content.contact, current_user),
+    )
+    filename = f"{(current_user.display_name or '').replace('/', '_')}-resume-updated.docx"
+    storage_key = f"resumes/{current_user.id}/{uuid.uuid4()}-{filename}"
+    upload_file(storage_key, docx_bytes, _TAILORED_CONTENT_TYPE)
+
+    new_resume = Resume(
+        user_id=current_user.id,
+        filename=filename,
+        content_type=_TAILORED_CONTENT_TYPE,
+        storage_key=storage_key,
+        parsed_text=_tailored_resume_text(content.model_dump()),
+        is_main=False,
+    )
+    db.add(new_resume)
+    for addition in additions:
+        db.delete(addition)
+    db.flush()
+    return new_resume
 
 
 @router.post("/main/review", response_model=ResumeReviewRead)

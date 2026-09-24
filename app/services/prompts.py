@@ -297,6 +297,104 @@ Fitness assessment (prior evaluation of this resume against this job):
 \"\"\"
 """
 
+RESUME_ROLES_PROMPT = """Read the resume text below and identify each distinct \
+work-history entry (one per job held, not per bullet point).
+
+Respond with ONLY a single JSON object (no markdown fences, no commentary) \
+with exactly this key:
+
+{{
+  "roles": [string, ...]
+}}
+
+Each string in "roles" is one short label for a single job in the \
+candidate's work history, in the resume's own order, formatted \
+"Title — Company (Dates)" when those parts are available (omit a part \
+that genuinely isn't stated rather than inventing it). Do not include \
+education, projects, skills, or certifications — work-history roles only.
+
+Resume text:
+\"\"\"
+{resume_text}
+\"\"\"
+"""
+
+RESUME_SKILL_ADDITIONS_PROMPT = """You are updating a candidate's resume to include real experience \
+they have but never wrote down.
+
+Below is the candidate's current resume, followed by a list of skill \
+additions: each names a skill or piece of experience the candidate says \
+they genuinely have, a short explanation in their own words, and which \
+part of the resume it belongs under.
+
+Respond with ONLY a single JSON object (no markdown fences, no commentary) \
+with exactly these keys:
+
+{{
+  "contact": {{"name": string|null, "email": string|null, "phone": string|null, \
+"location": string|null, "linkedin": string|null}},
+  "summary": string,
+  "sections": [
+    {{"heading": string,
+      "entries": [{{"title": string, "subtitle": string|null, "bullets": [string, ...]}}, ...],
+      "bullets": [string, ...]}},
+    ...
+  ]
+}}
+
+This is an additive edit, not a rewrite — reproduce "contact", "summary", \
+every section, and every existing bullet/entry from the resume text below \
+unchanged, in the same shape and order. The only change is applying each \
+skill addition listed below, which always has two parts:
+1. Narrative placement:
+   - For an addition whose "target_role" names a specific work-history \
+entry, add one new bullet to that entry's own "bullets" (matching it to \
+the entry with the same or closest title/company — the wording won't be \
+identical character-for-character), turning the candidate's own \
+explanation into one concise, resume-appropriate bullet point (plain \
+text, no markup) — rephrase for clarity and tone, but never invent \
+detail, tools, or outcomes the explanation didn't mention.
+   - For an addition whose "target_role" is the general/skills catch-all \
+(not a specific role), skip this step — there is no work-history entry \
+to narrate it under.
+2. Skills-list placement (always do this, for every addition, regardless \
+of "target_role"): make sure the skill/technology named in the addition's \
+"Skill:" line itself is listed in whatever section of this resume serves \
+as its skills list — resumes vary, so find it by what it's for, not by \
+name (it might be headed "Skills", "Technical Skills", "Core Technical \
+Skills", "Core Competencies", "Technologies", or similar). Match this \
+resume's own existing style for that section instead of imposing a fixed \
+format:
+   - If that section lists skills as labeled categories (e.g. a bullet \
+reading "Languages: Python, Go, Java" or "Cloud & DevOps: AWS, Terraform"), \
+append the new skill to whichever existing category bullet it best fits, \
+rather than adding a redundant new bullet — only add a new category \
+bullet if none of the existing ones are a reasonable fit.
+   - If that section is a flat list of individual skills (one per bullet), \
+add one new bullet with just the skill name.
+   - If the resume has no skills-type section at all, create one (heading \
+"Skills", flat bullets) and add the skill there.
+   Do this in addition to step 1 when a specific role bullet was also \
+added — the skill should end up in both places, not one or the other.
+
+"contact"/"summary"/section-shape rules are otherwise identical to the \
+resume's own existing structure — see the entries/bullets distinction: \
+"entries" for a section listing multiple distinct items (one per job, \
+degree, or project), "bullets" directly on a section for a flat list \
+(e.g. "Skills"). Keep all bullet/title/subtitle text plain, no markup. \
+This gets rendered straight into a plain, single-column, ATS-scannable .docx.
+
+Resume text:
+\"\"\"
+{resume_text}
+\"\"\"
+
+Skill additions:
+\"\"\"
+{skill_additions}
+\"\"\"
+"""
+
 COVER_LETTER_PROMPT = """You are an expert cover letter writer.
 
 Write a concise, specific cover letter for the candidate below, targeting the \

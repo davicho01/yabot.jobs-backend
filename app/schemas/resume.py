@@ -158,6 +158,53 @@ class ResumeScoreHistoryRead(BaseModel):
     recurring_missing_keywords: list[RecurringMissingKeywordRead]
 
 
+class MissingSkillJobRef(BaseModel):
+    # A job that asked for a given recurring missing skill — see
+    # GET /resumes/missing-keywords. Same url_id-for-linking convention as
+    # ResumeScoreHistoryEntryRead above.
+    job_posting_id: uuid.UUID
+    url_id: uuid.UUID
+    job_title: str | None
+    company_name: str | None
+
+
+class MissingSkillSummaryEntry(BaseModel):
+    keyword: str
+    # Number of distinct jobs that flagged this keyword missing for this one
+    # resume (not the number of scores — rescoring the same job repeatedly
+    # doesn't inflate this).
+    count: int
+    jobs: list[MissingSkillJobRef]
+
+
+class MissingSkillsSummaryRead(BaseModel):
+    entries: list[MissingSkillSummaryEntry]
+
+
+class ResumeRolesRead(BaseModel):
+    # Labels for this resume's own work-history entries — see
+    # GET /resumes/{resume_id}/roles — used to populate the "which job does
+    # this belong to" dropdown on a ResumeSkillAddition.
+    roles: list[str]
+
+
+class ResumeSkillAdditionUpsert(BaseModel):
+    keyword: str
+    target_role: str
+    explanation: str
+
+
+class ResumeSkillAdditionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    resume_id: uuid.UUID
+    keyword: str
+    target_role: str
+    explanation: str
+    created_at: datetime
+
+
 class TailoredResumeRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
