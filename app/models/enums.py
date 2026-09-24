@@ -193,6 +193,11 @@ class AtsType(StrEnum):
     # module on their own SAP Hybris storefront, not any shared ATS
     # platform (see adapters/sportsmans_warehouse.py).
     SPORTSMANS_WAREHOUSE = "sportsmans_warehouse"
+    # ApplicantPro (rebranded "isolved Talent Acquisition") — a multi-tenant
+    # ATS at {tenant}.applicantpro.com, jobs server-rendered as plain
+    # anchors on a listing endpoint, each detail page a full schema.org
+    # JobPosting JSON-LD block (see adapters/applicantpro.py).
+    APPLICANTPRO = "applicantpro"
 
 
 class CrawlSourceStatus(StrEnum):
