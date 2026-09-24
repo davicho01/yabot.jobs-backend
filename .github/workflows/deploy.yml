@@ -294,7 +294,13 @@ jobs:
 
       # Same shape as saved-search-alerts/follow-up-reminders above — its
       # own dispatch() entry point in retry_failed_scans.py, not this
-      # repo's main.py.
+      # repo's main.py. --trigger-http/--no-allow-unauthenticated are
+      # spelled out here (the other functions' redeploy steps omit them
+      # since gcloud preserves an existing function's trigger config on
+      # redeploy) because this is that function's first-ever deploy —
+      # `gcloud functions deploy` requires an explicit trigger when the
+      # function doesn't exist yet, same config gcloud-deploy.sh's
+      # one-time setup would otherwise have applied.
       - name: Deploy retry-failed-scans
         run: |
           gcloud functions deploy retry-failed-scans \
@@ -304,4 +310,6 @@ jobs:
             --runtime=python313 \
             --source=. \
             --entry-point=dispatch \
-            --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=retry_failed_scans.py
+            --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=retry_failed_scans.py \
+            --trigger-http \
+            --no-allow-unauthenticated
