@@ -12,6 +12,10 @@ class ResumeRead(BaseModel):
     content_type: str
     is_main: bool
     created_at: datetime
+    # See Resume.has_structured_content — whether GET .../download?format=
+    # docx|pdf is available for this resume yet, without shipping the full
+    # structured_content JSONB in list responses.
+    has_structured_content: bool
 
 
 class ResumeUpdate(BaseModel):
@@ -23,6 +27,11 @@ class ResumeDetailRead(ResumeRead):
     # for callers (e.g. an MCP client's own LLM) who need the actual resume
     # content to evaluate/tailor against, not just its filename.
     parsed_text: str
+    # See Resume.structured_content — null until this resume has been
+    # structured (best-effort at upload, or via POST /resumes/{id}/structure).
+    # Its presence is what the frontend uses to decide whether
+    # GET /resumes/{id}/download?format=docx|pdf is available yet.
+    structured_content: dict | None = None
 
 
 class ResumeEntryContent(BaseModel):

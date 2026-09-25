@@ -17,6 +17,7 @@ from app.services.prompts import (
     QUICK_SCORE_PROMPT,
     RESUME_ROLES_PROMPT,
     RESUME_SKILL_ADDITIONS_PROMPT,
+    RESUME_STRUCTURE_PROMPT,
     REVIEW_PROMPT,
     TAILOR_PROMPT,
 )
@@ -342,6 +343,32 @@ def generate_tailored_resume_with_llm(
         job_description=job_description[:_MAX_TEXT_CHARS],
         fitness_assessment=_format_fitness_assessment(fitness_score),
     )
+    raw = call_llm(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
+    try:
+        data = _parse_response(raw)
+    except json.JSONDecodeError as exc:
+        raise LlmError(f"Model response was not valid JSON: {exc}") from exc
+
+    return TailoredResumeContent(
+        summary=data.get("summary") if isinstance(data.get("summary"), str) else "",
+        sections=_as_sections_list(data.get("sections")),
+        contact=_as_contact_dict(data.get("contact")),
+        raw_response=data,
+    )
+
+
+def extract_resume_structure_with_llm(
+    resume_text: str, *, provider: str, model: str | None, api_key: str, base_url: str | None
+) -> TailoredResumeContent:
+    """Structure a resume's own content — same output shape as
+    generate_tailored_resume_with_llm (reuses the same TailoredResumeContent/
+    parsing helpers), but faithfully as-is rather than tailored to a job:
+    no job description, no rewriting. Powers Resume.structured_content,
+    which the docx/PDF renderers (see app.services.resume_renderer) turn
+    into a downloadable file for a resume that didn't start out as one of
+    this app's own structured documents.
+    """
+    prompt = RESUME_STRUCTURE_PROMPT.format(resume_text=resume_text[:_MAX_TEXT_CHARS])
     raw = call_llm(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
     try:
         data = _parse_response(raw)

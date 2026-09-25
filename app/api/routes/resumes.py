@@ -1,5 +1,7 @@
+import logging
 import uuid
 from collections import Counter, defaultdict
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy import func, select, update
@@ -50,6 +52,7 @@ from app.services.resume_llm import (
     apply_skill_additions_with_llm,
     evaluate_resume_with_llm,
     extract_resume_roles_with_llm,
+    extract_resume_structure_with_llm,
     generate_cover_letter_with_llm,
     generate_interview_prep_with_llm,
     generate_tailored_resume_with_llm,
@@ -58,13 +61,21 @@ from app.services.resume_llm import (
     review_resume_with_llm,
 )
 from app.services.resume_parser import SUPPORTED_CONTENT_TYPES, extract_text
-from app.services.resume_renderer import render_cover_letter_docx, render_tailored_resume_docx
+from app.services.resume_renderer import (
+    render_cover_letter_docx,
+    render_cover_letter_pdf,
+    render_tailored_resume_docx,
+    render_tailored_resume_pdf,
+)
 from app.services.resume_storage import delete_file, download_file, upload_file
+
+logger = logging.getLogger("app.resumes")
 
 router = APIRouter(prefix="/resumes", tags=["resumes"])
 
 _MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024
 _TAILORED_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_PDF_CONTENT_TYPE = "application/pdf"
 
 
 def _clear_existing_main(db: Session, user_id: uuid.UUID, *, except_id: uuid.UUID | None = None) -> None:
@@ -118,13 +129,21 @@ def _get_owned_tailored_resume(db: Session, user_id: uuid.UUID, tailored_id: uui
 
 def _tailored_resume_text(content: dict) -> str:
     """Flatten a TailoredResume's structured content (see TailoredResumeUpload)
-    back into plain text for re-scoring. A section uses exactly one of
-    "bullets" or "entries" (see TAILOR_PROMPT) — entries (one per job/degree/
-    project, e.g. "Professional Experience") must be rendered too, or the
-    scorer sees nothing but section headings for any resume with real work
-    history and drastically under-scores it.
+    back into plain text — originally just for re-scoring, but also stored
+    as Resume.parsed_text for a skill-additions-derived resume (see
+    apply_resume_skill_additions), so this needs to be a faithful full
+    rendering, not just what a scorer cares about. A section uses exactly
+    one of "bullets" or "entries" (see TAILOR_PROMPT) — entries (one per
+    job/degree/project, e.g. "Professional Experience") must be rendered
+    too, or the scorer sees nothing but section headings for any resume
+    with real work history and drastically under-scores it.
     """
-    lines = [content.get("summary", "")]
+    contact = content.get("contact") or {}
+    contact_line = " | ".join(
+        contact[key] for key in ("email", "phone", "location", "linkedin") if contact.get(key)
+    )
+    lines = [line for line in (contact.get("name"), contact_line) if line]
+    lines.append(content.get("summary", ""))
     for section in content.get("sections", []):
         lines.append(section.get("heading", ""))
         lines.extend(f"- {b}" for b in section.get("bullets", []))
@@ -135,6 +154,39 @@ def _tailored_resume_text(content: dict) -> str:
             lines.append(header)
             lines.extend(f"- {b}" for b in entry.get("bullets", []))
     return "\n".join(lines)
+
+
+def _sections_tuples(sections: list[dict]) -> list[tuple[str, list[str], list[dict]]]:
+    """Turn a TailoredResumeUpload-shaped `sections` list (as stored raw in
+    JSONB — TailoredResume.content, CoverLetter.content isn't sectioned, or
+    Resume.structured_content) into the (heading, bullets, entries) tuples
+    render_tailored_resume_docx/render_tailored_resume_pdf expect.
+    """
+    return [(section.get("heading", ""), section.get("bullets", []), section.get("entries", [])) for section in sections]
+
+
+def _render_tailored_content(content: dict, contact: dict[str, str], fmt: Literal["docx", "pdf"]) -> tuple[bytes, str]:
+    """Render a TailoredResumeUpload-shaped dict (TailoredResume.content or
+    Resume.structured_content) to bytes in the requested format, returning
+    (bytes, content_type).
+    """
+    summary = content.get("summary", "")
+    sections = _sections_tuples(content.get("sections", []))
+    if fmt == "pdf":
+        return render_tailored_resume_pdf(summary, sections, contact), _PDF_CONTENT_TYPE
+    return render_tailored_resume_docx(summary, sections, contact), _TAILORED_CONTENT_TYPE
+
+
+def _render_cover_letter_content(content: dict, contact: dict[str, str], fmt: Literal["docx", "pdf"]) -> tuple[bytes, str]:
+    """Render a CoverLetterUpload-shaped dict (CoverLetter.content) to bytes
+    in the requested format, returning (bytes, content_type).
+    """
+    greeting = content.get("greeting", "")
+    body_paragraphs = content.get("body_paragraphs", [])
+    closing = content.get("closing", "")
+    if fmt == "pdf":
+        return render_cover_letter_pdf(greeting, body_paragraphs, closing, contact), _PDF_CONTENT_TYPE
+    return render_cover_letter_docx(greeting, body_paragraphs, closing, contact), _TAILORED_CONTENT_TYPE
 
 
 def _stamp_application_pointer(
@@ -158,6 +210,32 @@ def _stamp_application_pointer(
     for field, value in pointer.items():
         setattr(application, field, value)
     db.flush()
+
+
+def _structure_resume(db: Session, current_user: User, resume: Resume) -> dict:
+    """Structure a resume's own content via the LLM (see
+    extract_resume_structure_with_llm) and store it on resume.structured_content
+    — same TailoredResumeUpload shape as a tailored resume, just faithful to
+    the resume as-is rather than tailored to a job. Raises the same
+    HTTPException (missing default key) / LlmError as every other resume LLM
+    endpoint on failure; callers that want best-effort (e.g. upload) must
+    catch those themselves.
+    """
+    key = get_users_default_llm_key(db, current_user.id)
+    result = extract_resume_structure_with_llm(
+        resume.parsed_text,
+        provider=key.provider,
+        model=key.model,
+        api_key=key.get_plaintext_key(),
+        base_url=key.base_url,
+    )
+    content = TailoredResumeUpload(
+        summary=result.summary,
+        sections=[ResumeSectionContent(**section) for section in result.sections],
+        contact=ContactInfo(**result.contact) if result.contact else None,
+    )
+    resume.structured_content = content.model_dump()
+    return resume.structured_content
 
 
 @router.post("", response_model=ResumeRead, status_code=status.HTTP_201_CREATED)
@@ -206,6 +284,17 @@ def upload_resume(
     )
     db.add(resume)
     db.flush()
+
+    # Best-effort: a brand-new user very plausibly hasn't added an LLM key
+    # yet (get_users_default_llm_key 422s in that case), and an upload must
+    # never fail just because structuring couldn't happen — the raw file is
+    # still fully usable either way. The frontend can retry later via
+    # POST /resumes/{id}/structure once a key is in place.
+    try:
+        _structure_resume(db, current_user, resume)
+    except (HTTPException, LlmError) as exc:
+        logger.info("Skipped auto-structuring resume %s at upload: %s", resume.id, exc)
+
     return resume
 
 
@@ -255,23 +344,69 @@ def delete_resume(
     db.delete(resume)
 
 
+@router.post("/{resume_id}/structure", response_model=ResumeDetailRead)
+def structure_resume(
+    resume_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> Resume:
+    """(Re)generate this resume's structured_content via the LLM — see
+    _structure_resume. Unlike the best-effort attempt on upload, this raises
+    the usual 422 if the user has no default LLM key yet, so the frontend
+    can surface that directly (e.g. a link to add one) rather than silently
+    leaving structured_content null.
+    """
+    resume = db.scalar(select(Resume).where(Resume.id == resume_id, Resume.user_id == current_user.id))
+    if resume is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
+
+    try:
+        _structure_resume(db, current_user, resume)
+    except LlmError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM request failed: {exc}") from exc
+    db.flush()
+    return resume
+
+
 @router.get("/{resume_id}/download")
 def download_resume(
-    resume_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+    resume_id: uuid.UUID,
+    format: Literal["docx", "pdf"] | None = None,
+    disposition: Literal["inline", "attachment"] = "attachment",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> Response:
     resume = db.scalar(select(Resume).where(Resume.id == resume_id, Resume.user_id == current_user.id))
     if resume is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
 
-    data = download_file(resume.storage_key)
+    if format is None:
+        data = download_file(resume.storage_key)
+        return Response(
+            content=data,
+            media_type=resume.content_type,
+            # "inline" (not "attachment") so a PDF renders in the browser's
+            # own viewer when opened in a new tab instead of forcing a save
+            # dialog — DOCX has no native in-browser renderer, so browsers
+            # fall back to downloading it regardless of this header.
+            headers={"Content-Disposition": f'inline; filename="{resume.filename}"'},
+        )
+
+    if resume.structured_content is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Resume hasn't been structured yet — POST /resumes/{resume_id}/structure first.",
+        )
+
+    contact = resume.structured_content.get("contact")
+    data, media_type = _render_tailored_content(
+        resume.structured_content,
+        _resolve_contact(ContactInfo(**contact) if contact else None, current_user),
+        format,
+    )
+    base_name = (current_user.display_name or resume.filename.rsplit(".", 1)[0]).replace("/", "_")
     return Response(
         content=data,
-        media_type=resume.content_type,
-        # "inline" (not "attachment") so a PDF renders in the browser's own
-        # viewer when opened in a new tab instead of forcing a save dialog —
-        # DOCX has no native in-browser renderer, so browsers fall back to
-        # downloading it regardless of this header.
-        headers={"Content-Disposition": f'inline; filename="{resume.filename}"'},
+        media_type=media_type,
+        headers={"Content-Disposition": f'{disposition}; filename="{base_name}-resume.{format}"'},
     )
 
 
@@ -392,6 +527,31 @@ def get_missing_keywords_summary(
     return MissingSkillsSummaryRead(entries=entries)
 
 
+_EXPERIENCE_HEADING_KEYWORDS = ("experience", "employment", "work history", "career")
+
+
+def _roles_from_structured_content(structured_content: dict) -> list[str] | None:
+    """Best-effort: pull role labels straight out of an already-structured
+    resume's work-history section(s) instead of firing a second LLM call
+    (see extract_resume_roles_with_llm). Returns None — the caller should
+    fall back to the LLM — when no section heading can be confidently
+    identified as work history, rather than risk mixing in education/
+    project entries into the "which job does this belong to" dropdown.
+    """
+    roles: list[str] = []
+    matched_any_section = False
+    for section in structured_content.get("sections", []):
+        heading = (section.get("heading") or "").lower()
+        if not any(keyword in heading for keyword in _EXPERIENCE_HEADING_KEYWORDS):
+            continue
+        matched_any_section = True
+        for entry in section.get("entries", []):
+            title = entry.get("title", "")
+            subtitle = entry.get("subtitle")
+            roles.append(f"{title} — {subtitle}" if subtitle else title)
+    return roles if matched_any_section else None
+
+
 @router.get("/{resume_id}/roles", response_model=ResumeRolesRead)
 def get_resume_roles(
     resume_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
@@ -400,6 +560,12 @@ def get_resume_roles(
     does this belong to" dropdown on a ResumeSkillAddition (see below).
     """
     resume = _resolve_resume(db, current_user.id, resume_id)
+
+    if resume.structured_content is not None:
+        roles = _roles_from_structured_content(resume.structured_content)
+        if roles is not None:
+            return ResumeRolesRead(roles=roles)
+
     key = get_users_default_llm_key(db, current_user.id)
 
     try:
@@ -522,13 +688,9 @@ def apply_resume_skill_additions(
         sections=[ResumeSectionContent(**section) for section in result.sections],
         contact=ContactInfo(**result.contact) if result.contact else None,
     )
+    content_dict = content.model_dump()
     docx_bytes = render_tailored_resume_docx(
-        content.summary,
-        [
-            (section.heading, section.bullets, [entry.model_dump() for entry in section.entries])
-            for section in content.sections
-        ],
-        _resolve_contact(content.contact, current_user),
+        content.summary, _sections_tuples(content_dict["sections"]), _resolve_contact(content.contact, current_user)
     )
     filename = f"{(current_user.display_name or '').replace('/', '_')}-resume-updated.docx"
     storage_key = f"resumes/{current_user.id}/{uuid.uuid4()}-{filename}"
@@ -539,8 +701,12 @@ def apply_resume_skill_additions(
         filename=filename,
         content_type=_TAILORED_CONTENT_TYPE,
         storage_key=storage_key,
-        parsed_text=_tailored_resume_text(content.model_dump()),
+        parsed_text=_tailored_resume_text(content_dict),
         is_main=False,
+        # Already have the full structured content right here — save the
+        # extra LLM round-trip a POST .../structure call would otherwise
+        # need, so this new resume is immediately downloadable as docx/PDF.
+        structured_content=content_dict,
     )
     db.add(new_resume)
     for addition in additions:
@@ -1025,15 +1191,30 @@ def get_tailored_resume_score(
 
 @router.get("/tailored/{tailored_id}/download")
 def download_tailored_resume(
-    tailored_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+    tailored_id: uuid.UUID,
+    format: Literal["docx", "pdf"] = "docx",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> Response:
     tailored = _get_owned_tailored_resume(db, current_user.id, tailored_id)
 
-    data = download_file(tailored.storage_key)
+    if format == "docx":
+        # Unchanged from before format= existed — the same pre-rendered
+        # bytes already sitting in storage, no on-the-fly rendering.
+        data = download_file(tailored.storage_key)
+        return Response(
+            content=data,
+            media_type=_TAILORED_CONTENT_TYPE,
+            headers={"Content-Disposition": f'attachment; filename="{tailored.filename}"'},
+        )
+
+    contact = tailored.content.get("contact")
+    data, media_type = _render_tailored_content(
+        tailored.content, _resolve_contact(ContactInfo(**contact) if contact else None, current_user), format
+    )
+    pdf_filename = f"{tailored.filename.rsplit('.', 1)[0]}.pdf"
     return Response(
-        content=data,
-        media_type=_TAILORED_CONTENT_TYPE,
-        headers={"Content-Disposition": f'attachment; filename="{tailored.filename}"'},
+        content=data, media_type=media_type, headers={"Content-Disposition": f'attachment; filename="{pdf_filename}"'}
     )
 
 
@@ -1140,7 +1321,10 @@ def get_main_cover_letter(
 
 @router.get("/cover-letter/{cover_letter_id}/download")
 def download_cover_letter(
-    cover_letter_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+    cover_letter_id: uuid.UUID,
+    format: Literal["docx", "pdf"] = "docx",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> Response:
     cover_letter = db.scalar(
         select(CoverLetter).where(CoverLetter.id == cover_letter_id, CoverLetter.user_id == current_user.id)
@@ -1148,11 +1332,23 @@ def download_cover_letter(
     if cover_letter is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cover letter not found.")
 
-    data = download_file(cover_letter.storage_key)
+    if format == "docx":
+        # Unchanged from before format= existed — the same pre-rendered
+        # bytes already sitting in storage, no on-the-fly rendering.
+        data = download_file(cover_letter.storage_key)
+        return Response(
+            content=data,
+            media_type=_TAILORED_CONTENT_TYPE,
+            headers={"Content-Disposition": f'attachment; filename="{cover_letter.filename}"'},
+        )
+
+    contact = cover_letter.content.get("contact")
+    data, media_type = _render_cover_letter_content(
+        cover_letter.content, _resolve_contact(ContactInfo(**contact) if contact else None, current_user), format
+    )
+    pdf_filename = f"{cover_letter.filename.rsplit('.', 1)[0]}.pdf"
     return Response(
-        content=data,
-        media_type=_TAILORED_CONTENT_TYPE,
-        headers={"Content-Disposition": f'attachment; filename="{cover_letter.filename}"'},
+        content=data, media_type=media_type, headers={"Content-Disposition": f'attachment; filename="{pdf_filename}"'}
     )
 
 

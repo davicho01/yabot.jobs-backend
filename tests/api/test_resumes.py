@@ -1,6 +1,7 @@
 import itertools
 import uuid
 from datetime import datetime, timezone
+from unittest.mock import Mock
 
 import pytest
 from fastapi import HTTPException
@@ -8,20 +9,29 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.models as m
+from app.api.routes import resumes as resumes_routes
 from app.api.routes.resumes import (
     _resolve_resume,
+    _roles_from_structured_content,
     _tailored_resume_text,
     apply_resume_skill_additions,
     delete_resume_skill_addition,
+    download_cover_letter,
+    download_resume,
+    download_tailored_resume,
     get_main_interview_prep,
     get_missing_keywords_summary,
+    get_resume_roles,
     get_resume_score_history,
     list_resume_skill_additions,
+    structure_resume,
     upsert_resume_skill_addition,
 )
 from app.db.base import Base
-from app.models.resume import InterviewPrep
+from app.models.resume import CoverLetter, InterviewPrep
 from app.schemas.resume import ResumeSkillAdditionUpsert
+from app.services.llm_client import LlmError
+from app.services.resume_llm import TailoredResumeContent
 
 _counter = itertools.count()
 
@@ -43,6 +53,8 @@ def db() -> Session:
             m.JobPostingUrl.__table__,
             m.JobPosting.__table__,
             InterviewPrep.__table__,
+            m.TailoredResume.__table__,
+            CoverLetter.__table__,
         ],
     )
     with engine.begin() as conn:
@@ -110,6 +122,43 @@ def _make_score(
     db.add(score)
     db.commit()
     return score
+
+
+def _fake_key() -> Mock:
+    key = Mock()
+    key.provider = "openai"
+    key.model = "test-model"
+    key.base_url = None
+    key.get_plaintext_key.return_value = "test-key"
+    return key
+
+
+def _make_tailored_resume(db, user_id: uuid.UUID, resume: m.Resume, posting: m.JobPosting, *, content=None) -> m.TailoredResume:
+    tailored = m.TailoredResume(
+        resume_id=resume.id,
+        user_id=user_id,
+        job_posting_id=posting.id,
+        content=content or {"summary": "Backend engineer.", "sections": [], "contact": None},
+        storage_key=f"tailored/{user_id}/{next(_counter)}",
+        filename="Jane-Doe-Backend-Engineer-resume.docx",
+    )
+    db.add(tailored)
+    db.commit()
+    return tailored
+
+
+def _make_cover_letter(db, user_id: uuid.UUID, resume: m.Resume, posting: m.JobPosting, *, content=None) -> CoverLetter:
+    cover_letter = CoverLetter(
+        resume_id=resume.id,
+        user_id=user_id,
+        job_posting_id=posting.id,
+        content=content or {"greeting": "Dear Hiring Manager,", "body_paragraphs": ["I am interested."], "closing": "Sincerely,"},
+        storage_key=f"cover-letters/{user_id}/{next(_counter)}",
+        filename="Jane-Doe-Backend-Engineer-cover-letter.docx",
+    )
+    db.add(cover_letter)
+    db.commit()
+    return cover_letter
 
 
 def test_resolve_resume_with_no_id_falls_back_to_the_main_resume(db):
@@ -509,3 +558,277 @@ def test_tailored_resume_text_renders_entries_not_just_flat_bullets():
     assert "- Led the API migration" in text
     assert "- Mentored 3 engineers" in text
     assert "Engineer" in text  # no subtitle, no bullets — title alone still renders
+
+
+# --------------------------------------------------- structuring (docx/PDF)
+
+
+def test_structure_resume_stores_structured_content(db, monkeypatch):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    monkeypatch.setattr(resumes_routes, "get_users_default_llm_key", lambda db, uid: _fake_key())
+    monkeypatch.setattr(
+        resumes_routes,
+        "extract_resume_structure_with_llm",
+        lambda *a, **k: TailoredResumeContent(
+            summary="Backend engineer.",
+            sections=[{"heading": "Skills", "bullets": ["Python"], "entries": []}],
+            contact={"name": "Jane Doe"},
+            raw_response={},
+        ),
+    )
+
+    result = structure_resume(resume.id, current_user=m.User(id=user_id), db=db)
+
+    assert result.structured_content["summary"] == "Backend engineer."
+    assert result.structured_content["sections"][0]["heading"] == "Skills"
+    assert result.structured_content["contact"]["name"] == "Jane Doe"
+
+
+def test_structure_resume_404s_for_a_resume_owned_by_someone_else(db):
+    owner_id = uuid.uuid4()
+    resume = _make_resume(db, owner_id, is_main=True)
+
+    with pytest.raises(HTTPException) as exc_info:
+        structure_resume(resume.id, current_user=m.User(id=uuid.uuid4()), db=db)
+    assert exc_info.value.status_code == 404
+
+
+def test_structure_resume_propagates_422_when_no_default_llm_key(db, monkeypatch):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+
+    def raise_no_key(db, uid):
+        raise HTTPException(status_code=422, detail="Add a default LLM API key first via POST /api-keys.")
+
+    monkeypatch.setattr(resumes_routes, "get_users_default_llm_key", raise_no_key)
+
+    with pytest.raises(HTTPException) as exc_info:
+        structure_resume(resume.id, current_user=m.User(id=user_id), db=db)
+    assert exc_info.value.status_code == 422
+    assert resume.structured_content is None
+
+
+def test_structure_resume_502s_on_llm_error(db, monkeypatch):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    monkeypatch.setattr(resumes_routes, "get_users_default_llm_key", lambda db, uid: _fake_key())
+
+    def raise_llm_error(*a, **k):
+        raise LlmError("model returned garbage")
+
+    monkeypatch.setattr(resumes_routes, "extract_resume_structure_with_llm", raise_llm_error)
+
+    with pytest.raises(HTTPException) as exc_info:
+        structure_resume(resume.id, current_user=m.User(id=user_id), db=db)
+    assert exc_info.value.status_code == 502
+
+
+# ------------------------------------------------------------- main resume download
+
+
+def test_download_resume_default_format_streams_the_raw_file_unchanged(db, monkeypatch):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    monkeypatch.setattr(resumes_routes, "download_file", lambda key: b"RAW-FILE-BYTES")
+
+    response = download_resume(resume.id, current_user=m.User(id=user_id), db=db)
+
+    assert response.body == b"RAW-FILE-BYTES"
+    assert response.media_type == "application/pdf"
+    assert response.headers["content-disposition"].startswith("inline")
+
+
+def test_download_resume_format_pdf_422s_before_structuring(db):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+
+    with pytest.raises(HTTPException) as exc_info:
+        download_resume(resume.id, format="pdf", current_user=m.User(id=user_id), db=db)
+    assert exc_info.value.status_code == 422
+
+
+def test_download_resume_format_pdf_renders_from_structured_content(db):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    resume.structured_content = {
+        "summary": "Backend engineer.",
+        "sections": [{"heading": "Skills", "bullets": ["Python"], "entries": []}],
+        "contact": {"name": "Jane Doe"},
+    }
+    db.commit()
+
+    response = download_resume(
+        resume.id, format="pdf", current_user=m.User(id=user_id, display_name="Jane Doe"), db=db
+    )
+
+    assert response.media_type == "application/pdf"
+    assert response.body.startswith(b"%PDF")
+    assert response.headers["content-disposition"].startswith("attachment")
+    assert response.headers["content-disposition"].endswith('.pdf"')
+
+
+def test_download_resume_format_docx_renders_from_structured_content(db):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    resume.structured_content = {"summary": "Backend engineer.", "sections": [], "contact": None}
+    db.commit()
+
+    response = download_resume(
+        resume.id, format="docx", current_user=m.User(id=user_id, display_name="Jane Doe"), db=db
+    )
+
+    assert response.media_type == resumes_routes._TAILORED_CONTENT_TYPE
+    assert response.body.startswith(b"PK")  # docx is a zip archive
+    assert response.headers["content-disposition"].endswith('.docx"')
+
+
+def test_download_resume_format_pdf_disposition_inline_for_preview(db):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    resume.structured_content = {"summary": "", "sections": [], "contact": None}
+    db.commit()
+
+    response = download_resume(
+        resume.id, format="pdf", disposition="inline", current_user=m.User(id=user_id), db=db
+    )
+
+    assert response.headers["content-disposition"].startswith("inline")
+
+
+# ---------------------------------------------- tailored resume / cover letter PDF
+
+
+def test_download_tailored_resume_format_pdf_renders_on_the_fly(db):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    posting = _make_job_posting(db)
+    tailored = _make_tailored_resume(
+        db, user_id, resume, posting,
+        content={"summary": "Backend engineer.", "sections": [], "contact": {"name": "Jane Doe"}},
+    )
+
+    response = download_tailored_resume(tailored.id, format="pdf", current_user=m.User(id=user_id), db=db)
+
+    assert response.media_type == "application/pdf"
+    assert response.body.startswith(b"%PDF")
+    assert response.headers["content-disposition"].endswith('.pdf"')
+
+
+def test_download_tailored_resume_default_format_is_unchanged_docx_from_storage(db, monkeypatch):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    posting = _make_job_posting(db)
+    tailored = _make_tailored_resume(db, user_id, resume, posting)
+    monkeypatch.setattr(resumes_routes, "download_file", lambda key: b"STORED-DOCX-BYTES")
+
+    response = download_tailored_resume(tailored.id, current_user=m.User(id=user_id), db=db)
+
+    assert response.body == b"STORED-DOCX-BYTES"
+    assert response.media_type == resumes_routes._TAILORED_CONTENT_TYPE
+
+
+def test_download_cover_letter_format_pdf_renders_on_the_fly(db):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    posting = _make_job_posting(db)
+    cover_letter = _make_cover_letter(
+        db, user_id, resume, posting,
+        content={"greeting": "Dear Hiring Manager,", "body_paragraphs": ["I am interested."], "closing": "Sincerely,"},
+    )
+
+    response = download_cover_letter(cover_letter.id, format="pdf", current_user=m.User(id=user_id), db=db)
+
+    assert response.media_type == "application/pdf"
+    assert response.body.startswith(b"%PDF")
+    assert response.headers["content-disposition"].endswith('.pdf"')
+
+
+# -------------------------------------------------------- roles from structured content
+
+
+def test_roles_from_structured_content_reads_from_the_experience_section():
+    content = {
+        "sections": [
+            {
+                "heading": "Professional Experience",
+                "bullets": [],
+                "entries": [{"title": "Senior Engineer", "subtitle": "Acme Corp · 2020-Present", "bullets": []}],
+            },
+            {
+                "heading": "Education",
+                "bullets": [],
+                "entries": [{"title": "BS Computer Science", "subtitle": "MIT", "bullets": []}],
+            },
+        ]
+    }
+
+    roles = _roles_from_structured_content(content)
+
+    assert roles == ["Senior Engineer — Acme Corp · 2020-Present"]
+
+
+def test_roles_from_structured_content_returns_none_when_no_experience_heading_matches():
+    content = {"sections": [{"heading": "Something Else", "bullets": [], "entries": [{"title": "X", "bullets": []}]}]}
+
+    assert _roles_from_structured_content(content) is None
+
+
+def test_get_resume_roles_uses_structured_content_instead_of_a_second_llm_call(db, monkeypatch):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    resume.structured_content = {
+        "sections": [
+            {"heading": "Experience", "bullets": [], "entries": [{"title": "Engineer", "subtitle": "Acme", "bullets": []}]}
+        ]
+    }
+    db.commit()
+    should_not_be_called = Mock(side_effect=AssertionError("should not call the LLM when structured_content exists"))
+    monkeypatch.setattr(resumes_routes, "extract_resume_roles_with_llm", should_not_be_called)
+
+    result = get_resume_roles(resume.id, current_user=m.User(id=user_id), db=db)
+
+    assert result.roles == ["Engineer — Acme"]
+    should_not_be_called.assert_not_called()
+
+
+def test_get_resume_roles_falls_back_to_the_llm_when_not_yet_structured(db, monkeypatch):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    monkeypatch.setattr(resumes_routes, "get_users_default_llm_key", lambda db, uid: _fake_key())
+    from app.services.resume_llm import ResumeRolesResult
+
+    monkeypatch.setattr(
+        resumes_routes, "extract_resume_roles_with_llm", lambda *a, **k: ResumeRolesResult(roles=["Engineer — Acme"])
+    )
+
+    result = get_resume_roles(resume.id, current_user=m.User(id=user_id), db=db)
+
+    assert result.roles == ["Engineer — Acme"]
+
+
+# --------------------------------- skill additions populate structured_content too
+
+
+def test_apply_skill_additions_stores_structured_content_on_the_new_resume(db, monkeypatch):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    _upsert(db, resume.id, user_id, keyword="Kubernetes", target_role="General / Skills")
+    monkeypatch.setattr(resumes_routes, "get_users_default_llm_key", lambda db, uid: _fake_key())
+    monkeypatch.setattr(
+        resumes_routes,
+        "apply_skill_additions_with_llm",
+        lambda *a, **k: TailoredResumeContent(
+            summary="Backend engineer.",
+            sections=[{"heading": "Skills", "bullets": ["Kubernetes"], "entries": []}],
+            contact=None,
+            raw_response={},
+        ),
+    )
+    monkeypatch.setattr(resumes_routes, "upload_file", lambda *a, **k: None)
+
+    new_resume = apply_resume_skill_additions(resume.id, current_user=m.User(id=user_id, display_name="Jane"), db=db)
+
+    assert new_resume.structured_content is not None
+    assert new_resume.structured_content["summary"] == "Backend engineer."
+    assert new_resume.structured_content["sections"][0]["bullets"] == ["Kubernetes"]

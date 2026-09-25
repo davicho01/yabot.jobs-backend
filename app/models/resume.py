@@ -41,8 +41,25 @@ class Resume(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # prompt (review/score/tailor) is built from this, not the raw file.
     parsed_text: Mapped[str] = mapped_column(Text, nullable=False)
     is_main: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # TailoredResumeUpload's shape ({"summary": str, "sections": [...],
+    # "contact": {...}|null) — an LLM-structured breakdown of this same
+    # resume's own content (see app.services.resume_llm.
+    # extract_resume_structure_with_llm), not a tailoring or rewrite. Null
+    # until structured: best-effort at upload time if the user already has
+    # a default LLM key, or on demand via POST /resumes/{id}/structure.
+    # Lets a resume that didn't start out as one of this app's own
+    # structured documents still be rendered to .docx/PDF on request — see
+    # the format= query param on GET /resumes/{id}/download.
+    structured_content: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="resumes")
+
+    @property
+    def has_structured_content(self) -> bool:
+        """Cheap presence check for list views (see ResumeRead) that don't
+        want to ship the full structured_content JSONB per row.
+        """
+        return self.structured_content is not None
 
     def __repr__(self) -> str:
         return f"<Resume user_id={self.user_id} filename={self.filename!r} is_main={self.is_main}>"

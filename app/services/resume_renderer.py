@@ -1,11 +1,18 @@
 import io
 import re
+from xml.sax.saxutils import escape as _xml_escape
 
 import docx
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
+from reportlab.lib.colors import HexColor
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer
 
 # Word's own built-in template defaults to blue "Office 2007" heading colors
 # and 1"/1.25" margins, neither chosen with a resume in mind — this is our
@@ -180,6 +187,181 @@ def render_tailored_resume_docx(
     buffer = io.BytesIO()
     document.save(buffer)
     return buffer.getvalue()
+
+
+# --- PDF rendering (reportlab) ----------------------------------------------
+#
+# A pure-Python PDF renderer with no system-level dependencies (unlike
+# WeasyPrint/LibreOffice), so it drops straight into the existing slim
+# Dockerfile. Mirrors the docx renderer's structure and color palette above,
+# though the font is Helvetica (reportlab's built-in nearest match to
+# Calibri) rather than an embedded TTF, so it isn't pixel-identical.
+
+_PDF_INK = HexColor("#1A1A1A")
+_PDF_MUTED = HexColor("#595959")
+_PDF_ACCENT = HexColor("#1F3A5F")
+_PDF_MARGIN = 0.5 * inch
+
+
+def _pdf_escape(text: str) -> str:
+    """reportlab's Paragraph interprets a small XML-like markup language, so
+    any free text embedded in one (as opposed to markup we build ourselves,
+    e.g. our own <b> tags) must be escaped first.
+    """
+    return _xml_escape(text or "")
+
+
+def _pdf_styles() -> dict[str, ParagraphStyle]:
+    title_style = ParagraphStyle(
+        "EntryTitle", fontName="Helvetica-Bold", fontSize=10.5, leading=13, textColor=_PDF_INK, spaceBefore=10
+    )
+    return {
+        "name": ParagraphStyle(
+            "Name",
+            fontName="Helvetica-Bold",
+            fontSize=18,
+            leading=22,
+            textColor=_PDF_INK,
+            alignment=TA_CENTER,
+            spaceAfter=2,
+        ),
+        "contact": ParagraphStyle(
+            "Contact",
+            fontName="Helvetica",
+            fontSize=9.5,
+            leading=12,
+            textColor=_PDF_MUTED,
+            alignment=TA_CENTER,
+            spaceAfter=8,
+        ),
+        "summary": ParagraphStyle(
+            "Summary", fontName="Helvetica", fontSize=10.5, leading=14, textColor=_PDF_INK, spaceAfter=14
+        ),
+        "heading": ParagraphStyle(
+            "SectionHeading",
+            fontName="Helvetica-Bold",
+            fontSize=12,
+            leading=15,
+            textColor=_PDF_ACCENT,
+            spaceBefore=16,
+            spaceAfter=4,
+        ),
+        "title": title_style,
+        "title_first": ParagraphStyle("EntryTitleFirst", parent=title_style, spaceBefore=2),
+        "subtitle": ParagraphStyle(
+            "EntrySubtitle",
+            fontName="Helvetica-Oblique",
+            fontSize=9.5,
+            leading=12,
+            textColor=_PDF_MUTED,
+            spaceAfter=4,
+        ),
+        "bullet": ParagraphStyle(
+            "Bullet",
+            fontName="Helvetica",
+            fontSize=10.5,
+            leading=13,
+            textColor=_PDF_INK,
+            leftIndent=14,
+            bulletIndent=0,
+            spaceAfter=2,
+        ),
+        "body": ParagraphStyle(
+            "Body", fontName="Helvetica", fontSize=10.5, leading=14, textColor=_PDF_INK, spaceAfter=10
+        ),
+    }
+
+
+def _pdf_bullet_paragraph(text: str, style: ParagraphStyle) -> Paragraph:
+    match = _BULLET_LABEL_RE.match(text)
+    if match:
+        label, rest = match.groups()
+        body = f"<b>{_pdf_escape(label)}:</b> {_pdf_escape(rest)}"
+    else:
+        body = _pdf_escape(text)
+    return Paragraph(body, style, bulletText="•")
+
+
+def _pdf_contact_flowables(contact: dict[str, str], styles: dict[str, ParagraphStyle]) -> list:
+    name = contact.get("name", "")
+    line = " | ".join(contact[key] for key in ("email", "phone", "location", "linkedin") if contact.get(key))
+    if not name and not line:
+        return []
+
+    flowables = []
+    if name:
+        flowables.append(Paragraph(_pdf_escape(name), styles["name"]))
+    if line:
+        flowables.append(Paragraph(_pdf_escape(line), styles["contact"]))
+    flowables.append(HRFlowable(width="100%", thickness=0.75, color=_PDF_ACCENT, spaceAfter=12))
+    return flowables
+
+
+def _pdf_entry_flowables(entry: dict, styles: dict[str, ParagraphStyle], *, is_first: bool) -> list:
+    flowables = [Paragraph(_pdf_escape(entry.get("title", "")), styles["title_first"] if is_first else styles["title"])]
+    subtitle = entry.get("subtitle")
+    if subtitle:
+        flowables.append(Paragraph(_pdf_escape(subtitle), styles["subtitle"]))
+    flowables.extend(_pdf_bullet_paragraph(bullet, styles["bullet"]) for bullet in entry.get("bullets", []))
+    return flowables
+
+
+def _build_pdf(story: list) -> bytes:
+    buffer = io.BytesIO()
+    document = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        leftMargin=_PDF_MARGIN,
+        rightMargin=_PDF_MARGIN,
+        topMargin=_PDF_MARGIN,
+        bottomMargin=_PDF_MARGIN,
+    )
+    document.build(story or [Spacer(1, 1)])
+    return buffer.getvalue()
+
+
+def render_tailored_resume_pdf(
+    summary: str,
+    sections: list[tuple[str, list[str], list[dict]]],
+    contact: dict[str, str] | None = None,
+) -> bytes:
+    """PDF counterpart to render_tailored_resume_docx — same structured
+    content, same section/entry/bullet layout, rendered with reportlab
+    instead of python-docx. See that function's docstring for the content
+    shape.
+    """
+    styles = _pdf_styles()
+    story = _pdf_contact_flowables(contact or {}, styles)
+
+    if summary:
+        story.append(Paragraph(_pdf_escape(summary), styles["summary"]))
+
+    for heading, bullets, entries in sections:
+        story.append(Paragraph(_pdf_escape(heading.upper()), styles["heading"]))
+        story.append(HRFlowable(width="100%", thickness=0.5, color=_PDF_ACCENT, spaceAfter=4))
+        for index, entry in enumerate(entries):
+            story.extend(_pdf_entry_flowables(entry, styles, is_first=index == 0))
+        story.extend(_pdf_bullet_paragraph(bullet, styles["bullet"]) for bullet in bullets)
+
+    return _build_pdf(story)
+
+
+def render_cover_letter_pdf(
+    greeting: str, body_paragraphs: list[str], closing: str, contact: dict[str, str] | None = None
+) -> bytes:
+    """PDF counterpart to render_cover_letter_docx — see that function's
+    docstring for the content shape.
+    """
+    styles = _pdf_styles()
+    story = _pdf_contact_flowables(contact or {}, styles)
+
+    if greeting:
+        story.append(Paragraph(_pdf_escape(greeting), styles["body"]))
+    story.extend(Paragraph(_pdf_escape(paragraph), styles["body"]) for paragraph in body_paragraphs)
+    if closing:
+        story.append(Paragraph(_pdf_escape(closing), styles["body"]))
+
+    return _build_pdf(story)
 
 
 def render_cover_letter_docx(

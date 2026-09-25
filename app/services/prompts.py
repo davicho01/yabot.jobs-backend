@@ -297,6 +297,59 @@ Fitness assessment (prior evaluation of this resume against this job):
 \"\"\"
 """
 
+RESUME_STRUCTURE_PROMPT = """Read the resume text below and break it down into \
+structured sections, faithfully reproducing its actual content — this is not \
+a rewrite or a tailoring pass, just turning the same resume into structured \
+data.
+
+Respond with ONLY a single JSON object (no markdown fences, no commentary) \
+    with exactly these keys:
+
+{{
+  "contact": {{"name": string|null, "email": string|null, "phone": string|null, \
+"location": string|null, "linkedin": string|null}},
+  "summary": string,
+  "sections": [
+    {{"heading": string,
+      "entries": [{{"title": string, "subtitle": string|null, "bullets": [string, ...]}}, ...],
+      "bullets": [string, ...]}},
+    ...
+  ]
+}}
+
+"contact" is extracted verbatim from the header of the resume text below — \
+name, email, phone, location, LinkedIn URL. Use null for any field not \
+actually present; never invent contact details.
+"summary" is the resume's own professional summary/objective if it has one, \
+reworded only for brevity (2-3 sentences); if the resume has no such \
+section, write a short neutral 2-3 sentence summary drawn only from what's \
+actually in the resume — never invent experience, skills, or achievements \
+it doesn't already state.
+"sections" is the rest of the resume broken into named sections, in the \
+resume's own order, using its own section headings where reasonable. For \
+each section, use exactly one of "entries" or "bullets" (the other an empty \
+list):
+- "entries" for a section listing multiple distinct items, one entry per \
+item — one per job for "Experience" (title = role title, subtitle = \
+"Company · Dates"), one per degree for "Education", one per project for \
+"Projects", etc. Each entry's own "bullets" are its accomplishment/detail \
+statements, copied over faithfully — don't repeat the entry's title inside \
+them, and don't reword or embellish the candidate's own wording beyond \
+light cleanup (fixing obvious OCR/formatting artifacts).
+- "bullets" directly on the section for simple flat sections that aren't a \
+list of distinct items, e.g. "Skills" or "Certifications" (one bullet per \
+skill/item, or one per category like "Languages: Python, Go, Java").
+Keep all bullet/title/subtitle text plain, no markup. This gets rendered \
+straight into a plain, single-column, ATS-scannable .docx or PDF.
+Never invent experience, employers, dates, or skills that aren't already in \
+the resume text below — this is strictly a structuring pass, not a rewrite.
+
+Resume text:
+\"\"\"
+{resume_text}
+\"\"\"
+"""
+
 RESUME_ROLES_PROMPT = """Read the resume text below and identify each distinct \
 work-history entry (one per job held, not per bullet point).
 
