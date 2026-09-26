@@ -16,9 +16,13 @@ if TYPE_CHECKING:
 
 
 class Resume(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """An uploaded resume file. A user can upload several; exactly one may
-    be flagged `is_main` (enforced by the partial unique index below) — all
-    review/scoring/tailored-generation features operate on that one.
+    """An uploaded resume file. A user can upload several independent
+    resumes, and each one may accumulate further versions over time (see
+    root_resume_id/version_number) — e.g. via
+    POST /resumes/{resume_id}/skill-additions/apply. Exactly one row across
+    all of a user's resumes/versions may be flagged `is_main` (enforced by
+    the partial unique index below) — all review/scoring/tailored-generation
+    features operate on that one.
     """
 
     __tablename__ = "resumes"
@@ -29,6 +33,7 @@ class Resume(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             unique=True,
             postgresql_where=text("is_main"),
         ),
+        UniqueConstraint("root_resume_id", "version_number", name="uq_resumes_root_resume_id_version_number"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -41,6 +46,15 @@ class Resume(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # prompt (review/score/tailor) is built from this, not the raw file.
     parsed_text: Mapped[str] = mapped_column(Text, nullable=False)
     is_main: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Every version of the same resume shares one root_resume_id (the
+    # family's oldest surviving row); a resume that isn't a version of
+    # anything else self-references. Lets "all versions of this resume" be
+    # found with a single flat WHERE, no recursive parent-chain walk — see
+    # GET /resumes/{resume_id}/versions and list_resumes's family grouping.
+    root_resume_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("resumes.id"), index=True, nullable=False
+    )
+    version_number: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     # TailoredResumeUpload's shape ({"summary": str, "sections": [...],
     # "contact": {...}|null) — an LLM-structured breakdown of this same
     # resume's own content (see app.services.resume_llm.
@@ -135,7 +149,7 @@ class ResumeSkillAddition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     across several skills survives a refresh. Only consumed (read, then
     deleted) when the candidate applies them all at once via
     POST /resumes/{resume_id}/skill-additions/apply, which turns each into
-    a bullet point on a brand-new Resume row.
+    a bullet point on a new version of that same Resume.
     """
 
     __tablename__ = "resume_skill_additions"

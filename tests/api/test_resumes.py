@@ -1,12 +1,14 @@
+import io
 import itertools
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import Mock
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.datastructures import Headers
 
 import app.models as m
 from app.api.routes import resumes as resumes_routes
@@ -15,6 +17,7 @@ from app.api.routes.resumes import (
     _roles_from_structured_content,
     _tailored_resume_text,
     apply_resume_skill_additions,
+    delete_resume,
     delete_resume_skill_addition,
     download_cover_letter,
     download_resume,
@@ -23,13 +26,18 @@ from app.api.routes.resumes import (
     get_missing_keywords_summary,
     get_resume_roles,
     get_resume_score_history,
+    get_resume_versions,
     list_resume_skill_additions,
+    list_resumes,
+    restore_resume_version,
     structure_resume,
+    update_resume,
+    upload_resume,
     upsert_resume_skill_addition,
 )
 from app.db.base import Base
 from app.models.resume import CoverLetter, InterviewPrep
-from app.schemas.resume import ResumeSkillAdditionUpsert
+from app.schemas.resume import ResumeSkillAdditionUpsert, ResumeUpdate
 from app.services.llm_client import LlmError
 from app.services.resume_llm import TailoredResumeContent
 
@@ -71,15 +79,26 @@ def db() -> Session:
     session.close()
 
 
-def _make_resume(db, user_id: uuid.UUID, *, is_main: bool = False) -> m.Resume:
+def _make_resume(
+    db,
+    user_id: uuid.UUID,
+    *,
+    is_main: bool = False,
+    root_resume_id: uuid.UUID | None = None,
+    version_number: int = 1,
+) -> m.Resume:
     n = next(_counter)
+    resume_id = uuid.uuid4()
     resume = m.Resume(
+        id=resume_id,
         user_id=user_id,
         filename=f"resume-{n}.pdf",
         content_type="application/pdf",
         storage_key=f"resumes/{user_id}/{n}",
         parsed_text=f"Resume text {n}",
         is_main=is_main,
+        root_resume_id=root_resume_id if root_resume_id is not None else resume_id,
+        version_number=version_number,
     )
     db.add(resume)
     db.commit()
@@ -277,13 +296,14 @@ def test_get_resume_score_history_does_not_double_count_a_repeat_within_one_scor
 # ---------------------------------------------------- missing-keywords summary
 
 
-def test_missing_keywords_summary_defaults_to_the_main_resume(db):
+def test_missing_keywords_summary_aggregates_across_all_of_the_users_resumes(db):
+    # A gap flagged while scoring one resume is just as real a gap on any
+    # other — the summary is global per-user, not scoped to one resume (the
+    # candidate picks which resume actually gets the fix separately, via
+    # the resume picker / apply_resume_skill_additions).
     user_id = uuid.uuid4()
     main = _make_resume(db, user_id, is_main=True)
     other = _make_resume(db, user_id, is_main=False)
-    # SQL recurs across 2 jobs scored against the main resume; the other
-    # resume's own recurring gap ("Kubernetes") must not bleed in when no
-    # resume_id is given — each resume's scoring history is its own thing.
     _make_score(db, main, _make_job_posting(db), missing_keywords=["SQL", "Docker"])
     _make_score(db, main, _make_job_posting(db), missing_keywords=["sql"])
     _make_score(db, other, _make_job_posting(db), missing_keywords=["Kubernetes"])
@@ -292,21 +312,7 @@ def test_missing_keywords_summary_defaults_to_the_main_resume(db):
     result = get_missing_keywords_summary(current_user=m.User(id=user_id), db=db)
 
     by_keyword = {e.keyword: e.count for e in result.entries}
-    assert by_keyword == {"SQL": 2}
-
-
-def test_missing_keywords_summary_uses_the_given_resume_id(db):
-    user_id = uuid.uuid4()
-    main = _make_resume(db, user_id, is_main=True)
-    other = _make_resume(db, user_id, is_main=False)
-    _make_score(db, main, _make_job_posting(db), missing_keywords=["SQL"])
-    _make_score(db, other, _make_job_posting(db), missing_keywords=["Kubernetes"])
-    _make_score(db, other, _make_job_posting(db), missing_keywords=["Kubernetes"])
-
-    result = get_missing_keywords_summary(resume_id=other.id, current_user=m.User(id=user_id), db=db)
-
-    by_keyword = {e.keyword: e.count for e in result.entries}
-    assert by_keyword == {"Kubernetes": 2}
+    assert by_keyword == {"SQL": 2, "Kubernetes": 2}
 
 
 def test_missing_keywords_summary_does_not_double_count_a_repeat_within_one_score(db):
@@ -366,15 +372,6 @@ def test_missing_keywords_summary_never_leaks_another_users_scores(db):
     result = get_missing_keywords_summary(current_user=m.User(id=user_id), db=db)
 
     assert result.entries == []  # this user only has one job scored, no recurrence
-
-
-def test_missing_keywords_summary_404s_for_a_resume_owned_by_someone_else(db):
-    owner_id = uuid.uuid4()
-    resume = _make_resume(db, owner_id, is_main=True)
-
-    with pytest.raises(HTTPException) as exc_info:
-        get_missing_keywords_summary(resume_id=resume.id, current_user=m.User(id=uuid.uuid4()), db=db)
-    assert exc_info.value.status_code == 404
 
 
 # ----------------------------------------------------------- skill additions
@@ -832,3 +829,405 @@ def test_apply_skill_additions_stores_structured_content_on_the_new_resume(db, m
     assert new_resume.structured_content is not None
     assert new_resume.structured_content["summary"] == "Backend engineer."
     assert new_resume.structured_content["sections"][0]["bullets"] == ["Kubernetes"]
+
+
+# --------------------------------- resume versioning
+
+
+def _mock_skill_additions_apply(monkeypatch):
+    monkeypatch.setattr(resumes_routes, "get_users_default_llm_key", lambda db, uid: _fake_key())
+    monkeypatch.setattr(
+        resumes_routes,
+        "apply_skill_additions_with_llm",
+        lambda *a, **k: TailoredResumeContent(
+            summary="Backend engineer.",
+            sections=[{"heading": "Skills", "bullets": ["Kubernetes"], "entries": []}],
+            contact=None,
+            raw_response={},
+        ),
+    )
+    monkeypatch.setattr(resumes_routes, "upload_file", lambda *a, **k: None)
+
+
+def test_apply_skill_additions_creates_the_next_version_of_the_same_family_and_auto_promotes_it(db, monkeypatch):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    _upsert(db, resume.id, user_id, keyword="Kubernetes")
+    _mock_skill_additions_apply(monkeypatch)
+
+    new_resume = apply_resume_skill_additions(resume.id, current_user=m.User(id=user_id, display_name="Jane"), db=db)
+
+    assert new_resume.id != resume.id
+    assert new_resume.root_resume_id == resume.root_resume_id == resume.id
+    assert new_resume.version_number == 2
+    assert new_resume.is_main is True
+    db.refresh(resume)
+    assert resume.is_main is False
+
+
+def test_apply_skill_additions_keeps_the_familys_original_filename_stem(db, monkeypatch):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)  # filename: resume-{n}.pdf
+    stem = resume.filename.rsplit(".", 1)[0]
+    _upsert(db, resume.id, user_id, keyword="Kubernetes")
+    _mock_skill_additions_apply(monkeypatch)
+
+    new_resume = apply_resume_skill_additions(resume.id, current_user=m.User(id=user_id, display_name="Jane"), db=db)
+
+    assert new_resume.filename == f"{stem}.docx"
+
+
+def test_apply_skill_additions_from_a_non_root_version_still_uses_the_familys_original_filename(db, monkeypatch):
+    user_id = uuid.uuid4()
+    v1 = _make_resume(db, user_id, is_main=False)  # filename: resume-{n}.pdf, the family's original
+    root_stem = v1.filename.rsplit(".", 1)[0]
+    v2 = _make_resume(db, user_id, is_main=True, root_resume_id=v1.id, version_number=2)
+    v2.filename = "a-completely-different-name.docx"
+    db.commit()
+    _upsert(db, v2.id, user_id, keyword="Kubernetes")
+    _mock_skill_additions_apply(monkeypatch)
+
+    v3 = apply_resume_skill_additions(v2.id, current_user=m.User(id=user_id, display_name="Jane"), db=db)
+
+    assert v3.filename == f"{root_stem}.docx"
+
+
+def test_apply_skill_additions_always_optimizes_the_latest_version_even_when_called_via_an_older_one(db, monkeypatch):
+    user_id = uuid.uuid4()
+    v1 = _make_resume(db, user_id, is_main=False)
+    v1.parsed_text = "OLD TEXT"
+    v2 = _make_resume(db, user_id, is_main=True, root_resume_id=v1.id, version_number=2)
+    v2.parsed_text = "NEW TEXT"
+    db.commit()
+    # Staged against the older version's id — a stale draft must still be
+    # picked up and applied against the family's current content.
+    _upsert(db, v1.id, user_id, keyword="Kubernetes")
+
+    captured_resume_text = {}
+
+    def fake_apply(resume_text, additions, **kwargs):
+        captured_resume_text["value"] = resume_text
+        return TailoredResumeContent(
+            summary="Backend engineer.",
+            sections=[{"heading": "Skills", "bullets": ["Kubernetes"], "entries": []}],
+            contact=None,
+            raw_response={},
+        )
+
+    monkeypatch.setattr(resumes_routes, "get_users_default_llm_key", lambda db, uid: _fake_key())
+    monkeypatch.setattr(resumes_routes, "apply_skill_additions_with_llm", fake_apply)
+    monkeypatch.setattr(resumes_routes, "upload_file", lambda *a, **k: None)
+
+    new_resume = apply_resume_skill_additions(v1.id, current_user=m.User(id=user_id, display_name="Jane"), db=db)
+
+    assert captured_resume_text["value"] == "NEW TEXT"
+    assert new_resume.version_number == 3
+    assert new_resume.is_main is True
+
+
+def test_apply_skill_additions_applied_twice_increments_the_version_number_each_time(db, monkeypatch):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    _mock_skill_additions_apply(monkeypatch)
+
+    _upsert(db, resume.id, user_id, keyword="Kubernetes")
+    v2 = apply_resume_skill_additions(resume.id, current_user=m.User(id=user_id, display_name="Jane"), db=db)
+    _upsert(db, v2.id, user_id, keyword="Terraform")
+    v3 = apply_resume_skill_additions(v2.id, current_user=m.User(id=user_id, display_name="Jane"), db=db)
+
+    assert v2.version_number == 2
+    assert v3.version_number == 3
+    assert v3.root_resume_id == resume.id
+    assert v3.is_main is True
+    db.refresh(v2)
+    assert v2.is_main is False
+
+
+def test_apply_skill_additions_un_mains_the_previous_main_even_in_a_different_family(db, monkeypatch):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=False)
+    other_family_main = _make_resume(db, user_id, is_main=True)
+    _upsert(db, resume.id, user_id, keyword="Kubernetes")
+    _mock_skill_additions_apply(monkeypatch)
+
+    new_resume = apply_resume_skill_additions(resume.id, current_user=m.User(id=user_id, display_name="Jane"), db=db)
+
+    assert new_resume.is_main is True
+    db.refresh(other_family_main)
+    assert other_family_main.is_main is False
+
+
+def test_upload_resume_self_references_as_its_own_root(db, monkeypatch):
+    user_id = uuid.uuid4()
+    monkeypatch.setattr(resumes_routes, "extract_text", lambda data, content_type: "Some resume text")
+    monkeypatch.setattr(resumes_routes, "_structure_resume", lambda db, current_user, resume: {})
+    file = UploadFile(
+        file=io.BytesIO(b"pdf bytes"), filename="resume.pdf", headers=Headers({"content-type": "application/pdf"})
+    )
+
+    resume = upload_resume(file=file, current_user=m.User(id=user_id), db=db)
+
+    assert resume.root_resume_id == resume.id
+    assert resume.version_number == 1
+
+
+def test_upload_resume_second_upload_starts_its_own_independent_family(db, monkeypatch):
+    user_id = uuid.uuid4()
+    monkeypatch.setattr(resumes_routes, "extract_text", lambda data, content_type: "Some resume text")
+    monkeypatch.setattr(resumes_routes, "_structure_resume", lambda db, current_user, resume: {})
+
+    def _upload(filename: str) -> m.Resume:
+        file = UploadFile(
+            file=io.BytesIO(b"pdf bytes"), filename=filename, headers=Headers({"content-type": "application/pdf"})
+        )
+        return upload_resume(file=file, current_user=m.User(id=user_id), db=db)
+
+    first = _upload("first.pdf")
+    second = _upload("second.pdf")
+
+    assert second.root_resume_id == second.id
+    assert second.root_resume_id != first.root_resume_id
+
+
+def test_list_resumes_returns_one_row_per_family_preferring_the_current_main_version(db, monkeypatch):
+    user_id = uuid.uuid4()
+    v1 = _make_resume(db, user_id, is_main=False)
+    v2 = _make_resume(db, user_id, is_main=True, root_resume_id=v1.id, version_number=2)
+    unrelated = _make_resume(db, user_id, is_main=False)
+
+    result = list_resumes(current_user=m.User(id=user_id), db=db)
+
+    result_ids = {r.id for r in result}
+    assert v2.id in result_ids
+    assert v1.id not in result_ids
+    assert unrelated.id in result_ids
+    assert len(result) == 2
+
+
+def test_list_resumes_falls_back_to_the_highest_version_when_no_version_is_main(db):
+    user_id = uuid.uuid4()
+    v1 = _make_resume(db, user_id, is_main=False)
+    v2 = _make_resume(db, user_id, is_main=False, root_resume_id=v1.id, version_number=2)
+
+    result = list_resumes(current_user=m.User(id=user_id), db=db)
+
+    assert len(result) == 1
+    assert result[0].id == v2.id
+
+
+def test_get_resume_versions_lists_every_version_newest_first_regardless_of_which_id_was_asked_for(db):
+    user_id = uuid.uuid4()
+    v1 = _make_resume(db, user_id, is_main=False)
+    v2 = _make_resume(db, user_id, is_main=True, root_resume_id=v1.id, version_number=2)
+
+    from_root = get_resume_versions(v1.id, current_user=m.User(id=user_id), db=db)
+    from_leaf = get_resume_versions(v2.id, current_user=m.User(id=user_id), db=db)
+
+    assert [r.id for r in from_root] == [v2.id, v1.id]
+    assert [r.id for r in from_leaf] == [v2.id, v1.id]
+
+
+def test_get_resume_versions_404s_for_a_resume_owned_by_someone_else(db):
+    resume = _make_resume(db, uuid.uuid4())
+
+    with pytest.raises(HTTPException) as exc_info:
+        get_resume_versions(resume.id, current_user=m.User(id=uuid.uuid4()), db=db)
+    assert exc_info.value.status_code == 404
+
+
+def test_delete_resume_on_a_non_root_version_leaves_siblings_untouched(db, monkeypatch):
+    user_id = uuid.uuid4()
+    monkeypatch.setattr(resumes_routes, "delete_file", lambda *a, **k: None)
+    v1 = _make_resume(db, user_id, is_main=False)
+    v2 = _make_resume(db, user_id, is_main=True, root_resume_id=v1.id, version_number=2)
+
+    delete_resume(v2.id, current_user=m.User(id=user_id), db=db)
+    db.commit()
+
+    db.refresh(v1)
+    assert v1.root_resume_id == v1.id
+    assert db.get(m.Resume, v2.id) is None
+
+
+def test_delete_resume_root_reparents_surviving_siblings_to_the_next_oldest(db, monkeypatch):
+    user_id = uuid.uuid4()
+    monkeypatch.setattr(resumes_routes, "delete_file", lambda *a, **k: None)
+    v1 = _make_resume(db, user_id, is_main=False)
+    v2 = _make_resume(db, user_id, is_main=False, root_resume_id=v1.id, version_number=2)
+    v3 = _make_resume(db, user_id, is_main=True, root_resume_id=v1.id, version_number=3)
+
+    delete_resume(v1.id, current_user=m.User(id=user_id), db=db)
+    db.commit()
+
+    assert db.get(m.Resume, v1.id) is None
+    db.refresh(v2)
+    db.refresh(v3)
+    assert v2.root_resume_id == v2.id
+    assert v3.root_resume_id == v2.id
+
+
+def test_delete_resume_sole_version_removes_cleanly(db, monkeypatch):
+    user_id = uuid.uuid4()
+    monkeypatch.setattr(resumes_routes, "delete_file", lambda *a, **k: None)
+    resume = _make_resume(db, user_id, is_main=True)
+
+    delete_resume(resume.id, current_user=m.User(id=user_id), db=db)
+    db.commit()
+
+    assert db.get(m.Resume, resume.id) is None
+
+
+def test_delete_resume_of_the_current_main_version_does_not_auto_promote_a_sibling(db, monkeypatch):
+    user_id = uuid.uuid4()
+    monkeypatch.setattr(resumes_routes, "delete_file", lambda *a, **k: None)
+    v1 = _make_resume(db, user_id, is_main=False)
+    v2 = _make_resume(db, user_id, is_main=True, root_resume_id=v1.id, version_number=2)
+
+    delete_resume(v2.id, current_user=m.User(id=user_id), db=db)
+    db.commit()
+
+    db.refresh(v1)
+    assert v1.is_main is False
+
+
+# --------------------------------- default must always be the latest version
+
+
+def test_update_resume_422s_when_setting_a_non_latest_version_as_default(db):
+    user_id = uuid.uuid4()
+    v1 = _make_resume(db, user_id, is_main=False)
+    _make_resume(db, user_id, is_main=False, root_resume_id=v1.id, version_number=2)
+
+    with pytest.raises(HTTPException) as exc_info:
+        update_resume(v1.id, ResumeUpdate(is_main=True), current_user=m.User(id=user_id), db=db)
+    assert exc_info.value.status_code == 422
+
+
+def test_update_resume_allows_setting_the_latest_version_as_default(db):
+    user_id = uuid.uuid4()
+    v1 = _make_resume(db, user_id, is_main=False)
+    v2 = _make_resume(db, user_id, is_main=False, root_resume_id=v1.id, version_number=2)
+    other = _make_resume(db, user_id, is_main=True)
+
+    result = update_resume(v2.id, ResumeUpdate(is_main=True), current_user=m.User(id=user_id), db=db)
+
+    assert result.is_main is True
+    db.refresh(other)
+    assert other.is_main is False
+
+
+# --------------------------------- restoring an older version
+
+
+def _mock_storage(monkeypatch):
+    monkeypatch.setattr(resumes_routes, "download_file", lambda key: b"old bytes")
+    monkeypatch.setattr(resumes_routes, "upload_file", lambda *a, **k: None)
+
+
+def test_restore_creates_a_new_latest_version_with_the_old_version_content(db, monkeypatch):
+    user_id = uuid.uuid4()
+    _mock_storage(monkeypatch)
+    v1 = _make_resume(db, user_id, is_main=False)
+    v1.parsed_text = "Version 1 text"
+    db.commit()
+    _make_resume(db, user_id, is_main=False, root_resume_id=v1.id, version_number=2)
+
+    restored = restore_resume_version(v1.id, current_user=m.User(id=user_id), db=db)
+
+    assert restored.id not in (v1.id,)
+    assert restored.root_resume_id == v1.id
+    assert restored.version_number == 3
+    assert restored.parsed_text == "Version 1 text"
+    assert restored.filename == v1.filename
+
+
+def test_restore_promotes_to_default_when_its_family_was_already_default(db, monkeypatch):
+    user_id = uuid.uuid4()
+    _mock_storage(monkeypatch)
+    v1 = _make_resume(db, user_id, is_main=False)
+    v2 = _make_resume(db, user_id, is_main=True, root_resume_id=v1.id, version_number=2)
+
+    restored = restore_resume_version(v1.id, current_user=m.User(id=user_id), db=db)
+
+    assert restored.is_main is True
+    db.refresh(v2)
+    assert v2.is_main is False
+
+
+def test_restore_does_not_promote_when_its_family_was_not_the_default(db, monkeypatch):
+    user_id = uuid.uuid4()
+    _mock_storage(monkeypatch)
+    other_family_main = _make_resume(db, user_id, is_main=True)
+    v1 = _make_resume(db, user_id, is_main=False)
+    _make_resume(db, user_id, is_main=False, root_resume_id=v1.id, version_number=2)
+
+    restored = restore_resume_version(v1.id, current_user=m.User(id=user_id), db=db)
+
+    assert restored.is_main is False
+    db.refresh(other_family_main)
+    assert other_family_main.is_main is True
+
+
+def test_restore_422s_when_the_resume_is_already_the_latest_version(db, monkeypatch):
+    user_id = uuid.uuid4()
+    _mock_storage(monkeypatch)
+    v1 = _make_resume(db, user_id, is_main=False)
+    v2 = _make_resume(db, user_id, is_main=False, root_resume_id=v1.id, version_number=2)
+
+    with pytest.raises(HTTPException) as exc_info:
+        restore_resume_version(v2.id, current_user=m.User(id=user_id), db=db)
+    assert exc_info.value.status_code == 422
+
+
+def test_restore_404s_for_a_resume_owned_by_someone_else(db):
+    resume = _make_resume(db, uuid.uuid4())
+
+    with pytest.raises(HTTPException) as exc_info:
+        restore_resume_version(resume.id, current_user=m.User(id=uuid.uuid4()), db=db)
+    assert exc_info.value.status_code == 404
+
+
+# --------------------------------- score history survives new versions
+
+
+def test_get_resume_score_history_includes_scores_from_earlier_versions_in_the_same_family(db):
+    user_id = uuid.uuid4()
+    v1 = _make_resume(db, user_id, is_main=False)
+    v2 = _make_resume(db, user_id, is_main=True, root_resume_id=v1.id, version_number=2)
+    job = _make_job_posting(db)
+    old_score = _make_score(db, v1, job, overall_score=55, missing_keywords=["Kubernetes"])
+
+    result = get_resume_score_history(v2.id, current_user=m.User(id=user_id), db=db)
+
+    assert [e.id for e in result.entries] == [old_score.id]
+
+
+def test_get_resume_score_history_via_an_older_version_id_still_sees_the_whole_family(db):
+    user_id = uuid.uuid4()
+    v1 = _make_resume(db, user_id, is_main=False)
+    v2 = _make_resume(db, user_id, is_main=True, root_resume_id=v1.id, version_number=2)
+    job = _make_job_posting(db)
+    new_score = _make_score(db, v2, job, overall_score=80)
+
+    result = get_resume_score_history(v1.id, current_user=m.User(id=user_id), db=db)
+
+    assert [e.id for e in result.entries] == [new_score.id]
+
+
+def test_missing_keywords_summary_includes_earlier_versions_scores_too(db):
+    # A keyword only surfaces once it's recurred across 2+ distinct jobs
+    # (see get_missing_keywords_summary's len(jobs) >= 2 threshold) — split
+    # across v1 and v2 of the same family to prove an older version's
+    # scoring history still counts once a newer version exists.
+    user_id = uuid.uuid4()
+    v1 = _make_resume(db, user_id, is_main=False)
+    v2 = _make_resume(db, user_id, is_main=True, root_resume_id=v1.id, version_number=2)
+    job_a = _make_job_posting(db, title="Backend Engineer", company_name="Acme")
+    job_b = _make_job_posting(db, title="Platform Engineer", company_name="Globex")
+    _make_score(db, v1, job_a, missing_keywords=["Kubernetes"])
+    _make_score(db, v2, job_b, missing_keywords=["Kubernetes"])
+
+    result = get_missing_keywords_summary(current_user=m.User(id=user_id), db=db)
+
+    assert [e.keyword for e in result.entries] == ["Kubernetes"]
+    assert {j.job_title for j in result.entries[0].jobs} == {"Backend Engineer", "Platform Engineer"}

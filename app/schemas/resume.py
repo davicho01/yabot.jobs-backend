@@ -16,6 +16,10 @@ class ResumeRead(BaseModel):
     # docx|pdf is available for this resume yet, without shipping the full
     # structured_content JSONB in list responses.
     has_structured_content: bool
+    # Groups every version of the same resume together (see Resume.root_resume_id)
+    # and this row's place among them — see GET /resumes/{resume_id}/versions.
+    root_resume_id: uuid.UUID
+    version_number: int
 
 
 class ResumeUpdate(BaseModel):

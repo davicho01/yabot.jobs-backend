@@ -124,7 +124,16 @@ def test_update_application_marking_applied_sets_applied_at(db):
 def test_update_application_sets_selected_resume_id(db):
     user = _user()
     application = _make_application(db, user)
-    resume = m.Resume(user_id=user.id, filename="resume.pdf", content_type="application/pdf", storage_key="k", parsed_text="x")
+    resume_id = uuid.uuid4()
+    resume = m.Resume(
+        id=resume_id,
+        user_id=user.id,
+        filename="resume.pdf",
+        content_type="application/pdf",
+        storage_key="k",
+        parsed_text="x",
+        root_resume_id=resume_id,
+    )
     db.add(resume)
     db.flush()
 
@@ -139,8 +148,15 @@ def test_update_application_rejects_another_users_resume_as_selected_resume_id(d
     user = _user()
     other_user = _user()
     application = _make_application(db, user)
+    other_resume_id = uuid.uuid4()
     other_resume = m.Resume(
-        user_id=other_user.id, filename="resume.pdf", content_type="application/pdf", storage_key="k", parsed_text="x"
+        id=other_resume_id,
+        user_id=other_user.id,
+        filename="resume.pdf",
+        content_type="application/pdf",
+        storage_key="k",
+        parsed_text="x",
+        root_resume_id=other_resume_id,
     )
     db.add(other_resume)
     db.flush()
@@ -155,7 +171,16 @@ def test_update_application_rejects_another_users_resume_as_selected_resume_id(d
 def test_update_application_clearing_selected_resume_id_is_distinct_from_omitting_it(db):
     user = _user()
     application = _make_application(db, user)
-    resume = m.Resume(user_id=user.id, filename="resume.pdf", content_type="application/pdf", storage_key="k", parsed_text="x")
+    resume_id = uuid.uuid4()
+    resume = m.Resume(
+        id=resume_id,
+        user_id=user.id,
+        filename="resume.pdf",
+        content_type="application/pdf",
+        storage_key="k",
+        parsed_text="x",
+        root_resume_id=resume_id,
+    )
     db.add(resume)
     db.flush()
     application.selected_resume_id = resume.id

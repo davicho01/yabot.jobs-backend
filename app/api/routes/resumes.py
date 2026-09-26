@@ -85,12 +85,28 @@ def _clear_existing_main(db: Session, user_id: uuid.UUID, *, except_id: uuid.UUI
     db.execute(stmt.values(is_main=False))
 
 
+def _latest_version_number(db: Session, root_resume_id: uuid.UUID) -> int:
+    return db.scalar(select(func.max(Resume.version_number)).where(Resume.root_resume_id == root_resume_id)) or 0
+
+
+def _family_resume_ids(root_resume_id: uuid.UUID):
+    """Every resume id belonging to this family (see Resume.root_resume_id)
+    — scores/keyword gaps are tracked per specific version's row (ResumeScore.
+    resume_id), but a candidate thinks of that history as belonging to "this
+    resume" as a whole, not to whichever exact version happened to be
+    scored. Applying skill additions or restoring an old version must never
+    make prior scoring history disappear, so score-history and the missing-
+    keywords summary both look across the whole family via this.
+    """
+    return select(Resume.id).where(Resume.root_resume_id == root_resume_id)
+
+
 def _get_main_resume(db: Session, user_id: uuid.UUID) -> Resume:
     resume = db.scalar(select(Resume).where(Resume.user_id == user_id, Resume.is_main.is_(True)))
     if resume is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="No main resume set. Upload a resume, or PATCH one to is_main=true, first.",
+            detail="No default resume set. Upload a resume, or set one as default first.",
         )
     return resume
 
@@ -109,6 +125,20 @@ def _resolve_resume(db: Session, user_id: uuid.UUID, resume_id: uuid.UUID | None
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
         return resume
     return _get_main_resume(db, user_id)
+
+
+def _resolve_current_version(db: Session, user_id: uuid.UUID, resume_id: uuid.UUID | None) -> Resume:
+    """Like _resolve_resume, but always normalized to that resume's family's
+    current (highest-version_number) version — used by every endpoint
+    behind "Resume optimization" (roles, skill-addition drafts, apply) so
+    optimizing a resume always means optimizing its current version, never
+    one that's since been superseded, regardless of exactly which version
+    id was passed or fetched from.
+    """
+    resume = _resolve_resume(db, user_id, resume_id)
+    return db.scalar(
+        select(Resume).where(Resume.root_resume_id == resume.root_resume_id).order_by(Resume.version_number.desc())
+    )
 
 
 def _get_job_posting(db: Session, job_posting_id: uuid.UUID) -> JobPosting:
@@ -274,13 +304,19 @@ def upload_resume(
     storage_key = f"resumes/{current_user.id}/{uuid.uuid4()}-{safe_filename}"
     upload_file(storage_key, data, file.content_type)
 
+    # A fresh upload always starts its own new version family — it
+    # self-references as its own root. Only skill-additions-apply ever adds
+    # a later version to an existing family (see apply_resume_skill_additions).
+    resume_id = uuid.uuid4()
     resume = Resume(
+        id=resume_id,
         user_id=current_user.id,
         filename=safe_filename,
         content_type=file.content_type,
         storage_key=storage_key,
         parsed_text=parsed_text,
         is_main=is_first,
+        root_resume_id=resume_id,
     )
     db.add(resume)
     db.flush()
@@ -300,9 +336,39 @@ def upload_resume(
 
 @router.get("", response_model=list[ResumeRead])
 def list_resumes(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[Resume]:
-    return db.scalars(
+    """One row per resume *family* (see Resume.root_resume_id), not one per
+    version — each family is represented by its current is_main version if
+    it has one, else its most recent version. See GET .../versions for the
+    full per-family history.
+    """
+    resumes = db.scalars(
         select(Resume).where(Resume.user_id == current_user.id).order_by(Resume.created_at.desc())
     ).all()
+    representative_by_root: dict[uuid.UUID, Resume] = {}
+    for resume in resumes:
+        current = representative_by_root.get(resume.root_resume_id)
+        if current is None or resume.is_main or (not current.is_main and resume.version_number > current.version_number):
+            representative_by_root[resume.root_resume_id] = resume
+    return sorted(representative_by_root.values(), key=lambda r: r.created_at, reverse=True)
+
+
+@router.get("/{resume_id}/versions", response_model=list[ResumeRead])
+def get_resume_versions(
+    resume_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> list[Resume]:
+    """Every version in resume_id's family (resume_id may be any version's
+    id, not just the family's representative/root), newest first.
+    """
+    resume = db.scalar(select(Resume).where(Resume.id == resume_id, Resume.user_id == current_user.id))
+    if resume is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
+    return list(
+        db.scalars(
+            select(Resume)
+            .where(Resume.root_resume_id == resume.root_resume_id)
+            .order_by(Resume.version_number.desc())
+        ).all()
+    )
 
 
 # Registered before /{resume_id} so "main" (a single path segment, like a
@@ -327,6 +393,16 @@ def update_resume(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
 
     if payload.is_main:
+        # Invariant: whichever version is default must be its family's
+        # latest — otherwise an older version could sit as default while a
+        # newer one exists unused. Bringing an older version back is done by
+        # restoring it (POST .../restore), which creates a new latest
+        # version from its content, rather than rewinding in place.
+        if resume.version_number != _latest_version_number(db, resume.root_resume_id):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Only a resume's latest version can be set as default — restore it first.",
+            )
         _clear_existing_main(db, current_user.id, except_id=resume.id)
         resume.is_main = True
     db.flush()
@@ -340,8 +416,79 @@ def delete_resume(
     resume = db.scalar(select(Resume).where(Resume.id == resume_id, Resume.user_id == current_user.id))
     if resume is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
+
+    if resume.root_resume_id == resume.id:
+        siblings = list(
+            db.scalars(
+                select(Resume)
+                .where(Resume.root_resume_id == resume.id, Resume.id != resume.id)
+                .order_by(Resume.version_number.asc())
+            ).all()
+        )
+        if siblings:
+            # Deleting a family's root while later versions survive: the
+            # next-oldest version becomes the new root everyone else
+            # (including itself) points at, so the FK never dangles.
+            new_root_id = siblings[0].id
+            db.execute(
+                update(Resume)
+                .where(Resume.root_resume_id == resume.id, Resume.id != resume.id)
+                .values(root_resume_id=new_root_id)
+            )
+            db.flush()
+
     delete_file(resume.storage_key)
     db.delete(resume)
+
+
+@router.post("/{resume_id}/restore", response_model=ResumeRead, status_code=status.HTTP_201_CREATED)
+def restore_resume_version(
+    resume_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> Resume:
+    """Bring an older version's content back as a brand-new, latest version
+    of the same family, rather than rewinding in place — so the full
+    history (this row included) stays intact and the "default is always the
+    latest version" invariant (see update_resume) never breaks. If this
+    family is the current default, the restored version becomes the new
+    default too; otherwise it just becomes this family's new latest version.
+    """
+    resume = db.scalar(select(Resume).where(Resume.id == resume_id, Resume.user_id == current_user.id))
+    if resume is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
+
+    latest_version_number = _latest_version_number(db, resume.root_resume_id)
+    if resume.version_number == latest_version_number:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="This is already the latest version."
+        )
+
+    data = download_file(resume.storage_key)
+    storage_key = f"resumes/{current_user.id}/{uuid.uuid4()}-{resume.filename}"
+    upload_file(storage_key, data, resume.content_type)
+
+    family_is_default = (
+        db.scalar(
+            select(Resume.id).where(Resume.root_resume_id == resume.root_resume_id, Resume.is_main.is_(True))
+        )
+        is not None
+    )
+    if family_is_default:
+        _clear_existing_main(db, current_user.id)
+
+    new_resume = Resume(
+        user_id=current_user.id,
+        filename=resume.filename,
+        content_type=resume.content_type,
+        storage_key=storage_key,
+        parsed_text=resume.parsed_text,
+        is_main=family_is_default,
+        root_resume_id=resume.root_resume_id,
+        version_number=latest_version_number + 1,
+        structured_content=resume.structured_content,
+    )
+    db.add(new_resume)
+    db.flush()
+    return new_resume
 
 
 @router.post("/{resume_id}/structure", response_model=ResumeDetailRead)
@@ -414,13 +561,14 @@ def download_resume(
 def get_resume_score_history(
     resume_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> ResumeScoreHistoryRead:
-    """Every past scoring of this resume (see ResumeScore's own "history
-    kept" note), newest first, plus which missing_keywords keep recurring
-    across them — a pattern worth actually fixing on the resume, as
-    opposed to a one-off gap a single job happened to want. "Recurring"
-    means 2+ separate scores, case-insensitively (a keyword is deduped
-    within one score's own list first, so a list that happens to repeat a
-    word doesn't inflate its count on its own).
+    """Every past scoring of this resume's whole family (see
+    _family_resume_ids — a new version must never lose the scoring history
+    its earlier versions built up), newest first, plus which
+    missing_keywords keep recurring across them — a pattern worth actually
+    fixing on the resume, as opposed to a one-off gap a single job happened
+    to want. "Recurring" means 2+ separate scores, case-insensitively (a
+    keyword is deduped within one score's own list first, so a list that
+    happens to repeat a word doesn't inflate its count on its own).
     """
     resume = db.scalar(select(Resume).where(Resume.id == resume_id, Resume.user_id == current_user.id))
     if resume is None:
@@ -428,7 +576,7 @@ def get_resume_score_history(
 
     scores = db.scalars(
         select(ResumeScore)
-        .where(ResumeScore.resume_id == resume_id)
+        .where(ResumeScore.resume_id.in_(_family_resume_ids(resume.root_resume_id)))
         .order_by(ResumeScore.created_at.desc())
         .options(selectinload(ResumeScore.job_posting))
     ).all()
@@ -472,24 +620,21 @@ def get_resume_score_history(
 
 @router.get("/missing-keywords", response_model=MissingSkillsSummaryRead)
 def get_missing_keywords_summary(
-    resume_id: uuid.UUID | None = None,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> MissingSkillsSummaryRead:
     """The richer analogue of get_resume_score_history's
-    recurring_missing_keywords above, for one resume (main resume by
-    default, same _resolve_resume convention as every other resume
-    endpoint) — attaches the jobs that asked for each skill so a recurring
-    gap is easy to trace back to what to add and why. Scoped per-resume
-    rather than across all of a user's resumes since scoring itself is
-    always done against one selected resume — a candidate running several
-    resumes for different tracks would otherwise get gaps blended together
-    from roles that have nothing to do with each other.
+    recurring_missing_keywords above, across every resume this candidate
+    has ever scored — attaches the jobs that asked for each skill so a
+    recurring gap is easy to trace back to what to add and why. A gap
+    flagged while scoring one resume is just as real a gap on any other —
+    the candidate picks which resume to actually add it to (see
+    ResumeOptimizationPage's own resume picker / apply_resume_skill_additions),
+    so this list itself isn't limited to whichever resume happened to get
+    scored.
     """
-    resume = _resolve_resume(db, current_user.id, resume_id)
     scores = db.scalars(
         select(ResumeScore)
-        .where(ResumeScore.resume_id == resume.id)
+        .where(ResumeScore.user_id == current_user.id)
         .options(selectinload(ResumeScore.job_posting))
     ).all()
 
@@ -559,7 +704,7 @@ def get_resume_roles(
     """Labels for this resume's own work-history entries, for the "which job
     does this belong to" dropdown on a ResumeSkillAddition (see below).
     """
-    resume = _resolve_resume(db, current_user.id, resume_id)
+    resume = _resolve_current_version(db, current_user.id, resume_id)
 
     if resume.structured_content is not None:
         roles = _roles_from_structured_content(resume.structured_content)
@@ -651,15 +796,28 @@ def apply_resume_skill_additions(
     resume_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> Resume:
     """The batch action behind "Add missing skills to resume": turns every
-    staged ResumeSkillAddition for this resume into a bullet point and
-    produces a brand-new Resume (is_main=False — additive and reversible;
-    the candidate reviews and promotes it themselves from "My resume")
-    rather than editing the existing one in place. Consumes (deletes) the
-    drafts on success so the page returns to a clean slate.
+    staged ResumeSkillAddition for this resume's whole family into a bullet
+    point and produces the next version of this same resume (same
+    root_resume_id, version_number + 1), auto-promoted to is_main, rather
+    than editing the existing row in place. Always optimizes the family's
+    current (latest) version's content — never a version that's since been
+    superseded, regardless of exactly which version id this was called
+    with — and gathers drafts from across the whole family too, so a draft
+    never gets silently missed just because it was staged against a
+    different version than whichever happens to be latest right now.
+    Consumes (deletes) the drafts on success so the page returns to a clean
+    slate.
     """
     resume = _resolve_resume(db, current_user.id, resume_id)
+    latest_resume = db.scalar(
+        select(Resume).where(Resume.root_resume_id == resume.root_resume_id).order_by(Resume.version_number.desc())
+    )
     additions = list(
-        db.scalars(select(ResumeSkillAddition).where(ResumeSkillAddition.resume_id == resume.id)).all()
+        db.scalars(
+            select(ResumeSkillAddition).where(
+                ResumeSkillAddition.resume_id.in_(_family_resume_ids(resume.root_resume_id))
+            )
+        ).all()
     )
     if not additions:
         raise HTTPException(
@@ -670,7 +828,7 @@ def apply_resume_skill_additions(
 
     try:
         result = apply_skill_additions_with_llm(
-            resume.parsed_text,
+            latest_resume.parsed_text,
             [
                 {"keyword": a.keyword, "target_role": a.target_role, "explanation": a.explanation}
                 for a in additions
@@ -692,9 +850,23 @@ def apply_resume_skill_additions(
     docx_bytes = render_tailored_resume_docx(
         content.summary, _sections_tuples(content_dict["sections"]), _resolve_contact(content.contact, current_user)
     )
-    filename = f"{(current_user.display_name or '').replace('/', '_')}-resume-updated.docx"
+    # A version's filename never changes from the family's original — only
+    # the extension is forced to .docx, since that's what this always
+    # renders to regardless of what the original upload was.
+    root_filename = (
+        resume.filename
+        if resume.root_resume_id == resume.id
+        else db.scalar(select(Resume.filename).where(Resume.id == resume.root_resume_id))
+    )
+    filename = f"{root_filename.rsplit('.', 1)[0]}.docx"
     storage_key = f"resumes/{current_user.id}/{uuid.uuid4()}-{filename}"
     upload_file(storage_key, docx_bytes, _TAILORED_CONTENT_TYPE)
+
+    next_version_number = _latest_version_number(db, resume.root_resume_id) + 1
+
+    # Clear every existing is_main flag before inserting the new main row —
+    # never both true at once, so uq_resumes_one_main_per_user never trips.
+    _clear_existing_main(db, current_user.id)
 
     new_resume = Resume(
         user_id=current_user.id,
@@ -702,7 +874,9 @@ def apply_resume_skill_additions(
         content_type=_TAILORED_CONTENT_TYPE,
         storage_key=storage_key,
         parsed_text=_tailored_resume_text(content_dict),
-        is_main=False,
+        is_main=True,
+        root_resume_id=resume.root_resume_id,
+        version_number=next_version_number,
         # Already have the full structured content right here — save the
         # extra LLM round-trip a POST .../structure call would otherwise
         # need, so this new resume is immediately downloadable as docx/PDF.
