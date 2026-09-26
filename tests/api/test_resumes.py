@@ -961,6 +961,7 @@ def test_upload_resume_self_references_as_its_own_root(db, monkeypatch):
     user_id = uuid.uuid4()
     monkeypatch.setattr(resumes_routes, "extract_text", lambda data, content_type: "Some resume text")
     monkeypatch.setattr(resumes_routes, "_structure_resume", lambda db, current_user, resume: {})
+    monkeypatch.setattr(resumes_routes, "upload_file", lambda *a, **k: None)
     file = UploadFile(
         file=io.BytesIO(b"pdf bytes"), filename="resume.pdf", headers=Headers({"content-type": "application/pdf"})
     )
@@ -975,6 +976,7 @@ def test_upload_resume_second_upload_starts_its_own_independent_family(db, monke
     user_id = uuid.uuid4()
     monkeypatch.setattr(resumes_routes, "extract_text", lambda data, content_type: "Some resume text")
     monkeypatch.setattr(resumes_routes, "_structure_resume", lambda db, current_user, resume: {})
+    monkeypatch.setattr(resumes_routes, "upload_file", lambda *a, **k: None)
 
     def _upload(filename: str) -> m.Resume:
         file = UploadFile(
