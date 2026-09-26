@@ -42,6 +42,12 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Content-Disposition isn't on the CORS response-header safelist, so
+    # without this, frontend fetch()/response.headers.get("content-disposition")
+    # returns null for every download and the client falls back to its
+    # generic filename — always the original upload's extension, regardless
+    # of which format (docx/pdf) was actually requested and rendered.
+    expose_headers=["Content-Disposition"],
 )
 
 app.include_router(auth.router)
