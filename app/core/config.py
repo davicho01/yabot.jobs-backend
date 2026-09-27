@@ -84,7 +84,7 @@ class Settings(BaseSettings):
     # bucket above. Reuses resume_storage's AWS access key/secret (same IAM
     # user, though its policy may need widening to cover this bucket too) —
     # no separate credentials modeled here.
-    seo_pages_bucket: str = "yabot-jobs-frontend"
+    seo_pages_bucket: str = "yabot.jobs-frontend"
     seo_pages_region: str = "us-east-1"
     seo_pages_base_url: str = "https://yabot.jobs"
     # CloudFront distribution ID fronting seo_pages_bucket, for invalidating

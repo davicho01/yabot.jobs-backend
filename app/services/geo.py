@@ -248,9 +248,15 @@ class _Geo:
         # US state when the entry names another country, and to tell a
         # country-only entry from unrecognized text.
         self.foreign_countries: set[str] = set()
+        # Name -> iso2, for resolve_country below (JobPosting.country). Built
+        # from the same file/loop as foreign_countries, just also keeping the
+        # code each name maps to instead of throwing it away.
+        self.country_iso2_by_name: dict[str, str] = {}
         with (_DATA_DIR / "world_countries.tsv").open(encoding="utf-8") as handle:
             for row in csv.DictReader(handle, delimiter="\t"):
-                self.foreign_countries.add(_normalize(row["name"]))
+                name = _normalize(row["name"])
+                self.foreign_countries.add(name)
+                self.country_iso2_by_name[name] = row["iso2"]
         self.foreign_countries |= _CANADIAN_REGIONS
         self.foreign_countries -= set(self.state_by_name)
 
@@ -650,6 +656,41 @@ def resolve_places(entries: list[str]) -> list[list[float]]:
         if place is not None and [place.lat, place.lon] not in points:
             points.append([place.lat, place.lon])
     return points
+
+
+def resolve_country(entry: str) -> str | None:
+    """The ISO2 country code a single location entry names, or None when it
+    genuinely doesn't say (a bare "Remote", an unresolvable facility name, a
+    region word like "EMEA") — never guessed. A resolved city/state is always
+    "US": the whole place dataset (us_places.tsv/us_states.csv/
+    us_cbsa_counties.csv) is US-only, so resolve_entry can't return "city" or
+    "state" for anything else. Otherwise falls back to the same foreign-country
+    detection resolve_entry already uses internally (_names_foreign_country),
+    just returning which country instead of a bare yes/no."""
+    resolution = resolve_entry(entry)
+    if resolution.geo in ("city", "state"):
+        return "US"
+    geo = _geo()
+    parts = [p for chunk in entry.split(",") for p in _FACILITY_SEPARATOR_RE.split(chunk)]
+    for part in parts:
+        normalized = _normalize(part)
+        if normalized in _US_COUNTRY_TOKENS:
+            return "US"
+        code = geo.country_iso2_by_name.get(normalized)
+        if code:
+            return code
+    return None
+
+
+def resolve_country_for_locations(entries: list[str]) -> str | None:
+    """A posting's country: whichever of its location entries is the first to
+    resolve to one (order-preserving — the primary/first-listed location
+    decides), or None if none of them say."""
+    for entry in entries:
+        code = resolve_country(entry)
+        if code is not None:
+            return code
+    return None
 
 
 # ------------------------------------------------------------- radius search

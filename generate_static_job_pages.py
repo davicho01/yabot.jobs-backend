@@ -1,9 +1,13 @@
-"""Publishes the static, crawlable "jobs by sector, by day" pages — see
-app.services.static_pages for the query/render/publish logic this just
-drives. The job board at /jobs is a client-rendered React SPA (invisible to
-search engines); these plain HTML pages, one per sector per US calendar day
-(see static_pages.DAY_BOUNDARY_TZ), are published straight into the
-frontend's S3 bucket/CloudFront distribution instead.
+"""Publishes the static, crawlable "jobs by country, sector, and day" pages
+(/jobs/{country-slug}/{sector-slug}/{date}) — see app.services.static_pages
+for the query/render/publish logic this just drives. The job board at /jobs
+is a client-rendered React SPA (invisible to search engines); these plain
+HTML pages, one per country x sector per US calendar day (see
+static_pages.DAY_BOUNDARY_TZ), are published straight into the frontend's S3
+bucket/CloudFront distribution instead. Just the US for now
+(static_pages._COUNTRIES) — JobPosting.country is set at scan time (see
+app.services.geo.resolve_country_for_locations), so adding a country here is
+just adding a row to that list, no other change needed.
 
 Regenerates **today's** pages by default, overwriting whatever was written
 earlier today — meant to run every 30 minutes (its own independent
@@ -51,13 +55,13 @@ def main() -> None:
     finally:
         db.close()
 
-    if not result.sector_job_counts:
-        logger.info("No jobs found for any sector on %s; nothing published.", target_date.isoformat())
+    if not result.job_counts:
+        logger.info("No jobs found for any country/sector on %s; nothing published.", target_date.isoformat())
         return
     verb = "Would publish" if args.dry_run else "Published"
-    for slug, count in sorted(result.sector_job_counts.items()):
-        logger.info("%s %s/%s: %d job(s).", verb, slug, target_date.isoformat(), count)
-    logger.info("%s %d sector page(s) for %s.", verb, len(result.sector_job_counts), target_date.isoformat())
+    for key, count in sorted(result.job_counts.items()):
+        logger.info("%s jobs/%s/%s: %d job(s).", verb, key, target_date.isoformat(), count)
+    logger.info("%s %d country/sector page(s) for %s.", verb, len(result.job_counts), target_date.isoformat())
 
 
 def dispatch(_request=None) -> tuple[str, int]:

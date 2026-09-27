@@ -431,6 +431,34 @@ def test_resolve_places_gives_coordinates_only_for_entries_that_name_a_city():
     assert geo.resolve_places([]) == []
 
 
+# ------------------------------------------------------------ country resolution
+
+
+@pytest.mark.parametrize(
+    "entry,country",
+    [
+        ("Salt Lake City, UT, United States", "US"),
+        ("Remote - California", "US"),  # a bare state still resolves, and states are always US
+        ("SUNNYVALE, CA, United States", "US"),
+        ("Toronto, Canada", "CA"),
+        ("Mexico - Mexico City", "MX"),
+        ("London, United Kingdom", "GB"),
+        ("Remote", None),  # nothing left to say a country at all
+        ("EMEA", None),  # a region, not a country
+        ("123 Some Unresolvable Facility Name", None),
+    ],
+)
+def test_resolve_country(entry, country):
+    assert geo.resolve_country(entry) == country
+
+
+def test_resolve_country_for_locations_takes_the_first_entry_that_resolves():
+    assert geo.resolve_country_for_locations(["Remote", "Austin, TX"]) == "US"
+    assert geo.resolve_country_for_locations(["Toronto, Canada", "Austin, TX"]) == "CA"
+    assert geo.resolve_country_for_locations(["Remote", "EMEA"]) is None
+    assert geo.resolve_country_for_locations([]) is None
+
+
 # ------------------------------------------------------------ place suggestions
 
 

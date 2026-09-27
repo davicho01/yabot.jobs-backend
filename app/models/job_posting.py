@@ -63,6 +63,14 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
     # app.services.geo.resolve_places in _upsert_posting; entries with no city (a state,
     # "Remote", a facility, non-US) contribute nothing.
     places: Mapped[list[list[float]]] = mapped_column(JSONB, nullable=False, default=list)
+    # ISO2 country code ("US", "CA", ...), or null when it genuinely can't be
+    # determined (a bare "Remote", an unresolvable facility name, a region word
+    # like "EMEA" — never guessed). Derived from `locations` by
+    # app.services.geo.resolve_country_for_locations in _upsert_posting — the
+    # first entry that resolves to a country wins (a posting's primary/first-
+    # listed location). Indexed since the per-country static pages (see
+    # app.services.static_pages) filter on it directly.
+    country: Mapped[str | None] = mapped_column(String(2), index=True)
     workplace_type: Mapped[str] = mapped_column(String(20), default=WorkplaceType.UNKNOWN, nullable=False)
     employment_type: Mapped[str] = mapped_column(String(20), default=EmploymentType.UNKNOWN, nullable=False)
     # Job function/department this posting is hiring for (engineering, sales,

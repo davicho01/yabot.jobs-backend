@@ -53,14 +53,14 @@ SQL_INSTANCE="yabot-jobs-db"
 CLOUDSQL_INSTANCE_CONNECTION="${PROJECT_ID}:${SQL_REGION}:${SQL_INSTANCE}"
 BROWSER_FETCH_SERVICE_URL="https://yabot-jobs-browser-487584214286.us-central1.run.app"
 
-# TODO: fill in from yabot.jobs-frontend's own deploy config (its GitHub
-# Actions repo/environment variables S3_BUCKET / CLOUDFRONT_DISTRIBUTION_ID —
-# not committed to any repo, see that repo's .github/workflows/deploy.yml).
-# generate-static-job-pages writes real HTML objects straight into that same
-# bucket/distribution so they're served at yabot.jobs/jobs/... alongside the
-# SPA — this is intentionally the frontend's infra, not a new bucket of ours.
-SEO_PAGES_BUCKET="TODO-frontend-s3-bucket-name"
-SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID="TODO-frontend-cloudfront-distribution-id"
+# Same bucket/distribution yabot.jobs-frontend's own deploy uses (its GitHub
+# Actions vars S3_BUCKET / CLOUDFRONT_DISTRIBUTION_ID — not committed to any
+# repo, see that repo's .github/workflows/deploy.yml). generate-static-job-pages
+# writes real HTML objects straight into this same bucket/distribution so
+# they're served at yabot.jobs/jobs/... alongside the SPA — this is
+# intentionally the frontend's infra, not a new bucket of ours.
+SEO_PAGES_BUCKET="yabot.jobs-frontend"
+SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID="E2JQUGZZTUJPZ6"
 
 # ---------------------------------------------------------------------------
 # 0. One-time project setup
@@ -180,6 +180,28 @@ gcloud run jobs deploy migrate \
   --set-secrets="$COMMON_SECRETS"
 
 gcloud run jobs execute migrate --region="$REGION" --wait
+
+# ---------------------------------------------------------------------------
+# 3b. backfill-country — Cloud Run Job, one-off (not run on every deploy,
+#     unlike migrate above). Same image/secrets/env, command
+#     `python -m one_off.backfill_country` — computes JobPosting.country for
+#     every existing row via app.services.geo.resolve_country_for_locations,
+#     needed once so rows scanned before that column existed aren't invisible
+#     to the /jobs/us/... filter (see one_off/backfill_country.py's own
+#     docstring). Deploy once, then execute by hand — --dry-run first to
+#     sanity-check the country breakdown before writing:
+#       gcloud run jobs execute backfill-country --region="$REGION" --args=--dry-run --wait
+#       gcloud run jobs execute backfill-country --region="$REGION" --wait
+# ---------------------------------------------------------------------------
+
+gcloud run jobs deploy backfill-country \
+  --image="$IMAGE_TAG" \
+  --region="$REGION" \
+  --command=python --args=-m,one_off.backfill_country \
+  --set-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION" \
+  --set-env-vars="$COMMON_ENV" \
+  --set-secrets="$COMMON_SECRETS" \
+  --task-timeout=3600
 
 # ---------------------------------------------------------------------------
 # 4. api — Cloud Run service

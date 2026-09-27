@@ -20,7 +20,7 @@ from app.services.crawl_sources import register_discovered_board
 from app.services.job_dedup import find_duplicate_primary, normalize_company_name, normalize_title
 from app.services.job_llm_extractor import LlmExtraction, extract_with_llm, html_to_text
 from app.services import geo
-from app.services.geo import resolve_area_codes, resolve_places
+from app.services.geo import resolve_area_codes, resolve_country_for_locations, resolve_places
 from app.services.job_locations import location_matches, radius_search, split_locations
 from app.services.job_sector import classify_sector
 from app.services.workplace import infer_workplace_type, reconcile_workplace_type
@@ -878,6 +878,7 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
     posting.locations = split_locations(_strip_nul(location) if location else None)
     posting.metros = resolve_area_codes(posting.locations)
     posting.places = resolve_places(posting.locations)
+    posting.country = resolve_country_for_locations(posting.locations)
     # What the location text states ("Remote - US", "… HQ") beats an adapter's default
     # guess that a plain place means on-site — see app.services.workplace.
     posting.workplace_type = reconcile_workplace_type(fields["workplace_type"], infer_workplace_type(posting.locations))

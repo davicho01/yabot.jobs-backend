@@ -1,7 +1,8 @@
-"""Generates the static, crawlable "jobs by sector, by day" pages described
-in generate_static_job_pages.py — the job board at /jobs is a client-rendered
-React SPA (invisible to search engines), so this publishes plain HTML
-straight into the frontend's S3 bucket/CloudFront distribution instead.
+"""Generates the static, crawlable "jobs by country, sector, and day" pages
+described in generate_static_job_pages.py — the job board at /jobs is a
+client-rendered React SPA (invisible to search engines), so this publishes
+plain HTML straight into the frontend's S3 bucket/CloudFront distribution
+instead.
 
 Everything here is pure (query + render + build payloads); generate_static_job_pages.py
 is the only caller and is what actually touches S3/CloudFront, so this module
@@ -38,6 +39,16 @@ DAY_BOUNDARY_TZ = ZoneInfo("America/Los_Angeles")
 
 MANIFEST_KEY = "_meta/generated-pages.json"
 SITEMAP_KEY = "sitemap-jobs.xml"
+
+# Countries these pages cover — just the US for now (JobPosting.country is an
+# ISO2 code; see app.services.geo.resolve_country_for_locations for how it's
+# set). Adding a second country later is just adding a row here; nothing
+# about the URL scheme, manifest shape, or rendering assumes there's only one.
+_COUNTRIES: list[tuple[str, str, str]] = [
+    ("us", "US", "United States"),
+]
+COUNTRY_ISO2_BY_SLUG: dict[str, str] = {slug: iso2 for slug, iso2, _ in _COUNTRIES}
+COUNTRY_NAMES: dict[str, str] = {slug: name for slug, _, name in _COUNTRIES}
 
 # Human-readable slug/display name per sector, in the order they should list
 # on a page's "other sectors" footer. UNKNOWN is deliberately excluded — it's
@@ -108,12 +119,13 @@ class JobRow:
         return fmt(self.salary_max if self.salary_max is not None else self.salary_min)
 
 
-def jobs_for_sector_day(db: Session, sector: JobSector, local_day: date) -> list[JobRow]:
-    """Every canonical, successfully-scanned, unflagged posting in `sector`
-    whose JobPostingUrl.created_at falls in `local_day` (DAY_BOUNDARY_TZ),
-    newest first. Same base filter as build_job_search_statement
-    (app.services.jobs) — a job appears here iff it would also show up in a
-    normal /jobs search for this sector, nothing looser."""
+def jobs_for_sector_day(db: Session, country_iso2: str, sector: JobSector, local_day: date) -> list[JobRow]:
+    """Every canonical, successfully-scanned, unflagged `country_iso2` posting
+    in `sector` whose JobPostingUrl.created_at falls in `local_day`
+    (DAY_BOUNDARY_TZ), newest first. Same base filter as
+    build_job_search_statement (app.services.jobs) plus the country match — a
+    job appears here iff it would also show up in a normal /jobs search for
+    this sector, nothing looser."""
     start_utc, end_utc = day_bounds_utc(local_day)
     stmt = (
         select(JobPostingUrl, JobPosting)
@@ -123,6 +135,7 @@ def jobs_for_sector_day(db: Session, sector: JobSector, local_day: date) -> list
             JobPosting.title.is_not(None),
             JobPosting.primary_posting_id.is_(None),
             JobPosting.sector == sector,
+            JobPosting.country == country_iso2,
             JobPostingUrl.flagged_at.is_(None),
             JobPostingUrl.created_at >= start_utc,
             JobPostingUrl.created_at < end_utc,
@@ -152,21 +165,25 @@ def jobs_for_sector_day(db: Session, sector: JobSector, local_day: date) -> list
 
 def render_day_page(
     *,
+    country_slug: str,
     sector: JobSector,
     local_day: date,
     jobs: list[JobRow],
     generated_at: datetime,
     manifest: dict,
 ) -> str:
-    slug = SECTOR_SLUGS[sector]
+    sector_slug = SECTOR_SLUGS[sector]
+    country_name = COUNTRY_NAMES[country_slug]
     template = _TEMPLATE_ENV.get_template("sector_day.html.jinja")
-    dates_for_sector = sorted(manifest.get(slug, {}))
+    dates_for_sector = sorted(manifest.get(country_slug, {}).get(sector_slug, {}))
     day_str = local_day.isoformat()
     idx = dates_for_sector.index(day_str) if day_str in dates_for_sector else -1
     prev_day = dates_for_sector[idx - 1] if idx > 0 else None
     next_day = dates_for_sector[idx + 1] if 0 <= idx < len(dates_for_sector) - 1 else None
     return template.render(
-        sector_slug=slug,
+        country_slug=country_slug,
+        country_name=country_name,
+        sector_slug=sector_slug,
         sector_name=SECTOR_DISPLAY_NAMES[sector],
         date_display=local_day.strftime("%B %-d, %Y"),
         date_iso=day_str,
@@ -214,10 +231,11 @@ def _build_job_ld_json(jobs: list[JobRow], day_str: str) -> str:
     return json.dumps(payload).replace("</", "<\\/")
 
 
-def render_sector_index(*, sector: JobSector, dates_with_counts: list[tuple[str, int]]) -> str:
+def render_sector_index(*, country_slug: str, sector: JobSector, dates_with_counts: list[tuple[str, int]]) -> str:
     """`dates_with_counts`: [(YYYY-MM-DD, job_count), ...], any order — sorted
     here newest-first and grouped by month."""
-    slug = SECTOR_SLUGS[sector]
+    sector_slug = SECTOR_SLUGS[sector]
+    country_name = COUNTRY_NAMES[country_slug]
     template = _TEMPLATE_ENV.get_template("sector_index.html.jinja")
     ordered = sorted(dates_with_counts, key=lambda pair: pair[0], reverse=True)
     months: dict[str, list[tuple[str, str, int]]] = {}
@@ -226,7 +244,9 @@ def render_sector_index(*, sector: JobSector, dates_with_counts: list[tuple[str,
         month_label = d.strftime("%B %Y")
         months.setdefault(month_label, []).append((iso_date, d.strftime("%b %-d, %Y"), count))
     return template.render(
-        sector_slug=slug,
+        country_slug=country_slug,
+        country_name=country_name,
+        sector_slug=sector_slug,
         sector_name=SECTOR_DISPLAY_NAMES[sector],
         months=list(months.items()),
         base_url=settings.seo_pages_base_url,
@@ -238,26 +258,28 @@ def render_sector_index(*, sector: JobSector, dates_with_counts: list[tuple[str,
 # ---------------------------------------------------------------------------
 
 
-def add_to_manifest(manifest: dict, sector: JobSector, local_day: date, job_count: int) -> dict:
-    """Returns a new manifest with (sector, local_day) recorded against
-    `job_count`. `manifest` maps sector-slug -> {"YYYY-MM-DD": job_count} for
-    every day ever generated — the count (not just a list of dates) is stored
-    so the sector-index page can show "N jobs" per day without re-querying
-    the DB for every past date on every run; only today's entry actually
-    changes between runs, past ones are frozen once their day closes."""
-    slug = SECTOR_SLUGS[sector]
+def add_to_manifest(manifest: dict, country_slug: str, sector: JobSector, local_day: date, job_count: int) -> dict:
+    """Returns a new manifest with (country_slug, sector, local_day) recorded
+    against `job_count`. `manifest` maps
+    country-slug -> sector-slug -> {"YYYY-MM-DD": job_count} for every day
+    ever generated — the count (not just a list of dates) is stored so the
+    sector-index page can show "N jobs" per day without re-querying the DB
+    for every past date on every run; only today's entry actually changes
+    between runs, past ones are frozen once their day closes."""
+    sector_slug = SECTOR_SLUGS[sector]
     day_str = local_day.isoformat()
-    updated = {k: dict(v) for k, v in manifest.items()}
-    updated.setdefault(slug, {})[day_str] = job_count
+    updated = {c: {s: dict(days) for s, days in sectors.items()} for c, sectors in manifest.items()}
+    updated.setdefault(country_slug, {}).setdefault(sector_slug, {})[day_str] = job_count
     return updated
 
 
 def build_sitemap_xml(manifest: dict) -> str:
     base = settings.seo_pages_base_url
     urls = []
-    for slug, days in sorted(manifest.items()):
-        urls.append(f"{base}/jobs/{slug}")
-        urls.extend(f"{base}/jobs/{slug}/{day}" for day in sorted(days))
+    for country_slug, sectors in sorted(manifest.items()):
+        for sector_slug, days in sorted(sectors.items()):
+            urls.append(f"{base}/jobs/{country_slug}/{sector_slug}")
+            urls.extend(f"{base}/jobs/{country_slug}/{sector_slug}/{day}" for day in sorted(days))
     entries = "\n".join(f"  <url><loc>{url}</loc></url>" for url in urls)
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -314,17 +336,18 @@ def write_manifest(manifest: dict) -> None:
 class GenerationResult:
     generated_at: datetime
     target_date: date
-    sector_job_counts: dict[str, int]  # slug -> job count, only sectors with >=1 job today
+    # "us/engineering-tech" -> job count, only country/sector combos with >=1 job today
+    job_counts: dict[str, int]
     manifest: dict
 
 
 def generate_for_date(db: Session, target_date: date, *, dry_run: bool = False) -> GenerationResult:
-    """The whole run: for every sector with at least one job on `target_date`
-    (DAY_BOUNDARY_TZ), write/overwrite that day's page, refresh the sector's
-    index page, update the manifest, and rebuild sitemap-jobs.xml — then
-    invalidate exactly the CloudFront paths touched. Sectors with zero jobs
-    today are skipped entirely (no page, no manifest entry) rather than
-    publishing a thin/empty page.
+    """The whole run: for every country x sector with at least one job on
+    `target_date` (DAY_BOUNDARY_TZ), write/overwrite that day's page, refresh
+    the sector's index page, update the manifest, and rebuild
+    sitemap-jobs.xml — then invalidate exactly the CloudFront paths touched.
+    A combo with zero jobs today is skipped entirely (no page, no manifest
+    entry) rather than publishing a thin/empty page.
 
     Safe to call repeatedly for the same date (idempotent overwrites) — this
     is exactly how same-day pages get "updated as of HH:MM" freshness: call
@@ -335,26 +358,33 @@ def generate_for_date(db: Session, target_date: date, *, dry_run: bool = False) 
     generated_at = datetime.now(timezone.utc)
     manifest = {} if dry_run else read_manifest()
     touched_paths: list[str] = []
-    sector_job_counts: dict[str, int] = {}
+    job_counts: dict[str, int] = {}
 
-    for sector in SECTOR_SLUGS:
-        jobs = jobs_for_sector_day(db, sector, target_date)
-        if not jobs:
-            continue
-        slug = SECTOR_SLUGS[sector]
-        sector_job_counts[slug] = len(jobs)
-        manifest = add_to_manifest(manifest, sector, target_date, len(jobs))
-        day_html = render_day_page(sector=sector, local_day=target_date, jobs=jobs, generated_at=generated_at, manifest=manifest)
-        day_key = f"jobs/{slug}/{target_date.isoformat()}"
-        index_html = render_sector_index(sector=sector, dates_with_counts=list(manifest[slug].items()))
-        index_key = f"jobs/{slug}"
-        logger.info("%s: %d job(s) for %s.", slug, len(jobs), target_date.isoformat())
-        if not dry_run:
-            upload_html(day_key, day_html)
-            upload_html(index_key, index_html)
-        touched_paths.extend([f"/{day_key}", f"/{index_key}"])
+    for country_slug, country_iso2, _ in _COUNTRIES:
+        for sector in SECTOR_SLUGS:
+            jobs = jobs_for_sector_day(db, country_iso2, sector, target_date)
+            if not jobs:
+                continue
+            sector_slug = SECTOR_SLUGS[sector]
+            job_counts[f"{country_slug}/{sector_slug}"] = len(jobs)
+            manifest = add_to_manifest(manifest, country_slug, sector, target_date, len(jobs))
+            day_html = render_day_page(
+                country_slug=country_slug, sector=sector, local_day=target_date, jobs=jobs,
+                generated_at=generated_at, manifest=manifest,
+            )
+            day_key = f"jobs/{country_slug}/{sector_slug}/{target_date.isoformat()}"
+            index_html = render_sector_index(
+                country_slug=country_slug, sector=sector,
+                dates_with_counts=list(manifest[country_slug][sector_slug].items()),
+            )
+            index_key = f"jobs/{country_slug}/{sector_slug}"
+            logger.info("%s/%s: %d job(s) for %s.", country_slug, sector_slug, len(jobs), target_date.isoformat())
+            if not dry_run:
+                upload_html(day_key, day_html)
+                upload_html(index_key, index_html)
+            touched_paths.extend([f"/{day_key}", f"/{index_key}"])
 
-    if not dry_run and sector_job_counts:
+    if not dry_run and job_counts:
         write_manifest(manifest)
         _get_s3_client().put_object(
             Bucket=settings.seo_pages_bucket,
@@ -365,9 +395,7 @@ def generate_for_date(db: Session, target_date: date, *, dry_run: bool = False) 
         touched_paths.append(f"/{SITEMAP_KEY}")
         invalidate_paths(touched_paths)
 
-    return GenerationResult(
-        generated_at=generated_at, target_date=target_date, sector_job_counts=sector_job_counts, manifest=manifest
-    )
+    return GenerationResult(generated_at=generated_at, target_date=target_date, job_counts=job_counts, manifest=manifest)
 
 
 def invalidate_paths(paths: list[str]) -> None:

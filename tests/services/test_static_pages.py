@@ -45,6 +45,7 @@ def make_posting(db):
         *,
         created_at: datetime,
         sector: str = JobSector.ENGINEERING_TECH,
+        country: str | None = "US",
         extraction_status: str = ScanStatus.SUCCESS,
         title: str | None = "Software Engineer",
         primary_posting_id: uuid.UUID | None = None,
@@ -72,6 +73,7 @@ def make_posting(db):
             company_name=company_name,
             location=location,
             sector=sector,
+            country=country,
             extraction_status=extraction_status,
             primary_posting_id=primary_posting_id,
             salary_min=salary_min,
@@ -105,37 +107,45 @@ class TestDayBoundsUtc:
 class TestJobsForSectorDay:
     def test_includes_a_valid_job_on_the_target_day(self, db, make_posting):
         make_posting(created_at=PT_NOON)
-        jobs = sp.jobs_for_sector_day(db, JobSector.ENGINEERING_TECH, date(2026, 9, 26))
+        jobs = sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26))
         assert len(jobs) == 1
         assert jobs[0].title == "Software Engineer"
 
     def test_excludes_wrong_sector(self, db, make_posting):
         make_posting(created_at=PT_NOON, sector=JobSector.SALES)
-        assert sp.jobs_for_sector_day(db, JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
+        assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
+
+    def test_excludes_wrong_country(self, db, make_posting):
+        make_posting(created_at=PT_NOON, country="GB")
+        assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
+
+    def test_excludes_unresolved_country(self, db, make_posting):
+        make_posting(created_at=PT_NOON, country=None)
+        assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
 
     def test_excludes_unsuccessful_scans(self, db, make_posting):
         make_posting(created_at=PT_NOON, extraction_status=ScanStatus.NEEDS_REVIEW)
-        assert sp.jobs_for_sector_day(db, JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
+        assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
 
     def test_excludes_non_canonical_duplicates(self, db, make_posting):
         make_posting(created_at=PT_NOON, primary_posting_id=uuid.uuid4())
-        assert sp.jobs_for_sector_day(db, JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
+        assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
 
     def test_excludes_flagged_listings(self, db, make_posting):
         make_posting(created_at=PT_NOON, flagged_at=PT_NOON)
-        assert sp.jobs_for_sector_day(db, JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
+        assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
 
     def test_evening_pacific_post_does_not_spill_into_next_utc_day(self, db, make_posting):
         # 11pm Pacific (PDT, UTC-7) on Sept 26 is 06:00 UTC on Sept 27 — a
         # naive UTC-day bucket would wrongly file this under Sept 27.
         late_pt = datetime(2026, 9, 27, 6, 0, tzinfo=timezone.utc)
         make_posting(created_at=late_pt)
-        assert len(sp.jobs_for_sector_day(db, JobSector.ENGINEERING_TECH, date(2026, 9, 26))) == 1
-        assert sp.jobs_for_sector_day(db, JobSector.ENGINEERING_TECH, date(2026, 9, 27)) == []
+        assert len(sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26))) == 1
+        assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 27)) == []
 
     def test_carries_salary_fields_through(self, db, make_posting):
         make_posting(created_at=PT_NOON, salary_min=100_000, salary_max=130_000, salary_currency="USD")
-        jobs = sp.jobs_for_sector_day(db, JobSector.ENGINEERING_TECH, date(2026, 9, 26))
+        jobs = sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26))
         assert jobs[0].salary_min == 100_000
         assert jobs[0].salary_max == 130_000
         assert jobs[0].salary_display == "$100,000 – $130,000"
@@ -143,27 +153,32 @@ class TestJobsForSectorDay:
     def test_excludes_adjacent_days(self, db, make_posting):
         make_posting(created_at=PT_NOON - timedelta(days=1))
         make_posting(created_at=PT_NOON + timedelta(days=1))
-        assert sp.jobs_for_sector_day(db, JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
+        assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
 
 
 class TestManifestAndSitemap:
     def test_add_to_manifest_records_count_without_mutating_input(self):
         original = {}
-        updated = sp.add_to_manifest(original, JobSector.ENGINEERING_TECH, date(2026, 9, 26), 5)
+        updated = sp.add_to_manifest(original, "us", JobSector.ENGINEERING_TECH, date(2026, 9, 26), 5)
         assert original == {}
-        assert updated == {"engineering-tech": {"2026-09-26": 5}}
+        assert updated == {"us": {"engineering-tech": {"2026-09-26": 5}}}
 
     def test_add_to_manifest_updates_same_day_count_idempotently(self):
-        manifest = sp.add_to_manifest({}, JobSector.ENGINEERING_TECH, date(2026, 9, 26), 5)
-        manifest = sp.add_to_manifest(manifest, JobSector.ENGINEERING_TECH, date(2026, 9, 26), 9)
-        assert manifest == {"engineering-tech": {"2026-09-26": 9}}
+        manifest = sp.add_to_manifest({}, "us", JobSector.ENGINEERING_TECH, date(2026, 9, 26), 5)
+        manifest = sp.add_to_manifest(manifest, "us", JobSector.ENGINEERING_TECH, date(2026, 9, 26), 9)
+        assert manifest == {"us": {"engineering-tech": {"2026-09-26": 9}}}
 
-    def test_build_sitemap_xml_lists_index_and_day_urls(self):
-        manifest = {"engineering-tech": {"2026-09-26": 3, "2026-09-25": 1}}
+    def test_add_to_manifest_keeps_countries_and_sectors_independent(self):
+        manifest = sp.add_to_manifest({}, "us", JobSector.ENGINEERING_TECH, date(2026, 9, 26), 5)
+        manifest = sp.add_to_manifest(manifest, "us", JobSector.SALES, date(2026, 9, 26), 2)
+        assert manifest == {"us": {"engineering-tech": {"2026-09-26": 5}, "sales": {"2026-09-26": 2}}}
+
+    def test_build_sitemap_xml_lists_index_and_day_urls_nested_by_country(self):
+        manifest = {"us": {"engineering-tech": {"2026-09-26": 3, "2026-09-25": 1}}}
         xml = sp.build_sitemap_xml(manifest)
-        assert "<loc>https://yabot.jobs/jobs/engineering-tech</loc>" in xml
-        assert "<loc>https://yabot.jobs/jobs/engineering-tech/2026-09-26</loc>" in xml
-        assert "<loc>https://yabot.jobs/jobs/engineering-tech/2026-09-25</loc>" in xml
+        assert "<loc>https://yabot.jobs/jobs/us/engineering-tech</loc>" in xml
+        assert "<loc>https://yabot.jobs/jobs/us/engineering-tech/2026-09-26</loc>" in xml
+        assert "<loc>https://yabot.jobs/jobs/us/engineering-tech/2026-09-25</loc>" in xml
 
 
 class TestRendering:
@@ -177,8 +192,9 @@ class TestRendering:
                 posted_at_local=PT_NOON,
             )
         ]
-        manifest = sp.add_to_manifest({}, JobSector.ENGINEERING_TECH, date(2026, 9, 26), 1)
+        manifest = sp.add_to_manifest({}, "us", JobSector.ENGINEERING_TECH, date(2026, 9, 26), 1)
         html = sp.render_day_page(
+            country_slug="us",
             sector=JobSector.ENGINEERING_TECH,
             local_day=date(2026, 9, 26),
             jobs=jobs,
@@ -186,7 +202,9 @@ class TestRendering:
             manifest=manifest,
         )
         assert "/jobs/11111111-1111-1111-1111-111111111111" in html
+        assert "/jobs/us/engineering-tech/2026-09-26" in html
         assert "Senior Backend Engineer" in html
+        assert "United States" in html
 
         import json
         import re
@@ -207,8 +225,9 @@ class TestRendering:
                 salary_max=150_000,
             )
         ]
-        manifest = sp.add_to_manifest({}, JobSector.ENGINEERING_TECH, date(2026, 9, 26), 1)
+        manifest = sp.add_to_manifest({}, "us", JobSector.ENGINEERING_TECH, date(2026, 9, 26), 1)
         html = sp.render_day_page(
+            country_slug="us",
             sector=JobSector.ENGINEERING_TECH,
             local_day=date(2026, 9, 26),
             jobs=jobs,
@@ -252,12 +271,14 @@ class TestRendering:
 
     def test_sector_index_lists_dates_grouped_by_month(self):
         html = sp.render_sector_index(
+            country_slug="us",
             sector=JobSector.ENGINEERING_TECH,
             dates_with_counts=[("2026-09-26", 5), ("2026-08-30", 2)],
         )
         assert "2026-09-26" in html
         assert "September 2026" in html
         assert "August 2026" in html
+        assert "/jobs/us/engineering-tech" in html
 
 
 class TestGenerateForDate:
@@ -273,11 +294,16 @@ class TestGenerateForDate:
         monkeypatch.setattr(sp, "invalidate_paths", _boom)
 
         result = sp.generate_for_date(db, date(2026, 9, 26), dry_run=True)
-        assert result.sector_job_counts == {"engineering-tech": 1}
+        assert result.job_counts == {"us/engineering-tech": 1}
 
-    def test_skips_sectors_with_zero_jobs(self, db):
+    def test_skips_country_sector_combos_with_zero_jobs(self, db):
         result = sp.generate_for_date(db, date(2026, 9, 26), dry_run=True)
-        assert result.sector_job_counts == {}
+        assert result.job_counts == {}
+
+    def test_non_us_postings_are_not_published_anywhere(self, db, make_posting):
+        make_posting(created_at=PT_NOON, country="GB")
+        result = sp.generate_for_date(db, date(2026, 9, 26), dry_run=True)
+        assert result.job_counts == {}
 
     def test_publishes_day_and_index_pages_and_updates_manifest(self, db, make_posting, monkeypatch):
         make_posting(created_at=PT_NOON)
@@ -290,10 +316,10 @@ class TestGenerateForDate:
 
         result = sp.generate_for_date(db, date(2026, 9, 26), dry_run=False)
 
-        assert result.sector_job_counts == {"engineering-tech": 1}
-        assert "jobs/engineering-tech/2026-09-26" in uploaded
-        assert "jobs/engineering-tech" in uploaded
-        assert uploaded["_manifest"] == {"engineering-tech": {"2026-09-26": 1}}
+        assert result.job_counts == {"us/engineering-tech": 1}
+        assert "jobs/us/engineering-tech/2026-09-26" in uploaded
+        assert "jobs/us/engineering-tech" in uploaded
+        assert uploaded["_manifest"] == {"us": {"engineering-tech": {"2026-09-26": 1}}}
         assert "/sitemap-jobs.xml" in uploaded["_invalidated"]
 
 

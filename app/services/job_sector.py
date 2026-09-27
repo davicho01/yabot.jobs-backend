@@ -184,14 +184,27 @@ def _normalize(text: str) -> str:
     return " " + _WHITESPACE_RE.sub(" ", text.lower()) + " "
 
 
-def _match(text: str) -> JobSector | None:
+def _match(text: str, *, allow_single_word: bool = True) -> JobSector | None:
     # Multi-word keywords ("sales engineer") are more specific than
     # single-word ones ("engineer") and are checked first, across every
     # sector, so a compound title isn't swallowed by a broader single-word
     # keyword from an earlier sector in the list — otherwise
     # engineering_tech's bare "engineer" would catch "Sales Engineer" before
     # sales's own, more specific, entry was ever reached.
+    #
+    # allow_single_word=False is for the description fallback below: a long
+    # description very often contains a generic "Bachelor's degree in
+    # Business, Engineering, or related field" qualifications line that has
+    # nothing to do with what the job itself is — a bare single-word keyword
+    # matching anywhere in all that text is a false-positive risk a short,
+    # purpose-written title doesn't have (verified live: a Walmart "Manager,
+    # Seller Engagement" listing landed in engineering_tech purely from that
+    # boilerplate degree line). Multi-word phrases ("site reliability",
+    # "product manager") stay enabled for descriptions — specific enough to
+    # still be diagnostic wherever they appear.
     for multi_word in (True, False):
+        if not multi_word and not allow_single_word:
+            continue
         for sector, keywords in _SECTOR_KEYWORDS:
             for keyword in keywords:
                 if (" " in keyword.strip()) == multi_word and keyword in text:
@@ -208,7 +221,7 @@ def classify_sector(title: str | None, description: str | None = None) -> JobSec
         if match is not None:
             return match
     if description:
-        match = _match(_normalize(description))
+        match = _match(_normalize(description), allow_single_word=False)
         if match is not None:
             return match
     return JobSector.UNKNOWN
