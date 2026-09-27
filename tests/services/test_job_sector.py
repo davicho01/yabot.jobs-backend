@@ -49,3 +49,19 @@ class TestClassifySector:
         # this deliberately isn't in engineering_traditional's keyword list
         # and falls through to the bare "engineer" match instead.
         assert classify_sector("Sr Associate, Quality Engineer", "") == JobSector.ENGINEERING_TECH
+
+    def test_information_technology_boilerplate_does_not_land_in_tech(self):
+        # Regression: "information technology" used to be a description-
+        # fallback keyword, but it also matches when a career site's own
+        # department/category tag leaks into an unrelated description —
+        # verified live against a real Walgreens "Pharmacy Intern Grad"
+        # posting whose description contained a stray "information
+        # technology" line with no surrounding sentence (a scraped page
+        # artifact, not job content).
+        title = "Pharmacy Intern Grad"
+        description = (
+            "Ensures the use of all elements of the Good Faith Dispensing policy.\n"
+            "information technology\n"
+            "Ensures the accurate processing of insurance claims to resolve customer issues."
+        )
+        assert classify_sector(title, description) != JobSector.ENGINEERING_TECH

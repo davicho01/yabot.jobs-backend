@@ -28,6 +28,14 @@ _SECTOR_KEYWORDS: list[tuple[JobSector, tuple[str, ...]]] = [
     (
         JobSector.ENGINEERING_TECH,
         (
+            # No bare "information technology" here on purpose: it used to be
+            # a multi-word keyword, but verified live it also matches when a
+            # career site's own department/category tag ("Information
+            # Technology" — a scraped page artifact, not job content) leaks
+            # into a totally unrelated description (a Walgreens "Pharmacy
+            # Intern" listing landed in engineering_tech purely from that).
+            # "it support"/"it technician" below already cover the genuine
+            # IT-role title patterns.
             "engineer", "engineering", "developer", "programmer", "software",
             "devops", "sre", "site reliability", "data scientist", "data engineer",
             "data analyst", "machine learning", "ai researcher", "qa engineer",
@@ -37,7 +45,7 @@ _SECTOR_KEYWORDS: list[tuple[JobSector, tuple[str, ...]]] = [
             "backend", "back-end", "frontend", "front-end", "ios developer",
             "android developer", "mobile developer", "cloud engineer",
             "database administrator", "dba", "it support", "it technician",
-            "information technology", "web developer", "firmware engineer",
+            "web developer", "firmware engineer",
             "embedded engineer", "computer vision",
         ),
     ),
