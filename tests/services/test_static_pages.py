@@ -158,12 +158,33 @@ class TestJobsForSectorDay:
         make_posting(created_at=PT_NOON + timedelta(days=1))
         assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
 
+    def test_buckets_by_posted_at_not_scan_date_when_known(self, db, make_posting):
+        # Scanned today, but the employer says it was posted a week ago —
+        # belongs on that day's page, not today's.
+        make_posting(created_at=PT_NOON, posted_at=date(2026, 9, 19))
+        assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
+        assert len(sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 19))) == 1
+
+    def test_falls_back_to_scan_date_when_posted_at_unknown(self, db, make_posting):
+        make_posting(created_at=PT_NOON, posted_at=None)
+        assert len(sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26))) == 1
+
+    def test_known_posted_at_elsewhere_is_not_rescued_by_todays_scan(self, db, make_posting):
+        # Scanned today (created_at in today's window) but posted_at names a
+        # *different* day — the known date always wins, never overridden by
+        # when we happened to find it.
+        make_posting(created_at=PT_NOON, posted_at=date(2026, 9, 25))
+        assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
+
     def test_ordered_by_posted_at_then_title_not_by_when_we_found_it(self, db, make_posting):
-        # Found in reverse of posted order, on purpose — the sort must come
-        # from posted_at/title, not created_at.
-        make_posting(created_at=PT_NOON, title="Zebra Role", posted_at=date(2026, 9, 20))
-        make_posting(created_at=PT_NOON + timedelta(minutes=1), title="Beta Role", posted_at=date(2026, 9, 25))
-        make_posting(created_at=PT_NOON + timedelta(minutes=2), title="Alpha Role", posted_at=date(2026, 9, 25))
+        # Found in reverse of alphabetical order, on purpose — the tiebreak
+        # must come from title, not created_at. All share the same posted_at
+        # (2026-09-26) so posted_at itself doesn't distinguish them; the
+        # null-posted_at one falls back to created_at for inclusion and
+        # sorts last (nulls_last).
+        make_posting(created_at=PT_NOON, title="Zebra Role", posted_at=date(2026, 9, 26))
+        make_posting(created_at=PT_NOON + timedelta(minutes=1), title="Beta Role", posted_at=date(2026, 9, 26))
+        make_posting(created_at=PT_NOON + timedelta(minutes=2), title="Alpha Role", posted_at=date(2026, 9, 26))
         make_posting(created_at=PT_NOON + timedelta(minutes=3), title="No Date Role", posted_at=None)
 
         jobs = sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26))

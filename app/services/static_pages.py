@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 import boto3
 from botocore.client import Config
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -122,11 +122,20 @@ class JobRow:
 
 def jobs_for_sector_day(db: Session, country_iso2: str, sector: JobSector, local_day: date) -> list[JobRow]:
     """Every canonical, successfully-scanned, unflagged `country_iso2` posting
-    in `sector` whose JobPostingUrl.created_at falls in `local_day`
-    (DAY_BOUNDARY_TZ). Same base filter as build_job_search_statement
-    (app.services.jobs) plus the country match — a job appears here iff it
-    would also show up in a normal /jobs search for this sector, nothing
-    looser.
+    in `sector` that was actually *posted* on `local_day` (DAY_BOUNDARY_TZ) —
+    or, when the employer's posted_at is unknown, whose JobPostingUrl.created_at
+    (when we found it) falls in `local_day` instead, so a posting with no
+    stated date is still findable somewhere rather than never appearing on
+    any page. A known posted_at is never overridden by a different
+    created_at date — a job genuinely posted last week that we happen to
+    scan today belongs on last week's page, not today's (a known limitation:
+    since only today's page is ever regenerated, going forward, a job like
+    that — discovered too late for its own day's now-frozen page — won't
+    appear anywhere; accepted for now, same trade-off as everything else
+    "forward-only" already makes). Same base filter as
+    build_job_search_statement (app.services.jobs) plus the country match —
+    a job appears here iff it would also show up in a normal /jobs search
+    for this sector, nothing looser.
 
     Ordered by the employer's own posted_at (newest first) when known, since
     that's what a reader actually means by "posting date" — created_at
@@ -145,8 +154,14 @@ def jobs_for_sector_day(db: Session, country_iso2: str, sector: JobSector, local
             JobPosting.sector == sector,
             JobPosting.country == country_iso2,
             JobPostingUrl.flagged_at.is_(None),
-            JobPostingUrl.created_at >= start_utc,
-            JobPostingUrl.created_at < end_utc,
+            or_(
+                JobPosting.posted_at == local_day,
+                and_(
+                    JobPosting.posted_at.is_(None),
+                    JobPostingUrl.created_at >= start_utc,
+                    JobPostingUrl.created_at < end_utc,
+                ),
+            ),
         )
         .order_by(JobPosting.posted_at.desc().nulls_last(), JobPosting.title.asc())
     )

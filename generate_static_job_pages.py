@@ -18,6 +18,15 @@ its last update as the permanent historical record. No separate
 backfill/finalize step exists — --date lets you (re)generate an older day by
 hand if you ever want to, but nothing does that automatically.
 
+"Today's page" means jobs the employer actually posted today (falling back
+to when we scanned it, for the — common — case where a posting has no
+stated date at all — see app.services.static_pages.jobs_for_sector_day).
+A job with a *known* posted_at from an earlier day belongs on that day's
+page even if we only discover it today; since only today ever regenerates,
+a stale-by-the-time-we-find-it job like that — whose own day's page has
+already frozen — won't end up on any page. Accepted trade-off, same
+"forward-only" posture as everything else here.
+
 Sectors with zero jobs that day are skipped entirely (no thin/empty page).
 
 Usage:
