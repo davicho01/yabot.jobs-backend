@@ -11,9 +11,9 @@ from app.models.crawl_source import CrawlSource
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
 from app.schemas.admin import AdminDashboardRead, ScanDayCount, ScanHourCount
-from app.schemas.job import JobListRead
+from app.schemas.job import JobDetailRead, JobListRead
 from app.services import admin as admin_service
-from app.services.jobs import to_job_detail
+from app.services.jobs import dismiss_job_flag, to_job_detail
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(get_current_admin_user)])
 
@@ -46,6 +46,7 @@ def get_jobs(
     source_id: uuid.UUID | None = Query(None),
     scan_from: datetime | None = Query(None),
     scan_to: datetime | None = Query(None),
+    flagged: bool | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     sort_by: Literal["company", "title", "status", "discovered"] = Query("discovered"),
@@ -55,7 +56,9 @@ def get_jobs(
     """Lists job listings, optionally scoped to one crawl source and/or a
     last_scanned_at window — the drill-down target for a ScanActivityChart
     bar (source-scoped from the source stats page, unscoped from the
-    dashboard's all-sources chart) as well as the plain per-source listing."""
+    dashboard's all-sources chart) as well as the plain per-source listing.
+    `flagged=true` is the user-report triage queue instead (see POST
+    /jobs/{url_id}/flag)."""
     if source_id is not None and db.get(CrawlSource, source_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Crawl source not found.")
 
@@ -66,6 +69,8 @@ def get_jobs(
         stmt = stmt.where(JobPostingUrl.last_scanned_at >= scan_from)
     if scan_to is not None:
         stmt = stmt.where(JobPostingUrl.last_scanned_at <= scan_to)
+    if flagged is not None:
+        stmt = stmt.where(JobPostingUrl.flagged_at.isnot(None) if flagged else JobPostingUrl.flagged_at.is_(None))
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
 
@@ -76,7 +81,9 @@ def get_jobs(
     stmt = stmt.order_by(order_fn(JOB_SORT_COLUMNS[sort_by]), JobPostingUrl.created_at.desc())
     stmt = stmt.limit(page_size).offset((page - 1) * page_size)
     url_rows = db.scalars(stmt).all()
-    return JobListRead(items=[to_job_detail(row) for row in url_rows], total=total, page=page, page_size=page_size)
+    return JobListRead(
+        items=[to_job_detail(row, include_flag=True) for row in url_rows], total=total, page=page, page_size=page_size
+    )
 
 
 @router.delete("/listings/{url_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -85,3 +92,16 @@ def delete_listing(url_id: uuid.UUID, db: Session = Depends(get_db)) -> None:
     if url_row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found.")
     db.delete(url_row)
+
+
+@router.post("/listings/{url_id}/flag/dismiss", response_model=JobDetailRead)
+def dismiss_listing_flag(url_id: uuid.UUID, db: Session = Depends(get_db)) -> JobDetailRead:
+    """Clear a listing's open flag report once it's been looked into
+    (typically after rescanning it or fixing the adapter)."""
+    url_row = db.get(JobPostingUrl, url_id)
+    if url_row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found.")
+    dismiss_job_flag(db, url_row)
+    db.flush()
+    db.refresh(url_row)
+    return to_job_detail(url_row, include_flag=True)

@@ -1429,13 +1429,25 @@ def generate_main_cover_letter(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> CoverLetter:
-    resume = _resolve_resume(db, current_user.id, resume_id)
+    resume = _resolve_current_version(db, current_user.id, resume_id)
     posting = _get_job_posting(db, job_posting_id)
     key = get_users_default_llm_key(db, current_user.id)
 
+    # Prefer the resume already tailored to this job, if one exists — it has
+    # the job-matched bullets/skill additions baked in, which is exactly what
+    # makes for a specific, non-generic cover letter. Falls back to the
+    # family's current (latest) version otherwise, never a version that's
+    # since been superseded.
+    tailored = db.scalar(
+        select(TailoredResume)
+        .where(TailoredResume.resume_id == resume.id, TailoredResume.job_posting_id == job_posting_id)
+        .order_by(TailoredResume.created_at.desc())
+    )
+    resume_text = _tailored_resume_text(tailored.content) if tailored else resume.parsed_text
+
     try:
         generated = generate_cover_letter_with_llm(
-            resume.parsed_text,
+            resume_text,
             posting.description or "",
             provider=key.provider,
             model=key.model,

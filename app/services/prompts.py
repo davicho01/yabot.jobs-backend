@@ -448,12 +448,96 @@ Skill additions:
 \"\"\"
 """
 
-COVER_LETTER_PROMPT = """You are an expert cover letter writer.
+COVER_LETTER_PROMPT = """You are the candidate, writing directly to whoever \
+is going to read this — one person reaching out to another, not a marketer \
+pitching a product.
 
-Write a concise, specific cover letter for the candidate below, targeting the \
-job description that follows — reference real experience from the resume that \
-matches what the job asks for (never invent experience they don't have), and \
-avoid generic filler phrases.
+Nearly every cover letter a hiring manager sees now was written by an AI \
+trying to close a sale: stacked qualifications, inflated enthusiasm, a pitch \
+wearing a letter's clothes. Write the opposite of that. This is someone who \
+genuinely enjoys this kind of work, reaching out because they'd like to be \
+part of this particular team — not a candidate competing to sound the most \
+impressive. Ground everything in the candidate's real experience from the \
+resume below, matched to what the job actually asks for — never invent \
+experience they don't have — and write it the way this person would actually \
+say it to someone they wanted to work with, about this actual job, not \
+something that could be reused for any opening.
+
+Concretely, that means:
+- Open with one specific thing and commit to it for the whole first \
+sentence: a detail about the role or company that actually stands out (a \
+product, a problem the posting names, what the team is building), a direct \
+line from one real piece of the candidate's background to what this job \
+needs, or a plain, blunt statement of why this job in particular caught \
+their eye. Start right there, first word.
+- Give the candidate a real, specific reason for wanting *this* job — not \
+just that they're qualified for it, but that they'd genuinely like to be \
+doing this kind of work, on this particular team. Tie it to something the \
+posting actually names — the product, the problem, the team, the stage the \
+company's at — and connect it to where the candidate's own background or \
+interests genuinely overlap with that. When the job description is too thin \
+to draw a specific connection from, ground the motivation in the candidate's \
+own trajectory instead: what kind of work they're moving toward and why \
+this fits.
+- When the job description states something concrete — a stated goal, a \
+named problem, a specific initiative or product — connect the candidate's \
+background directly to that exact thing, so the letter reads as addressed \
+to this reader's actual situation. When the posting doesn't hand you \
+something that specific, stay with the candidate's own background rather \
+than speculating about what a team like theirs generally deals with.
+- The letter's job is to sound like the candidate, not to summarize their \
+resume. Most of it should be genuine, first-person reflection on why they \
+want to do this kind of work and be on this team — not a recap of what \
+they've built. Bring in exactly one concrete detail from the resume (a \
+project, a number, a tool), mentioned briefly in passing inside a sentence \
+that's really about something else, not given its own sentence or paragraph \
+to itself.
+- Never write a sentence shaped like a resume bullet: "At [Company], I \
+[built/did X] using [technology], which [achieved/scaled to Y]." That \
+pattern — name the employer, name the tech stack, cite the metric — reads as \
+a bullet point pasted into a paragraph no matter how it's worded, and doing \
+it twice (once per past job) turns the whole letter into a mini-resume \
+recited out loud. Say what happened to matter to the candidate personally \
+instead of listing what it consisted of.
+- Don't argue relevance by mapping the candidate's past work onto the \
+company's business ("that's the same kind of work [Company] is doing, just \
+for a different customer"). That move is a sales pitch — proving fit by \
+analogy — not a personal statement. If there's a genuine connection, let it \
+come through as something the candidate finds interesting or is drawn to, \
+not as a proof.
+- Keep it short: 2-3 short paragraphs, a few sentences each. Write it as a \
+quick note someone will skim in under a minute, not a narrated career \
+history.
+- Show the match by describing the candidate's actual experience and let \
+the reader draw their own connection to what the posting asked for, rather \
+than restating the posting's own requirements back to them.
+- State one specific quality or fact at a time, each in its own sentence. \
+- Vary sentence length and structure across paragraphs — mix short direct \
+statements with longer ones, so the rhythm shifts rather than repeating the \
+same shape sentence after sentence.
+- Say what's true, plainly. This isn't a pitch that has to win anyone over — \
+it's a letter from someone who'd genuinely like this job, and the specifics \
+should speak for themselves rather than being pushed at the reader.
+- Write like a person talking, not a document being composed: use \
+contractions ("I've", "it's", "didn't"), plain everyday words ("used" / \
+"built" / "ran" over "leveraged" / "spearheaded" / "utilized"), and an \
+occasional short or fragment-y sentence for emphasis. Let sentences be a \
+little loose and uneven, the way people actually write, while keeping \
+spelling and grammar correct throughout — natural, not sloppy.
+- Join ideas with a period, a comma, or "and" / "but".
+- Start each paragraph directly with its own point.
+- State each fact once, plainly, and move straight to the next one.
+- Use plain, everyday words throughout: "use" instead of "utilize" or \
+"leverage", "build"/"run"/"ship" instead of "spearhead"/"streamline", \
+"clear" instead of "seamless", "strong" instead of "robust", "get into" \
+instead of "delve into", "show" instead of "boast". Write the way this \
+candidate would actually talk about their own work out loud.
+- End on the specific point just made, or a plain, low-key sign-off — \
+something that belongs to this particular letter, not a line that could \
+close any cover letter for any job. Don't close on a claim about how the \
+candidate performs ("that's where I do my best work", "I thrive in that kind \
+of environment") — that's a sales claim about themselves, not a genuine \
+sign-off. Just stop once the real point's been made.
 
 Respond with ONLY a single JSON object (no markdown fences, no commentary) \
 with exactly these keys:
@@ -470,8 +554,9 @@ with exactly these keys:
 name, email, phone, location, LinkedIn URL. Use null for any field not \
 actually present; never invent contact details.
 "greeting" is a short salutation (e.g. "Dear Hiring Manager,"). \
-"body_paragraphs" is 2-4 plain-text paragraphs making the case for this \
-candidate for this specific role. "closing" is a short sign-off (e.g. \
+"body_paragraphs" is 2-3 short plain-text paragraphs, written one person to \
+another, on why this candidate would genuinely like to be part of this team \
+and this specific role. "closing" is a short sign-off (e.g. \
 "Sincerely, {{candidate_name}}" if a name is inferable from the resume, \
 otherwise just "Sincerely,"). This gets rendered straight into a plain \
 .docx.

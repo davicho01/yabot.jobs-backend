@@ -74,6 +74,23 @@ def test_extract_pulls_location_from_the_header_pair_not_the_empty_json_ld_one()
     assert fields.location == "United States, Georgia, Atlanta"
 
 
+def test_extract_location_from_cbre_style_single_location_field():
+    """CBRE (verified live 2026-09-26) uses the same field__label/
+    field__value metadata shape as IBM's tenant, but packs city/state/
+    country into one "Location(s)" field rather than separate City/State/
+    Country labels, dash- not comma-separated."""
+    html = """
+    <html><head><meta name="avature.portal.id" content="1"></head><body>
+    <article class="article--details">
+      <div class="article__content__view__field__label">Location(s)</div>
+      <div class="article__content__view__field__value">Richardson - Texas - United States of America</div>
+    </article>
+    </body></html>
+    """
+    fields = avature.extract(html)
+    assert fields.location == "Richardson, Texas, United States of America"
+
+
 def test_extract_concatenates_every_section_not_just_the_first():
     fields = avature.extract(_page())
     assert "Overview" in fields.description or "Keep Climbing" in fields.description

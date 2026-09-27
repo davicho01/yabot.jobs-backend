@@ -53,6 +53,10 @@ def get_dashboard_stats(db: Session) -> dict:
     return {
         "totals": {
             "job_listings": db.scalar(select(func.count()).select_from(JobPostingUrl)) or 0,
+            "jobs_flagged": db.scalar(
+                select(func.count()).select_from(JobPostingUrl).where(JobPostingUrl.flagged_at.isnot(None))
+            )
+            or 0,
             "crawl_sources": db.scalar(select(func.count()).select_from(CrawlSource)) or 0,
             "crawl_sources_flagged": db.scalar(
                 select(func.count()).select_from(CrawlSource).where(CrawlSource.coverage_flagged_at.isnot(None))

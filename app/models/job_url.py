@@ -44,6 +44,13 @@ class JobPostingUrl(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "next_retry_at",
             postgresql_where=text("scan_status = 'failed'"),
         ),
+        # Serves GET /admin/jobs?flagged=true (app.api.routes.admin.get_jobs)
+        # and the dashboard's jobs_flagged count.
+        Index(
+            "ix_job_posting_urls_flagged",
+            "flagged_at",
+            postgresql_where=text("flagged_at IS NOT NULL"),
+        ),
     )
 
     # Original URL as submitted, kept for display/debugging.
@@ -86,7 +93,22 @@ class JobPostingUrl(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("crawl_sources.id", ondelete="SET NULL"), index=True
     )
 
-    submitted_by: Mapped["User | None"] = relationship()
+    # A user's report that this listing's scanned data looks wrong (see
+    # app.services.jobs.flag_job_url/dismiss_job_flag) — null when there's no
+    # open report. A second report just overwrites the first: this is a
+    # low-volume triage queue for a human to work through, not an audit log.
+    flagged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    flag_reason: Mapped[str | None] = mapped_column(String(30))
+    flag_note: Mapped[str | None] = mapped_column(Text)
+    # Attribution only, like submitted_by_user_id — not surfaced in the API
+    # response, so no relationship is loaded back from it.
+    flagged_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+    # Two FKs to users.id now exist (submitted_by_user_id, flagged_by_user_id)
+    # — foreign_keys disambiguates which one this relationship follows.
+    submitted_by: Mapped["User | None"] = relationship(foreign_keys=[submitted_by_user_id])
     postings: Mapped[list["JobPosting"]] = relationship(
         back_populates="url", cascade="all, delete-orphan", order_by="JobPosting.scanned_at.desc()"
     )

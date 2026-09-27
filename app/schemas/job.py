@@ -4,9 +4,16 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, HttpUrl
 
+from app.models.enums import FlagReason
+
 
 class JobUrlSubmit(BaseModel):
     url: HttpUrl
+
+
+class JobFlagCreate(BaseModel):
+    reason: FlagReason
+    note: str | None = None
 
 
 class MetroRead(BaseModel):
@@ -32,6 +39,7 @@ class JobPostingRead(BaseModel):
     location: str | None
     workplace_type: str
     employment_type: str
+    sector: str
     salary_min: int | None
     salary_max: int | None
     salary_currency: str | None
@@ -59,6 +67,12 @@ class JobPostingUrlRead(BaseModel):
     crawl_source_id: uuid.UUID | None
     last_scanned_at: datetime | None
     created_at: datetime
+    # Populated from the row regardless of caller, then nulled out by
+    # to_job_detail unless include_flag=True (admin-only) — another user's
+    # report shouldn't be visible to a regular viewer of the listing.
+    flagged_at: datetime | None = None
+    flag_reason: str | None = None
+    flag_note: str | None = None
 
 
 class JobDetailRead(BaseModel):

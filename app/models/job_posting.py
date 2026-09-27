@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-from app.models.enums import EmploymentType, ScanStatus, WorkplaceType
+from app.models.enums import EmploymentType, JobSector, ScanStatus, WorkplaceType
 from app.models.mixins import UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
@@ -65,6 +65,11 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
     places: Mapped[list[list[float]]] = mapped_column(JSONB, nullable=False, default=list)
     workplace_type: Mapped[str] = mapped_column(String(20), default=WorkplaceType.UNKNOWN, nullable=False)
     employment_type: Mapped[str] = mapped_column(String(20), default=EmploymentType.UNKNOWN, nullable=False)
+    # Job function/department this posting is hiring for (engineering, sales,
+    # finance, ...) — see app.services.job_sector. Per-posting, not per-company:
+    # the same company can post across several sectors at once. Indexed since a
+    # per-sector search page (the reason this exists) filters on it directly.
+    sector: Mapped[str] = mapped_column(String(30), default=JobSector.UNKNOWN, nullable=False, index=True)
 
     salary_min: Mapped[int | None] = mapped_column(Integer)
     salary_max: Mapped[int | None] = mapped_column(Integer)

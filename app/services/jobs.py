@@ -12,7 +12,7 @@ from sqlalchemy.sql import Select
 
 from app.core.config import settings
 from app.core.rate_limit import RateLimitExceeded
-from app.models.enums import ApplicationStatus, EmploymentType, ScanStatus, WorkplaceType
+from app.models.enums import ApplicationStatus, EmploymentType, FlagReason, ScanStatus, WorkplaceType
 from app.models.job_application import UserJobApplication
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
@@ -22,6 +22,7 @@ from app.services.job_llm_extractor import LlmExtraction, extract_with_llm, html
 from app.services import geo
 from app.services.geo import resolve_area_codes, resolve_places
 from app.services.job_locations import location_matches, radius_search, split_locations
+from app.services.job_sector import classify_sector
 from app.services.workplace import infer_workplace_type, reconcile_workplace_type
 from app.services.job_queue import enqueue_scan, enqueue_source_scan
 from app.services.job_scanner import ScanResult, domain_of, normalize_url, scan_job_url, url_hash
@@ -32,7 +33,7 @@ from app.schemas.job import JobDetailRead, SearchAreaRead
 logger = logging.getLogger("app.jobs")
 
 
-def to_job_detail(url_row: JobPostingUrl, *, include_url: bool = True) -> JobDetailRead:
+def to_job_detail(url_row: JobPostingUrl, *, include_url: bool = True, include_flag: bool = False) -> JobDetailRead:
     latest_posting = url_row.postings[0] if url_row.postings else None
     detail = JobDetailRead(url=url_row, posting=latest_posting)
     if not include_url:
@@ -42,6 +43,11 @@ def to_job_detail(url_row: JobPostingUrl, *, include_url: bool = True) -> JobDet
         detail.url.url = None
         if detail.posting:
             detail.posting.apply_url = None
+    if not include_flag:
+        # Another user's flag report is admin-only — see app.api.routes.admin.
+        detail.url.flagged_at = None
+        detail.url.flag_reason = None
+        detail.url.flag_note = None
     return detail
 
 
@@ -77,6 +83,7 @@ def build_job_search_statement(
     company: str | None = None,
     posted_within_days: int | None = None,
     workplace_type: str | None = None,
+    sector: str | None = None,
     salary_min: int | None = None,
     salary_max: int | None = None,
 ) -> tuple[Select, list, SearchAreaRead | None]:
@@ -113,6 +120,7 @@ def build_job_search_statement(
         or company
         or posted_within_days
         or workplace_type
+        or sector
         or salary_min is not None
         or salary_max is not None
     ):
@@ -153,6 +161,8 @@ def build_job_search_statement(
             stmt = stmt.where(JobPosting.posted_at >= date.today() - timedelta(days=posted_within_days))
         if workplace_type:
             stmt = stmt.where(JobPosting.workplace_type == workplace_type)
+        if sector:
+            stmt = stmt.where(JobPosting.sector == sector)
         # A posting often lists only one of salary_min/salary_max — compare
         # against whichever end of its range is actually set, falling back to
         # the other one, rather than requiring both. A posting with neither
@@ -690,6 +700,34 @@ def rescan_job_url(db: Session, url_row: JobPostingUrl) -> JobPostingUrl:
     return url_row
 
 
+def flag_job_url(
+    db: Session, url_row: JobPostingUrl, user_id: uuid.UUID, reason: FlagReason, note: str | None
+) -> JobPostingUrl:
+    """Record a user's report that this listing's scanned data looks wrong
+    (wrong title/company/location, a dead link, a garbled description, ...).
+    Surfaced to admins via GET /admin/jobs?flagged=true; not auto-cleared —
+    a human dismisses it (see dismiss_job_flag) once satisfied, typically
+    after rescanning or fixing the adapter. A second report — from the same
+    or a different user — just overwrites the first rather than
+    accumulating a history: this is a low-volume triage queue, not an audit
+    log.
+    """
+    url_row.flagged_at = datetime.now(timezone.utc)
+    url_row.flag_reason = reason
+    url_row.flag_note = _strip_nul(note) if note else None
+    url_row.flagged_by_user_id = user_id
+    return url_row
+
+
+def dismiss_job_flag(db: Session, url_row: JobPostingUrl) -> JobPostingUrl:
+    """Clear an open flag report once a human has looked into it."""
+    url_row.flagged_at = None
+    url_row.flag_reason = None
+    url_row.flag_note = None
+    url_row.flagged_by_user_id = None
+    return url_row
+
+
 # Must match the String(n) lengths on JobPosting (app/models/job_posting.py).
 _TITLE_MAX = 255
 _COMPANY_NAME_MAX = 255
@@ -769,6 +807,7 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
     # guess that a plain place means on-site — see app.services.workplace.
     posting.workplace_type = reconcile_workplace_type(fields["workplace_type"], infer_workplace_type(posting.locations))
     posting.employment_type = fields["employment_type"]
+    posting.sector = classify_sector(posting.title, result.description)
     posting.salary_min = fields["salary_min"]
     posting.salary_max = fields["salary_max"]
     posting.salary_currency = _fit(fields["salary_currency"], _SALARY_CURRENCY_MAX)

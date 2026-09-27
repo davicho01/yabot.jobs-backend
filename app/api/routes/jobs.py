@@ -6,17 +6,18 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, get_current_user_optional, get_db
 from app.core.rate_limit import RateLimitExceeded
-from app.models.enums import ScanStatus, WorkplaceType
+from app.models.enums import JobSector, ScanStatus, WorkplaceType
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
 from app.models.user import User
-from app.schemas.job import JobDetailRead, JobListRead, JobUrlSubmit, MetroRead, SimilarJobsRead
+from app.schemas.job import JobDetailRead, JobFlagCreate, JobListRead, JobUrlSubmit, MetroRead, SimilarJobsRead
 from app.services import geo
 from app.services.job_locations import location_suggestions, metro_suggestions
 from app.services.jobs import (
     build_job_search_statement,
     ensure_user_applicant,
     find_similar_job_urls,
+    flag_job_url,
     get_or_create_job_posting,
     rescan_job_url,
     to_job_detail,
@@ -60,6 +61,7 @@ def list_job_urls(
     company: str | None = None,
     posted_within_days: int | None = Query(None, ge=1),
     workplace_type: WorkplaceType | None = None,
+    sector: JobSector | None = None,
     salary_min: int | None = Query(None, ge=0),
     salary_max: int | None = Query(None, ge=0),
     page: int = Query(1, ge=1),
@@ -78,6 +80,7 @@ def list_job_urls(
         company=company,
         posted_within_days=posted_within_days,
         workplace_type=workplace_type,
+        sector=sector,
         salary_min=salary_min,
         salary_max=salary_max,
     )
@@ -204,6 +207,25 @@ def rescan_job(
     if url_row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job URL not found.")
     rescan_job_url(db, url_row)
+    db.flush()
+    db.refresh(url_row)
+    return to_job_detail(url_row)
+
+
+@router.post("/{url_id}/flag", response_model=JobDetailRead)
+def flag_job(
+    url_id: uuid.UUID,
+    payload: JobFlagCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> JobDetailRead:
+    """Report that this listing's scanned data looks wrong — queued for
+    admin triage (see GET /admin/jobs?flagged=true), not acted on
+    immediately."""
+    url_row = db.get(JobPostingUrl, url_id)
+    if url_row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job URL not found.")
+    flag_job_url(db, url_row, current_user.id, payload.reason, payload.note)
     db.flush()
     db.refresh(url_row)
     return to_job_detail(url_row)

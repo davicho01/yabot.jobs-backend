@@ -40,6 +40,37 @@ class EmploymentType(StrEnum):
     UNKNOWN = "unknown"
 
 
+class JobSector(StrEnum):
+    """The job function/department a posting is hiring for — e.g. a single
+    company can post HR, Finance, and Engineering roles at once, so this is
+    inferred per-posting (from its own title/description) rather than being
+    a property of the company. See app.services.job_sector."""
+
+    ENGINEERING_TECH = "engineering_tech"
+    # Civil/mechanical/electrical/aerospace/chemical engineering — degree
+    # (often PE-track) disciplines distinct from ENGINEERING_TECH's
+    # software/IT roles. Not to be confused with SERVICE_TRADES' electrician
+    # (a trade, not this).
+    ENGINEERING_TRADITIONAL = "engineering_traditional"
+    SALES = "sales"
+    MARKETING = "marketing"
+    FINANCE_ACCOUNTING = "finance_accounting"
+    HR = "hr"
+    OPERATIONS_MANUFACTURING = "operations_manufacturing"
+    CUSTOMER_SUPPORT = "customer_support"
+    LEGAL = "legal"
+    HEALTHCARE = "healthcare"
+    DESIGN_PRODUCT = "design_product"
+    EXECUTIVE = "executive"
+    # Receptionist, office assistant, data entry, executive assistant.
+    ADMINISTRATIVE_OFFICE = "administrative_office"
+    # Frontline hourly/no-degree work: delivery drivers, food service,
+    # retail, hospitality, and skilled trades (electrician, plumber, HVAC,
+    # construction) — apprenticeship-based, not a 4-year degree.
+    SERVICE_TRADES = "service_trades"
+    UNKNOWN = "unknown"
+
+
 class ScanStatus(StrEnum):
     PENDING = "pending"
     SUCCESS = "success"
@@ -235,3 +266,13 @@ class ApplicationStatus(StrEnum):
     OFFER = "offer"
     REJECTED = "rejected"
     WITHDRAWN = "withdrawn"
+
+
+class FlagReason(StrEnum):
+    """Why a user reported a listing's scanned data as wrong — see
+    JobPostingUrl.flag_reason / app.services.jobs.flag_job_url."""
+
+    WRONG_DETAILS = "wrong_details"
+    BROKEN_OR_EXPIRED = "broken_or_expired"
+    GARBLED_DESCRIPTION = "garbled_description"
+    OTHER = "other"

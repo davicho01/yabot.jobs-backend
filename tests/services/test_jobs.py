@@ -8,7 +8,7 @@ from sqlalchemy import select
 import app.models as m
 from app.core.config import settings
 from app.core.rate_limit import RateLimitExceeded
-from app.models.enums import ScanStatus
+from app.models.enums import FlagReason, ScanStatus
 from app.services.job_dedup import normalize_company_name, normalize_title
 from app.services.job_scanner import normalize_url
 from app.services.job_scanner import url_hash as compute_url_hash
@@ -16,9 +16,11 @@ from app.services.jobs import (
     _backoff_seconds,
     _enforce_submission_rate_limit,
     build_job_search_statement,
+    dismiss_job_flag,
     ensure_user_applicant,
     find_existing_application,
     find_similar_job_urls,
+    flag_job_url,
     get_or_create_job_posting,
     parse_search_query,
     to_job_detail,
@@ -371,3 +373,70 @@ def test_to_job_detail_strips_the_url_for_anonymous_callers(scan_db):
     # Everything else is untouched.
     assert detail.posting.title == posting.title
     assert detail.posting.company_name == posting.company_name
+
+
+def test_to_job_detail_hides_flag_fields_by_default(scan_db):
+    posting = _make_posting(scan_db)
+    flag_job_url(scan_db, posting.url, uuid.uuid4(), FlagReason.WRONG_DETAILS, "location is missing")
+
+    detail = to_job_detail(posting.url)
+
+    assert (detail.url.flagged_at, detail.url.flag_reason, detail.url.flag_note) == (None, None, None)
+
+
+def test_to_job_detail_includes_flag_fields_when_asked(scan_db):
+    posting = _make_posting(scan_db)
+    flag_job_url(scan_db, posting.url, uuid.uuid4(), FlagReason.WRONG_DETAILS, "location is missing")
+
+    detail = to_job_detail(posting.url, include_flag=True)
+
+    assert detail.url.flag_reason == FlagReason.WRONG_DETAILS
+    assert detail.url.flag_note == "location is missing"
+    assert detail.url.flagged_at is not None
+
+
+def test_flag_job_url_sets_reporter_reason_and_note(scan_db):
+    posting = _make_posting(scan_db)
+    reporter_id = uuid.uuid4()
+
+    flag_job_url(scan_db, posting.url, reporter_id, FlagReason.GARBLED_DESCRIPTION, "half the description is HTML")
+
+    assert posting.url.flagged_at is not None
+    assert posting.url.flag_reason == FlagReason.GARBLED_DESCRIPTION
+    assert posting.url.flag_note == "half the description is HTML"
+    assert posting.url.flagged_by_user_id == reporter_id
+
+
+def test_flag_job_url_with_no_note_leaves_it_null(scan_db):
+    posting = _make_posting(scan_db)
+
+    flag_job_url(scan_db, posting.url, uuid.uuid4(), FlagReason.BROKEN_OR_EXPIRED, None)
+
+    assert posting.url.flag_note is None
+
+
+def test_flag_job_url_a_second_report_overwrites_the_first(scan_db):
+    posting = _make_posting(scan_db)
+    first_reporter = uuid.uuid4()
+    second_reporter = uuid.uuid4()
+    flag_job_url(scan_db, posting.url, first_reporter, FlagReason.WRONG_DETAILS, "wrong company")
+
+    flag_job_url(scan_db, posting.url, second_reporter, FlagReason.OTHER, "also the salary looks off")
+
+    assert posting.url.flag_reason == FlagReason.OTHER
+    assert posting.url.flag_note == "also the salary looks off"
+    assert posting.url.flagged_by_user_id == second_reporter
+
+
+def test_dismiss_job_flag_clears_every_flag_field(scan_db):
+    posting = _make_posting(scan_db)
+    flag_job_url(scan_db, posting.url, uuid.uuid4(), FlagReason.WRONG_DETAILS, "wrong company")
+
+    dismiss_job_flag(scan_db, posting.url)
+
+    assert (posting.url.flagged_at, posting.url.flag_reason, posting.url.flag_note, posting.url.flagged_by_user_id) == (
+        None,
+        None,
+        None,
+        None,
+    )

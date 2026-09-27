@@ -108,6 +108,15 @@ _IBM_FIELD_RE = re.compile(
 _IBM_CONTENT_BLOCK_MIN_CHARS = 300
 _IBM_LOCATION_FIELD_LABELS = ("City / Township / Village", "City", "State / Province", "State", "Country")
 
+# Yet another tenant (verified live: careers.cbre.com) uses this same
+# field__label metadata-block shape, but packs city/state/country into a
+# single "Location(s)" field rather than IBM's separate City/State/Country
+# labels - and dash-, not comma-, separated ("Richardson - Texas - United
+# States of America"). Split and rejoin on ", " so it lands in this
+# codebase's usual comma-joined shape (app.services.geo splits entries on
+# "," to parse city/state/country).
+_CBRE_LOCATION_FIELD_LABEL = "Location(s)"
+
 
 def _ibm_fields(html: str) -> dict[str, str]:
     fields: dict[str, str] = {}
@@ -120,6 +129,10 @@ def _ibm_fields(html: str) -> dict[str, str]:
 
 def _location_from_ibm_fields(html: str) -> str | None:
     fields = _ibm_fields(html)
+    if fields.get(_CBRE_LOCATION_FIELD_LABEL):
+        parts = [p.strip() for p in clean_text(fields[_CBRE_LOCATION_FIELD_LABEL]).split(" - ") if p.strip()]
+        deduped = list(dict.fromkeys(parts))
+        return ", ".join(deduped) if deduped else None
     parts = [clean_text(fields[label]) for label in _IBM_LOCATION_FIELD_LABELS if fields.get(label)]
     deduped = list(dict.fromkeys(p for p in parts if p))
     return ", ".join(deduped) if deduped else None
