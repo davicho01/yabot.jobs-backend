@@ -49,13 +49,15 @@ _SECTOR_KEYWORDS: list[tuple[JobSector, tuple[str, ...]]] = [
             "mechanical engineering", "electrical engineer", "electrical engineering",
             "aerospace engineer", "chemical engineer", "structural engineer",
             "industrial engineer", "environmental engineer", "process engineer",
-            # Without these, a bare "engineer" (below) would catch these
-            # titles as engineering_tech — same reasoning as "sales engineer"
-            # under SALES (verified live: "Manufacturing Engineer" and three
-            # separate "Quality Engineer"/"Quality Engineering" titles all
-            # landed in engineering_tech before this).
+            # Without this, a bare "engineer" (below) would catch this title
+            # as engineering_tech — same reasoning as "sales engineer" under
+            # SALES (verified live: "Manufacturing Engineer" landed in
+            # engineering_tech before this). "Quality Engineer" was
+            # considered too, but it's genuinely ambiguous — verified live,
+            # an L3 "Quality Engineer" posting was actually a *Software*
+            # Quality Engineer (QMS/CMMI/AS9100 for aerospace software), so
+            # it's not added here.
             "manufacturing engineer", "manufacturing engineering",
-            "quality engineer", "quality engineering",
         ),
     ),
     (

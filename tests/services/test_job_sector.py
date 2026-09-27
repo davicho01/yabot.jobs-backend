@@ -42,5 +42,10 @@ class TestClassifySector:
         # against a real Hubbell "Manufacturing Engineer" posting.
         assert classify_sector("Manufacturing Engineer - Lincoln, NH", "") == JobSector.ENGINEERING_TRADITIONAL
 
-    def test_quality_engineer_is_traditional_not_tech(self):
-        assert classify_sector("Sr Associate, Quality Engineer", "") == JobSector.ENGINEERING_TRADITIONAL
+    def test_quality_engineer_stays_tech_not_a_blanket_traditional_match(self):
+        # "Quality Engineer" is genuinely ambiguous (software QA vs.
+        # manufacturing/hardware QA) — verified live, a real L3 "Quality
+        # Engineer" posting was actually Software Quality Engineering, so
+        # this deliberately isn't in engineering_traditional's keyword list
+        # and falls through to the bare "engineer" match instead.
+        assert classify_sector("Sr Associate, Quality Engineer", "") == JobSector.ENGINEERING_TECH
