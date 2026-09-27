@@ -1,0 +1,28 @@
+{# Same header as yabot.jobs-frontend's index.html (.top) — brand mark, a
+   real (no-JS) GET /jobs search form, and a log-in link — so a generated
+   page reads as part of the site, not an orphan, and gives crawlers/users a
+   real path back into the live board. #}
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+  <div class="top__row">
+    <a class="brand" href="{{ base_url }}/" aria-label="Yabot Jobs home">
+      <span class="brand__mark" aria-hidden="true">
+        <svg viewBox="0 0 48 48" fill="none" width="20" height="20">
+          <path d="M9 24h6l4-10 6 20 4-10h10" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </span>
+      Yabot Jobs
+    </a>
+    <form class="search" role="search" action="{{ base_url }}/jobs" method="get">
+      <label class="sr" for="search-q">Job title or keyword</label>
+      <input id="search-q" name="q" type="search" placeholder="Search postings by title…" autocomplete="off" enterkeyhint="search" />
+      <span class="search__rule" aria-hidden="true"></span>
+      <label class="sr" for="search-location">City or state</label>
+      <input id="search-location" name="location" type="search" placeholder="Search by city or state…" autocomplete="off" enterkeyhint="search" />
+      <button class="btn btn--accent" type="submit">Search</button>
+    </form>
+    <nav class="top__actions" aria-label="Account">
+      <a class="btn btn--line" href="{{ base_url }}/login">Log in</a>
+    </nav>
+  </div>
+</header>

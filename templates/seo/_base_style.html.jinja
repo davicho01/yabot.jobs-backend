@@ -1,0 +1,91 @@
+{# Shared <style> block for the generated SEO pages — a trimmed-down copy of
+   yabot.jobs-frontend's index.html tokens (same palette/fonts/dark-mode
+   handling) so these pages read as the same product, without depending on
+   the SPA's build pipeline. Only prefers-color-scheme is honored (not the
+   app's manual light/dark toggle, which needs JS/localStorage) — acceptable
+   for a page that's mostly landed on fresh from search. #}
+<style>
+  :root {
+    --paper: #ffffff;
+    --surface: #f5f5f7;
+    --ink: #1d1d1f;
+    --ink-soft: #6e6e73;
+    --accent: #0071e3;
+    --accent-fill: #0071e3;
+    --accent-fill-hover: #0058b0;
+    --line: #e8e8ed;
+    --font-display: "Outfit", system-ui, -apple-system, sans-serif;
+    --font-body: "Manrope", system-ui, -apple-system, sans-serif;
+    --wrap: 780px;
+    --radius-pill: 980px;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #000000;
+      --surface: #1d1d1f;
+      --ink: #f5f5f7;
+      --ink-soft: #86868b;
+      --accent: #2997ff;
+      --line: #2c2c2e;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    line-height: 1.6;
+  }
+  h1, h2 { font-family: var(--font-display); }
+  .wrap { max-width: var(--wrap); margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ---------- header (mirrors yabot.jobs-frontend's index.html .top) ---------- */
+  .skip { position: absolute; left: -9999px; top: 0; background: var(--paper); color: var(--ink); padding: 0.75rem 1rem; z-index: 10; }
+  .skip:focus { left: 1rem; top: 1rem; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-height: 2.6rem; padding: 0.55rem 1.25rem; border: 1px solid transparent;
+    border-radius: var(--radius-pill); font-family: var(--font-body); font-weight: 600;
+    font-size: 0.9rem; line-height: 1.1; text-decoration: none; white-space: nowrap; cursor: pointer;
+  }
+  .btn--accent { background: var(--accent-fill); color: #fff; }
+  .btn--accent:hover { background: var(--accent-fill-hover); text-decoration: none; }
+  .btn--line { border-color: var(--line); background: transparent; color: var(--ink); }
+  .btn--line:hover { background: var(--ink); border-color: var(--ink); color: var(--paper); text-decoration: none; }
+  .top { background: var(--paper); border-bottom: 1px solid var(--line); }
+  .top__row { max-width: var(--wrap); margin: 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; padding: 0.8rem 1.25rem; }
+  .brand { display: inline-flex; align-items: center; gap: 0.65rem; color: var(--ink); font-family: var(--font-display); font-weight: 700; font-size: 1.2rem; letter-spacing: -0.02em; text-decoration: none; flex-shrink: 0; }
+  .brand:hover { text-decoration: none; }
+  .brand__mark { display: inline-flex; width: 2rem; height: 2rem; align-items: center; justify-content: center; background: var(--ink); color: var(--accent); border-radius: 8px; flex-shrink: 0; }
+  .search {
+    flex: 1 1 20rem; min-width: 0; max-width: 32rem; margin-inline: auto;
+    display: grid; grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr) auto; align-items: center;
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-pill);
+    padding: 0.2rem 0.2rem 0.2rem 1.1rem;
+  }
+  .search input { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; padding: 0.55rem 0.75rem 0.55rem 0; color: var(--ink); font-family: var(--font-body); font-size: 0.92rem; }
+  .search input::placeholder { color: var(--ink-soft); opacity: 1; }
+  .search__rule { width: 1px; height: 1.4rem; background: var(--line); }
+  .search .search__rule + label + input { padding-left: 0.9rem; }
+  .top__actions { display: flex; align-items: center; gap: 0.6rem; flex-shrink: 0; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  nav.breadcrumb { font-size: 0.9rem; color: var(--ink-soft); margin-bottom: 1.5rem; }
+  nav.breadcrumb a { color: var(--ink-soft); }
+  .meta-line { color: var(--ink-soft); font-size: 0.95rem; margin: 0.25rem 0 1.5rem; }
+  ul.job-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+  ul.job-list li { padding: 1rem 0; border-bottom: 1px solid var(--line); }
+  ul.job-list .job-title { font-weight: 600; font-size: 1.05rem; }
+  ul.job-list .job-meta { color: var(--ink-soft); font-size: 0.9rem; margin-top: 0.15rem; }
+  .day-nav { display: flex; justify-content: space-between; margin-top: 2rem; font-size: 0.95rem; }
+  .sector-link-back { margin-top: 1rem; font-size: 0.95rem; }
+  footer.other-sectors { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line); font-size: 0.9rem; color: var(--ink-soft); }
+  ul.date-list { list-style: none; margin: 0 0 2rem; padding: 0; }
+  ul.date-list li { padding: 0.4rem 0; }
+  ul.date-list .count { color: var(--ink-soft); }
+  h2.month-heading { margin-top: 2rem; font-size: 1.1rem; }
+</style>

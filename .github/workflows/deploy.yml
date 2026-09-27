@@ -1,17 +1,18 @@
 name: Deploy
 
 # Redeploys api/worker/crawl-worker/crawl-dispatcher/saved-search-alerts/
-# follow-up-reminders/retry-failed-scans with the new image/source on every
-# push to main. worker and crawl-worker are Cloud Functions (2nd gen,
-# Pub/Sub-triggered) redeployed from source, same as crawl-dispatcher,
-# saved-search-alerts, follow-up-reminders, and retry-failed-scans
-# (HTTP-triggered, Scheduler-invoked) — not from the built image below.
+# follow-up-reminders/retry-failed-scans/generate-static-job-pages with the
+# new image/source on every push to main. worker and crawl-worker are Cloud
+# Functions (2nd gen, Pub/Sub-triggered) redeployed from source, same as
+# crawl-dispatcher, saved-search-alerts, follow-up-reminders,
+# retry-failed-scans, and generate-static-job-pages (HTTP-triggered,
+# Scheduler-invoked) — not from the built image below.
 # One-time setup (API enablement,
 # Cloud SQL instance, secrets, IAM bindings, Scheduler jobs, the functions'
 # Pub/Sub triggers) lives in deploy/gcloud-deploy.sh and is NOT part of this
 # workflow — see that script's comments before changing infra, not just code.
 #
-# Job graph: test -> build (image + migrations) -> the seven deploy-*
+# Job graph: test -> build (image + migrations) -> the eight deploy-*
 # jobs, which all depend only on build and nothing else, so GitHub Actions
 # runs them concurrently instead of one long serial chain. Each deploy-*
 # job re-authenticates on its own fresh runner (no state carries over
@@ -311,5 +312,40 @@ jobs:
             --source=. \
             --entry-point=dispatch \
             --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=retry_failed_scans.py \
+            --trigger-http \
+            --no-allow-unauthenticated
+
+  deploy-generate-static-job-pages:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/487584214286/locations/global/workloadIdentityPools/github/providers/github-provider
+          service_account: github-deployer@yabotjobs.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: latest
+
+      # Same shape as retry-failed-scans above — its own dispatch() entry
+      # point in generate_static_job_pages.py, not this repo's main.py.
+      # --trigger-http/--no-allow-unauthenticated spelled out here for the
+      # same reason as retry-failed-scans: this is that function's
+      # first-ever deploy, before deploy/gcloud-deploy.sh's one-time setup
+      # has applied its trigger config.
+      - name: Deploy generate-static-job-pages
+        run: |
+          gcloud functions deploy generate-static-job-pages \
+            --gen2 \
+            --region="$REGION" \
+            --project="$PROJECT_ID" \
+            --runtime=python313 \
+            --source=. \
+            --entry-point=dispatch \
+            --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=generate_static_job_pages.py \
             --trigger-http \
             --no-allow-unauthenticated

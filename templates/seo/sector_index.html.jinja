@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ sector_name }} Jobs, by Day | Yabot Jobs</title>
+  <meta name="description" content="Browse {{ sector_name }} jobs posted on Yabot Jobs, day by day. Free to search and apply." />
+  <link rel="canonical" href="{{ base_url }}/jobs/{{ sector_slug }}" />
+  <meta name="robots" content="index, follow" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Yabot Jobs" />
+  <meta property="og:title" content="{{ sector_name }} Jobs, by Day" />
+  <meta property="og:description" content="Browse {{ sector_name }} jobs posted on Yabot Jobs, day by day." />
+  <meta property="og:url" content="{{ base_url }}/jobs/{{ sector_slug }}" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
+  {% include "_base_style.html.jinja" %}
+</head>
+<body>
+  {% include "_header.html.jinja" %}
+  <main id="main">
+  <div class="wrap">
+    <nav class="breadcrumb">
+      <a href="{{ base_url }}/">Home</a> &rsaquo;
+      <a href="{{ base_url }}/jobs">Jobs</a> &rsaquo;
+      {{ sector_name }}
+    </nav>
+    <h1>{{ sector_name }} Jobs, by Day</h1>
+
+    {% for month_label, days in months %}
+    <h2 class="month-heading">{{ month_label }}</h2>
+    <ul class="date-list">
+      {% for iso_date, display_date, count in days %}
+      <li>
+        <a href="{{ base_url }}/jobs/{{ sector_slug }}/{{ iso_date }}">{{ display_date }}</a>
+        &mdash; <span class="count">{{ count }} job{{ '' if count == 1 else 's' }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endfor %}
+  </div>
+  </main>
+</body>
+</html>

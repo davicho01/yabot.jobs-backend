@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ sector_name }} Jobs Posted {{ date_display }} | Yabot Jobs</title>
+  <meta name="description" content="{{ job_count }} {{ sector_name }} job{{ '' if job_count == 1 else 's' }} posted on {{ date_display }}, updated throughout the day. Free to search and apply on Yabot Jobs." />
+  <link rel="canonical" href="{{ base_url }}/jobs/{{ sector_slug }}/{{ date_iso }}" />
+  <meta name="robots" content="index, follow" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Yabot Jobs" />
+  <meta property="og:title" content="{{ sector_name }} Jobs Posted {{ date_display }}" />
+  <meta property="og:description" content="{{ job_count }} {{ sector_name }} job{{ '' if job_count == 1 else 's' }} posted on {{ date_display }}." />
+  <meta property="og:url" content="{{ base_url }}/jobs/{{ sector_slug }}/{{ date_iso }}" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
+  {% include "_base_style.html.jinja" %}
+  <script type="application/ld+json">{{ job_ld_json|safe }}</script>
+</head>
+<body>
+  {% include "_header.html.jinja" %}
+  <main id="main">
+  <div class="wrap">
+    <nav class="breadcrumb">
+      <a href="{{ base_url }}/">Home</a> &rsaquo;
+      <a href="{{ base_url }}/jobs">Jobs</a> &rsaquo;
+      <a href="{{ base_url }}/jobs/{{ sector_slug }}">{{ sector_name }}</a> &rsaquo;
+      {{ date_display }}
+    </nav>
+    <h1>{{ sector_name }} Jobs Posted {{ date_display }}</h1>
+    <p class="meta-line">{{ job_count }} job{{ '' if job_count == 1 else 's' }} found &middot; Updated as of {{ generated_at_display }} Pacific</p>
+
+    <ul class="job-list">
+    {% for job in jobs %}
+      <li>
+        <div class="job-title"><a href="{{ base_url }}/jobs/{{ job.url_id }}">{{ job.title }}</a></div>
+        <div class="job-meta">
+          {{ job.company_name or "Unknown company" }}
+          {% if job.location %} &middot; {{ job.location }}{% endif %}
+          {% if job.salary_display %} &middot; {{ job.salary_display }}{% endif %}
+          &middot; Posted {{ job.posted_at_local.strftime('%-I:%M %p') }}
+        </div>
+      </li>
+    {% endfor %}
+    </ul>
+
+    <div class="day-nav">
+      <span>{% if prev_day %}<a href="{{ base_url }}/jobs/{{ sector_slug }}/{{ prev_day }}">&larr; Previous day</a>{% endif %}</span>
+      <span>{% if next_day %}<a href="{{ base_url }}/jobs/{{ sector_slug }}/{{ next_day }}">Next day &rarr;</a>{% endif %}</span>
+    </div>
+    <p class="sector-link-back"><a href="{{ base_url }}/jobs/{{ sector_slug }}">Browse all {{ sector_name }} days &rarr;</a></p>
+
+    <footer class="other-sectors">
+      Other sectors:
+      {% for name, slug in other_sectors %}<a href="{{ base_url }}/jobs/{{ slug }}">{{ name }}</a>{% if not loop.last %} &middot; {% endif %}{% endfor %}
+    </footer>
+  </div>
+  </main>
+</body>
+</html>

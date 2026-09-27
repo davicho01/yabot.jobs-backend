@@ -78,6 +78,19 @@ class Settings(BaseSettings):
     resume_storage_access_key_id: str
     resume_storage_secret_access_key: str
 
+    # Where generate_static_job_pages.py publishes the crawlable "jobs by
+    # sector, by day" pages (see that script) — the *frontend's* S3
+    # bucket/CloudFront distribution (yabot.jobs itself), not the resume
+    # bucket above. Reuses resume_storage's AWS access key/secret (same IAM
+    # user, though its policy may need widening to cover this bucket too) —
+    # no separate credentials modeled here.
+    seo_pages_bucket: str = "yabot-jobs-frontend"
+    seo_pages_region: str = "us-east-1"
+    seo_pages_base_url: str = "https://yabot.jobs"
+    # CloudFront distribution ID fronting seo_pages_bucket, for invalidating
+    # just-written paths after each run. None skips invalidation (local dev).
+    seo_pages_cloudfront_distribution_id: str | None = None
+
     # Standalone Chromium-rendering service for the rare sites that need JS
     # execution to reveal their content (see app/services/browser_fetch.py).
     # Unset just means that fallback is skipped.

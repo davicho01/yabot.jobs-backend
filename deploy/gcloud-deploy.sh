@@ -16,6 +16,11 @@
 #                       + Cloud Scheduler cron trigger
 #   - retry-failed-scans  Cloud Function 2nd gen (retry_failed_scans.py:dispatch)
 #                       + Cloud Scheduler cron trigger
+#   - generate-static-job-pages  Cloud Function 2nd gen (generate_static_job_pages.py:dispatch)
+#                       + Cloud Scheduler cron trigger, every 30 minutes — publishes
+#                       the crawlable "jobs by sector, by day" pages straight into the
+#                       *frontend's* S3 bucket/CloudFront (SEO_PAGES_BUCKET below), not
+#                       this backend's own storage.
 #   - browser-fetch   already deployed separately; see BROWSER_FETCH_SERVICE_URL below
 #
 # Prereqs this script assumes already exist (create once, not here):
@@ -47,6 +52,15 @@ IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/backend"
 SQL_INSTANCE="yabot-jobs-db"
 CLOUDSQL_INSTANCE_CONNECTION="${PROJECT_ID}:${SQL_REGION}:${SQL_INSTANCE}"
 BROWSER_FETCH_SERVICE_URL="https://yabot-jobs-browser-487584214286.us-central1.run.app"
+
+# TODO: fill in from yabot.jobs-frontend's own deploy config (its GitHub
+# Actions repo/environment variables S3_BUCKET / CLOUDFRONT_DISTRIBUTION_ID —
+# not committed to any repo, see that repo's .github/workflows/deploy.yml).
+# generate-static-job-pages writes real HTML objects straight into that same
+# bucket/distribution so they're served at yabot.jobs/jobs/... alongside the
+# SPA — this is intentionally the frontend's infra, not a new bucket of ours.
+SEO_PAGES_BUCKET="TODO-frontend-s3-bucket-name"
+SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID="TODO-frontend-cloudfront-distribution-id"
 
 # ---------------------------------------------------------------------------
 # 0. One-time project setup
@@ -139,7 +153,7 @@ create_secret_from_env resume-storage-access-key   RESUME_STORAGE_ACCESS_KEY_ID 
 create_secret_from_env resume-storage-secret-key   RESUME_STORAGE_SECRET_ACCESS_KEY deploy/.env.production
 
 # Non-secret, shared across api/worker/crawl-worker:
-COMMON_ENV="GCP_PROJECT_ID=${PROJECT_ID},BROWSER_FETCH_SERVICE_URL=${BROWSER_FETCH_SERVICE_URL},FRONTEND_BASE_URL=https://yabot.jobs,SESSION_COOKIE_SECURE=true,SYSTEM_LLM_PROVIDER=deepseek,SYSTEM_LLM_MODEL=deepseek-v4-flash,RESUME_STORAGE_BUCKET=yabot.jobs-files,RESUME_STORAGE_REGION=us-east-1"
+COMMON_ENV="GCP_PROJECT_ID=${PROJECT_ID},BROWSER_FETCH_SERVICE_URL=${BROWSER_FETCH_SERVICE_URL},FRONTEND_BASE_URL=https://yabot.jobs,SESSION_COOKIE_SECURE=true,SYSTEM_LLM_PROVIDER=deepseek,SYSTEM_LLM_MODEL=deepseek-v4-flash,RESUME_STORAGE_BUCKET=yabot.jobs-files,RESUME_STORAGE_REGION=us-east-1,SEO_PAGES_BUCKET=${SEO_PAGES_BUCKET},SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID=${SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID}"
 
 # EMAIL_SENDER_* map to the same underlying secrets as RESUME_STORAGE_* —
 # both are the yabot-jobs-backend IAM user's credentials (S3 + SES policies
@@ -433,6 +447,59 @@ gcloud scheduler jobs create http retry-failed-scans-hourly \
   --oidc-token-audience="$RETRY_FAILED_SCANS_FUNCTION_URL"
 
 # ---------------------------------------------------------------------------
+# 10. generate-static-job-pages — Cloud Function (2nd gen), triggered every
+#     30 minutes by Scheduler. Deploys from source (this repo), entry point
+#     is dispatch() in generate_static_job_pages.py — same shape as the
+#     functions above in every respect except what it talks to: it writes
+#     straight into the *frontend's* S3 bucket/CloudFront distribution
+#     (SEO_PAGES_BUCKET/SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID above), not
+#     Postgres/Pub/Sub. Its own independent cadence, deliberately not synced
+#     to crawl-dispatcher's 2h schedule or chained off crawl-worker — see
+#     generate_static_job_pages.py's own docstring for why. 30 minutes is
+#     the freshness/cost tradeoff picked for how "live" these pages feel.
+#
+#     IMPORTANT: the yabot-jobs-backend IAM user (whose key/secret are
+#     already in the resume-storage-access-key/resume-storage-secret-key
+#     secrets above, reused here) must additionally have s3:PutObject/
+#     s3:GetObject on SEO_PAGES_BUCKET and cloudfront:CreateInvalidation on
+#     SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID — an AWS console/IAM policy change
+#     to make once, not something this script can do.
+# ---------------------------------------------------------------------------
+
+gcloud functions deploy generate-static-job-pages \
+  --gen2 \
+  --region="$REGION" \
+  --runtime=python313 \
+  --source=. \
+  --entry-point=dispatch \
+  --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=generate_static_job_pages.py \
+  --trigger-http \
+  --no-allow-unauthenticated \
+  --set-env-vars="$COMMON_ENV" \
+  --set-secrets="$COMMON_SECRETS" \
+  --memory=512Mi \
+  --timeout=540s
+
+gcloud run services update generate-static-job-pages \
+  --region="$REGION" \
+  --add-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION"
+
+GENERATE_STATIC_JOB_PAGES_FUNCTION_URL="$(gcloud functions describe generate-static-job-pages --gen2 --region="$REGION" --format='value(serviceConfig.uri)')"
+
+gcloud functions add-invoker-policy-binding generate-static-job-pages \
+  --gen2 \
+  --region="$REGION" \
+  --member="serviceAccount:${PROJECT_ID}@appspot.gserviceaccount.com"
+
+gcloud scheduler jobs create http generate-static-job-pages-30min \
+  --location="$REGION" \
+  --schedule="*/30 * * * *" \
+  --uri="$GENERATE_STATIC_JOB_PAGES_FUNCTION_URL" \
+  --http-method=POST \
+  --oidc-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com" \
+  --oidc-token-audience="$GENERATE_STATIC_JOB_PAGES_FUNCTION_URL"
+
+# ---------------------------------------------------------------------------
 # Redeploys after this point (new image/source, no infra changes) — this is
 # also exactly what .github/workflows/deploy.yml runs on every push to main:
 #   gcloud builds submit --tag "${IMAGE}:$(git rev-parse --short HEAD)" --project="$PROJECT_ID" .
@@ -451,4 +518,6 @@ gcloud scheduler jobs create http retry-failed-scans-hourly \
 #     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=follow_up_reminders.py
 #   gcloud functions deploy retry-failed-scans --gen2 --region="$REGION" --project="$PROJECT_ID" \
 #     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=retry_failed_scans.py
+#   gcloud functions deploy generate-static-job-pages --gen2 --region="$REGION" --project="$PROJECT_ID" \
+#     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=generate_static_job_pages.py
 # ---------------------------------------------------------------------------
