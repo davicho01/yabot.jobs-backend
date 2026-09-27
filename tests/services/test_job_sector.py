@@ -26,3 +26,21 @@ class TestClassifySector:
 
     def test_no_title_or_description_is_unknown(self):
         assert classify_sector(None, None) == JobSector.UNKNOWN
+
+    def test_keyword_embedded_inside_an_unrelated_word_does_not_match(self):
+        # Regression: naive substring matching let "dba" (database
+        # administrator) match inside "Handbags" — verified live against a
+        # real Macy's "Retail Sales Ambassador - Designer Handbags" posting.
+        assert classify_sector("Retail Sales Ambassador - Designer Handbags", "") == JobSector.UNKNOWN
+
+    def test_keyword_still_matches_as_a_real_standalone_word(self):
+        assert classify_sector("Oracle DBA", "") == JobSector.ENGINEERING_TECH
+
+    def test_manufacturing_engineer_is_traditional_not_tech(self):
+        # Regression: with no more-specific multi-word match, this fell
+        # through to engineering_tech's bare "engineer" — verified live
+        # against a real Hubbell "Manufacturing Engineer" posting.
+        assert classify_sector("Manufacturing Engineer - Lincoln, NH", "") == JobSector.ENGINEERING_TRADITIONAL
+
+    def test_quality_engineer_is_traditional_not_tech(self):
+        assert classify_sector("Sr Associate, Quality Engineer", "") == JobSector.ENGINEERING_TRADITIONAL

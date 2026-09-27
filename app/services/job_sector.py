@@ -16,6 +16,7 @@ each sector's keyword list to terms that are genuinely diagnostic of it.
 """
 
 import re
+from functools import lru_cache
 
 from app.models.enums import JobSector
 
@@ -48,6 +49,13 @@ _SECTOR_KEYWORDS: list[tuple[JobSector, tuple[str, ...]]] = [
             "mechanical engineering", "electrical engineer", "electrical engineering",
             "aerospace engineer", "chemical engineer", "structural engineer",
             "industrial engineer", "environmental engineer", "process engineer",
+            # Without these, a bare "engineer" (below) would catch these
+            # titles as engineering_tech — same reasoning as "sales engineer"
+            # under SALES (verified live: "Manufacturing Engineer" and three
+            # separate "Quality Engineer"/"Quality Engineering" titles all
+            # landed in engineering_tech before this).
+            "manufacturing engineer", "manufacturing engineering",
+            "quality engineer", "quality engineering",
         ),
     ),
     (
@@ -178,10 +186,18 @@ _WHITESPACE_RE = re.compile(r"\s+")
 
 
 def _normalize(text: str) -> str:
-    # Padded with spaces so a bare keyword regex (e.g. " ceo ") can match at
-    # the very start/end of the text too, without a separate word-boundary
-    # pattern per keyword.
     return " " + _WHITESPACE_RE.sub(" ", text.lower()) + " "
+
+
+@lru_cache(maxsize=None)
+def _keyword_pattern(keyword: str) -> re.Pattern[str]:
+    """A keyword matched as a whole word/phrase, not just a bare substring —
+    plain `keyword in text` let "dba" (database administrator) match inside
+    "Handbags" (verified live: a Macy's "Retail Sales Ambassador - Designer
+    Handbags" listing landed in engineering_tech purely from that). Cached
+    since this runs on every scan; there are only a few hundred keywords
+    total, so this pays for itself after the first classify_sector call."""
+    return re.compile(r"\b" + re.escape(keyword.strip()) + r"\b")
 
 
 def _match(text: str, *, allow_single_word: bool = True) -> JobSector | None:
@@ -207,7 +223,7 @@ def _match(text: str, *, allow_single_word: bool = True) -> JobSector | None:
             continue
         for sector, keywords in _SECTOR_KEYWORDS:
             for keyword in keywords:
-                if (" " in keyword.strip()) == multi_word and keyword in text:
+                if (" " in keyword.strip()) == multi_word and _keyword_pattern(keyword).search(text):
                     return sector
     return None
 
