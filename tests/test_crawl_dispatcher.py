@@ -30,7 +30,7 @@ def session_factory(monkeypatch):
     Base.metadata.create_all(engine, tables=[m.CrawlSource.__table__])
     factory = sessionmaker(bind=engine, autoflush=False)
     monkeypatch.setattr(crawl_dispatcher, "SessionLocal", factory)
-    monkeypatch.setattr(crawl_dispatcher, "ensure_topic_and_subscription", lambda: None)
+    monkeypatch.setattr(crawl_dispatcher, "ensure_topic", lambda: None)
     monkeypatch.setattr(crawl_dispatcher, "wake_sources_with_pending_scans", lambda db: 0)
     monkeypatch.setattr(sys, "argv", ["crawl_dispatcher.py"])
     return factory

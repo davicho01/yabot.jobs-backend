@@ -26,7 +26,7 @@ from app.core.log_config import configure_logging
 from app.db.session import SessionLocal
 from app.models.crawl_source import CrawlSource
 from app.models.enums import CrawlSourceStatus
-from app.services.crawl_queue import enqueue_crawl, ensure_topic_and_subscription
+from app.services.crawl_queue import enqueue_crawl, ensure_topic
 
 configure_logging()
 logger = logging.getLogger("app.recrawl_sources")
@@ -94,7 +94,7 @@ def main() -> None:
     args = parser.parse_args()
     ats_types = None if args.all_active else (args.ats_types or DEFAULT_ATS_TYPES)
 
-    ensure_topic_and_subscription()
+    ensure_topic()
 
     db = SessionLocal()
     try:

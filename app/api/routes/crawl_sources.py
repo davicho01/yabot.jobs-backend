@@ -13,7 +13,7 @@ from app.schemas.admin import CrawlSourceStatsRead, ScanDayCount, ScanHourCount
 from app.schemas.crawl_source import CrawlSourceCreate, CrawlSourceRead, CrawlSourceUpdate
 from app.services import admin as admin_service
 from app.services.ats_adapters import detect_ats_source, detect_embedded_ats_source
-from app.services.crawl_queue import enqueue_crawl, ensure_topic_and_subscription
+from app.services.crawl_queue import enqueue_crawl, ensure_topic
 from app.services.job_queue import enqueue_source_scan
 from app.services.job_queue import ensure_topic_and_subscription as ensure_scan_topic_and_subscription
 
@@ -105,7 +105,7 @@ def trigger_crawl_source(source_id: uuid.UUID, db: Session = Depends(get_db)) ->
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Only an active crawl source can be crawled.",
         )
-    ensure_topic_and_subscription()
+    ensure_topic()
     enqueue_crawl(source.id)
     return {"queued": True}
 
