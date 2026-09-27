@@ -2,15 +2,16 @@
 
 Consumes crawl-source-requests messages published by crawl_dispatcher.py:
 for each, lists every current job URL for that company's board (via the
-ATS's own public API — see app.services.ats_adapters) and hands each one to
-the normal get_or_create_job_posting flow, passing crawl_source_id so it
-skips board (re-)registration — that only happens for genuinely
-user-submitted URLs, see get_or_create_job_posting. Genuinely new URLs are
-left PENDING, and once the whole board has been recorded this worker wakes
-that source's throttled scan lanes on the *existing* job-scan topic (see
-app.services.scan_claims / worker.py) — never one message per URL, so a site
-is only ever fetched from CrawlSource.max_concurrent_scans pages at a time.
-Already-known URLs are a no-op.
+ATS's own public API — see app.services.ats_adapters) and registers the
+whole list at once (see app.services.jobs.bulk_register_discovered_urls) —
+a handful of round-trips for the whole board rather than one per URL, which
+is what the get_or_create_job_posting flow user submissions go through is
+built for one URL at a time, not a board that can list thousands. Genuinely
+new URLs are left PENDING, and once the whole board has been recorded this
+worker wakes that source's throttled scan lanes on the *existing* job-scan
+topic (see app.services.scan_claims / worker.py) — never one message per
+URL, so a site is only ever fetched from CrawlSource.max_concurrent_scans
+pages at a time. Already-known URLs are a no-op.
 
 Run multiple instances of this process to crawl many companies in parallel —
 it's a normal Pub/Sub pull subscription, so messages are split across
@@ -42,7 +43,7 @@ from app.services.ats_adapters import list_job_urls
 from app.services.coverage_monitor import update_coverage
 from app.services.crawl_queue import ensure_topic_and_subscription, subscriber_client, subscription_path
 from app.services.job_queue import enqueue_source_scan
-from app.services.jobs import get_or_create_job_posting
+from app.services.jobs import bulk_register_discovered_urls
 from app.services.scan_claims import has_unclaimed_pending
 
 configure_logging()
@@ -68,31 +69,24 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
         source.last_crawled_at = datetime.now(timezone.utc)
         return
 
-    # Read up front: get_or_create_job_posting commits per URL, and the
-    # rollback in the failure path below expires every loaded attribute.
+    # Read up front: the rollback in the failure path below expires every
+    # loaded attribute.
     source_id, source_name, lanes = source.id, source.name, source.max_concurrent_scans
 
-    failed = 0
-    for url in urls:
-        try:
-            # enqueue=False: new URLs stay PENDING and are scanned by this
-            # source's throttled lanes, woken once below — not by up to 500
-            # independent messages that any worker could grab at the same time.
-            get_or_create_job_posting(
-                db, url, submitted_by_user_id=None, crawl_source_id=source_id, enqueue=False
-            )
-        except Exception as exc:
-            # One bad URL (malformed link, a transient publish failure, ...)
-            # used to propagate out of this function and skip the
-            # last_crawled_at update below entirely — and since
-            # _handle_message nacks on any exception, a *deterministic*
-            # per-URL failure left the source's stats permanently stale
-            # across every redelivery. Roll back so this URL's partial work
-            # doesn't poison the session for the rest of the batch, then
-            # keep going.
-            db.rollback()
-            failed += 1
-            logger.warning("Failed to process discovered URL %s for %s: %s", url, source_name, exc)
+    # One SELECT for which of these are already known, one bulk INSERT for
+    # whatever's new, instead of a round-trip (and a commit, for a new URL)
+    # per URL — see bulk_register_discovered_urls. A large board can list
+    # thousands of URLs; that used to mean thousands of sequential
+    # round-trips to Cloud SQL in a single invocation.
+    try:
+        failed = bulk_register_discovered_urls(db, urls, source_id)
+    except Exception as exc:
+        # Same reasoning as the old per-URL loop's except: don't let this
+        # crawl's stats update below be skipped just because registration
+        # failed, and don't leave the session poisoned for it.
+        db.rollback()
+        failed = len(urls)
+        logger.warning("Failed to register discovered URLs for %s: %s", source_name, exc)
 
     source = db.get(CrawlSource, source_id)
     if source is None:  # deleted while this crawl was running

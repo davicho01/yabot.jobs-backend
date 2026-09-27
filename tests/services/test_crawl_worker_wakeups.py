@@ -6,46 +6,45 @@ from app.models.enums import ScanStatus
 
 
 def _run_crawl(monkeypatch, scan_db, source, urls):
-    enqueue_flags: list[bool] = []
     wakeups: list[tuple] = []
 
-    def fake_get_or_create(db, url, submitted_by_user_id, crawl_source_id=None, enqueue=True):
-        enqueue_flags.append(enqueue)
-        # What the real function leaves behind for a brand-new URL: a PENDING row.
-        db.add(
-            JobPostingUrl(
-                url=url,
-                normalized_url=url,
-                url_hash=url,
-                domain="example.com",
-                scan_status=ScanStatus.PENDING,
-                crawl_source_id=crawl_source_id,
+    def fake_bulk_register(db, raw_urls, crawl_source_id):
+        # What the real function leaves behind for brand-new URLs: PENDING rows.
+        for url in raw_urls:
+            db.add(
+                JobPostingUrl(
+                    url=url,
+                    normalized_url=url,
+                    url_hash=url,
+                    domain="example.com",
+                    scan_status=ScanStatus.PENDING,
+                    crawl_source_id=crawl_source_id,
+                )
             )
-        )
-        db.commit()
+        db.flush()
+        return 0
 
     monkeypatch.setattr(crawl_worker, "list_job_urls", lambda ats_type, board_url: urls)
-    monkeypatch.setattr(crawl_worker, "get_or_create_job_posting", fake_get_or_create)
+    monkeypatch.setattr(crawl_worker, "bulk_register_discovered_urls", fake_bulk_register)
     monkeypatch.setattr(crawl_worker, "enqueue_source_scan", lambda source_id, lanes=1: wakeups.append((source_id, lanes)))
 
     crawl_worker._crawl_source(scan_db, source.id)
-    return enqueue_flags, wakeups
+    return wakeups
 
 
 def test_crawl_wakes_the_sources_lanes_once_instead_of_queueing_every_url(monkeypatch, scan_db, make_source):
     source = make_source(max_concurrent_scans=4)
     urls = [f"https://example.com/jobs/{i}" for i in range(50)]
 
-    enqueue_flags, wakeups = _run_crawl(monkeypatch, scan_db, source, urls)
+    wakeups = _run_crawl(monkeypatch, scan_db, source, urls)
 
-    assert enqueue_flags == [False] * 50  # no per-URL scan messages
     assert wakeups == [(source.id, 4)]  # one wake-up per allowed lane, not 50 messages
 
 
 def test_crawl_with_nothing_to_scan_wakes_no_lanes(monkeypatch, scan_db, make_source):
     source = make_source()
 
-    _flags, wakeups = _run_crawl(monkeypatch, scan_db, source, [])
+    wakeups = _run_crawl(monkeypatch, scan_db, source, [])
 
     assert wakeups == []
 
@@ -53,15 +52,18 @@ def test_crawl_with_nothing_to_scan_wakes_no_lanes(monkeypatch, scan_db, make_so
 def test_crawl_still_records_its_stats_when_waking_lanes_fails(monkeypatch, scan_db, make_source):
     source = make_source()
     monkeypatch.setattr(crawl_worker, "list_job_urls", lambda ats_type, board_url: ["https://example.com/jobs/1"])
-    monkeypatch.setattr(
-        crawl_worker,
-        "get_or_create_job_posting",
-        lambda db, url, submitted_by_user_id, crawl_source_id=None, enqueue=True: db.add(
-            JobPostingUrl(
-                url=url, normalized_url=url, url_hash=url, domain="example.com", crawl_source_id=crawl_source_id
+
+    def fake_bulk_register(db, raw_urls, crawl_source_id):
+        for url in raw_urls:
+            db.add(
+                JobPostingUrl(
+                    url=url, normalized_url=url, url_hash=url, domain="example.com", crawl_source_id=crawl_source_id
+                )
             )
-        ),
-    )
+        db.flush()
+        return 0
+
+    monkeypatch.setattr(crawl_worker, "bulk_register_discovered_urls", fake_bulk_register)
 
     def broken(source_id, lanes=1):
         raise RuntimeError("pubsub down")

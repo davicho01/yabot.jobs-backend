@@ -300,6 +300,81 @@ def get_or_create_job_posting(
     return posting, url_row
 
 
+def bulk_register_discovered_urls(db: Session, raw_urls: list[str], crawl_source_id: uuid.UUID) -> int:
+    """Crawl-worker version of get_or_create_job_posting for a whole board at
+    once: registers every URL a crawl discovered with a small, fixed number
+    of round-trips instead of one SELECT+INSERT+COMMIT per URL.
+
+    That per-URL loop (still what get_or_create_job_posting itself does,
+    correctly, for the one-off case of a user submitting a single URL) is
+    why crawl-worker needed a 1-hour Cloud Function timeout and a full vCPU
+    just to get through one large board — thousands of sequential
+    round-trips to Cloud SQL, most of it spent waiting on network latency,
+    not CPU. This does the same dedup-then-create, but as one SELECT for
+    which hashes already exist and one bulk INSERT for whatever's new.
+
+    Never enqueues a scan (see get_or_create_job_posting's enqueue=False) —
+    new rows stay PENDING; the caller wakes the source's throttled lanes
+    once, after every URL from this crawl has been recorded.
+
+    Skips (and counts) a URL that fails to normalize/hash rather than
+    aborting the whole batch — the same per-URL isolation the old loop's
+    try/except gave. A URL that collides with a row inserted by someone else
+    between the SELECT and the INSERT below (e.g. a user submitting the very
+    URL this same crawl just discovered) is rare enough to just let raise —
+    url_hash's unique constraint catches it, the caller's except rolls back
+    and counts the whole batch as failed, and the crawl message gets nacked
+    and retried, at which point every URL in it (including that one) shows
+    up as already-known. A plain multi-row INSERT rather than an
+    ON CONFLICT DO NOTHING one specifically so this stays testable against
+    SQLite like the rest of this module (see tests/services/conftest.py) —
+    Postgres is the only real target, but a Postgres-only construct here
+    would need its own, separate test setup for no real benefit over
+    letting this one rare case fall back to a whole-batch retry.
+
+    Returns how many URLs failed to normalize/hash, for the caller's
+    last_error reporting.
+    """
+    # url_hash -> (raw_url, normalized_url), de-duplicated within this batch
+    # (a board's own listing can repeat a URL) before ever touching the DB.
+    parsed: dict[str, tuple[str, str]] = {}
+    failed = 0
+    for raw_url in raw_urls:
+        try:
+            normalized = normalize_url(raw_url)
+            hashed = url_hash(normalized)
+        except Exception:
+            failed += 1
+            continue
+        parsed.setdefault(hashed, (raw_url, normalized))
+
+    if not parsed:
+        return failed
+
+    existing_hashes = set(
+        db.scalars(select(JobPostingUrl.url_hash).where(JobPostingUrl.url_hash.in_(parsed.keys())))
+    )
+    new_items = {h: v for h, v in parsed.items() if h not in existing_hashes}
+    if not new_items:
+        return failed
+
+    new_url_rows = [
+        JobPostingUrl(
+            url=raw_url,
+            normalized_url=normalized,
+            url_hash=hashed,
+            domain=domain_of(normalized),
+            crawl_source_id=crawl_source_id,
+        )
+        for hashed, (raw_url, normalized) in new_items.items()
+    ]
+    db.add_all(new_url_rows)
+    db.flush()  # assigns each row's id
+    db.add_all(JobPosting(url_id=row.id, extraction_status=ScanStatus.PENDING) for row in new_url_rows)
+    db.flush()
+    return failed
+
+
 def _enforce_submission_rate_limit(db: Session, user_id: uuid.UUID, now: datetime | None = None) -> None:
     """Throttle brand-new job-URL submissions per user — each one creates a
     JobPostingUrl row and queues a real LLM scan, so this caps runaway cost

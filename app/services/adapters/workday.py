@@ -91,7 +91,10 @@ def _fetch_jobs(board_key: str) -> list[str]:
     # _posted_age_days(None) is always None. Detected from the first page;
     # None means "not yet known."
     filter_by_recency: bool | None = None
-    while len(urls) < _WORKDAY_MAX_JOBS:
+    # Bounds requests-per-crawl to _WORKDAY_MAX_JOBS / _WORKDAY_PAGE_SIZE
+    # regardless of tenant size or behavior — see below for why this counts
+    # postings *scanned* (offset), not URLs collected.
+    while offset < _WORKDAY_MAX_JOBS:
         response = post_with_retry(
             jobs_url,
             json={"appliedFacets": {}, "limit": _WORKDAY_PAGE_SIZE, "offset": offset, "searchText": ""},
@@ -107,23 +110,29 @@ def _fetch_jobs(board_key: str) -> list[str]:
             filter_by_recency = any(p.get("postedOn") for p in postings)
 
         if filter_by_recency:
-            # Workday's default sort is newest-first (verified: offset=0
-            # was entirely "Posted Today", offset=300 was entirely "Posted
-            # 7 Days Ago" — no interleaving). Stop as soon as a page
-            # contains anything outside RECENT_WINDOW_DAYS instead of
-            # always paginating to _WORKDAY_MAX_JOBS — far fewer requests
-            # per crawl, and correct regardless of how many jobs the
-            # company has total.
-            recent_postings = [
-                p
-                for p in postings
-                if (age := _posted_age_days(p.get("postedOn"))) is not None and age < RECENT_WINDOW_DAYS
-            ]
+            # Workday's default sort is newest-first for *some* tenants
+            # (verified live: synopsys.wd1.myworkdayjobs.com — offset=0 was
+            # entirely "Posted Today", offset=300 entirely "Posted 7 Days
+            # Ago", no interleaving) but definitely not all of them —
+            # verified live: adobe.wd5.myworkdayjobs.com returned "Posted
+            # Yesterday" and "Posted 30+ Days Ago" back to back within the
+            # very same page (offset=80), with its true within-window
+            # postings clustered around offset~100-120, well past a long
+            # earlier run of only 8-day-old ones. Stopping at the first
+            # old-looking posting (this function's previous approach)
+            # silently undercounts a tenant shaped like that instead of
+            # erroring — nothing in the response can tell "genuinely done"
+            # apart from "this tenant just doesn't sort by date" — so every
+            # page gets scanned for recent postings regardless of what came
+            # before; only running past _WORKDAY_MAX_JOBS postings or
+            # genuinely reaching the end of the list stops the loop.
             urls.extend(
-                job_base_url + posting["externalPath"] for posting in recent_postings if posting.get("externalPath")
+                job_base_url + posting["externalPath"]
+                for posting in postings
+                if (age := _posted_age_days(posting.get("postedOn"))) is not None
+                and age < RECENT_WINDOW_DAYS
+                and posting.get("externalPath")
             )
-            if len(recent_postings) < len(postings) or len(postings) < _WORKDAY_PAGE_SIZE:
-                break  # hit an older posting, or this was the last page
         else:
             # No recency signal available for this tenant at all — capture
             # every posting up to the shared cap instead, same as any
@@ -131,14 +140,11 @@ def _fetch_jobs(board_key: str) -> list[str]:
             urls.extend(
                 job_base_url + posting["externalPath"] for posting in postings if posting.get("externalPath")
             )
-            if len(postings) < _WORKDAY_PAGE_SIZE:
-                break
+        if len(postings) < _WORKDAY_PAGE_SIZE:
+            break  # last page
         offset += _WORKDAY_PAGE_SIZE
 
-    # _WORKDAY_MAX_JOBS is a safety net, not the normal stopping point — it
-    # only bites if a company posts an unusually large batch within the
-    # window.
-    return urls[:_WORKDAY_MAX_JOBS]
+    return urls
 
 
 def _detect_embedded(url: str) -> str | None:

@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 import app.models as m
 from app.core.config import settings
@@ -16,6 +16,7 @@ from app.services.jobs import (
     _backoff_seconds,
     _enforce_submission_rate_limit,
     build_job_search_statement,
+    bulk_register_discovered_urls,
     dismiss_job_flag,
     ensure_user_applicant,
     find_existing_application,
@@ -165,6 +166,62 @@ def test_get_or_create_job_posting_still_allows_resubmitting_a_known_url_past_th
     posting, url_row = get_or_create_job_posting(scan_db, raw_url, user_id, now=now)
     assert url_row.url == raw_url
     assert posting.url_id == url_row.id
+
+
+# ------------------------------------------------ bulk crawl URL registration
+
+
+def test_bulk_register_discovered_urls_creates_a_pending_posting_per_new_url(scan_db, make_source):
+    source = make_source()
+    urls = [f"https://example.com/jobs/{i}" for i in range(5)]
+
+    failed = bulk_register_discovered_urls(scan_db, urls, source.id)
+
+    assert failed == 0
+    url_rows = scan_db.scalars(select(m.JobPostingUrl)).all()
+    assert {row.url for row in url_rows} == set(urls)
+    assert all(row.crawl_source_id == source.id for row in url_rows)
+    postings = scan_db.scalars(select(m.JobPosting)).all()
+    assert {p.url_id for p in postings} == {row.id for row in url_rows}
+    assert all(p.extraction_status == ScanStatus.PENDING for p in postings)
+
+
+def test_bulk_register_discovered_urls_is_a_no_op_for_already_known_urls(scan_db, make_source):
+    source = make_source()
+    raw_url = "https://example.com/jobs/already-known"
+    normalized = normalize_url(raw_url)
+    scan_db.add(
+        m.JobPostingUrl(
+            url=raw_url, normalized_url=normalized, url_hash=compute_url_hash(normalized), domain="example.com"
+        )
+    )
+    scan_db.commit()
+
+    failed = bulk_register_discovered_urls(scan_db, [raw_url], source.id)
+
+    assert failed == 0
+    assert scan_db.scalar(select(func.count()).select_from(m.JobPostingUrl)) == 1
+    assert scan_db.scalar(select(func.count()).select_from(m.JobPosting)) == 0
+
+
+def test_bulk_register_discovered_urls_dedupes_repeats_within_the_same_batch(scan_db, make_source):
+    source = make_source()
+    raw_url = "https://example.com/jobs/repeated"
+
+    failed = bulk_register_discovered_urls(scan_db, [raw_url, raw_url, raw_url], source.id)
+
+    assert failed == 0
+    assert scan_db.scalar(select(func.count()).select_from(m.JobPostingUrl)) == 1
+
+
+def test_bulk_register_discovered_urls_counts_unparseable_urls_without_aborting_the_batch(scan_db, make_source):
+    source = make_source()
+
+    failed = bulk_register_discovered_urls(scan_db, [None, "https://example.com/jobs/good"], source.id)
+
+    assert failed == 1
+    url_rows = scan_db.scalars(select(m.JobPostingUrl)).all()
+    assert [row.url for row in url_rows] == ["https://example.com/jobs/good"]
 
 
 # ------------------------------------------------------- application dedup

@@ -59,11 +59,13 @@ def _posting(external_path: str, posted_on: str) -> dict:
     return {"externalPath": external_path, "postedOn": posted_on}
 
 
-def test_fetch_jobs_stops_at_recent_window_boundary(monkeypatch):
-    # One page: a mix of within-window and outside-window postings (mirrors
-    # the interleaving seen against a real large Workday tenant) — only the
-    # within-window ones should come back, and pagination should stop
-    # rather than continuing past the boundary.
+def test_fetch_jobs_filters_out_of_window_postings_on_a_single_page(monkeypatch):
+    # One short page: a mix of within-window and outside-window postings —
+    # only the within-window ones should come back. Pagination stops here
+    # because the page is shorter than a full page (the real end-of-list
+    # signal), not because of the old postings on it — see
+    # test_fetch_jobs_finds_recent_postings_scattered_behind_a_long_run_of_old_ones
+    # for why this function no longer stops just because a page has one.
     page_1 = [
         _posting("/job/a", "Posted Today"),
         _posting("/job/b", f"Posted {workday.RECENT_WINDOW_DAYS - 1} Days Ago"),
@@ -174,6 +176,36 @@ def test_extract_falls_back_to_url_embedded_in_html(monkeypatch):
 
 def test_extract_none_when_neither_url_nor_html_match():
     assert workday.extract("https://example.com/jobs/1", "<html>unrelated</html>") is None
+
+
+def test_fetch_jobs_finds_recent_postings_scattered_behind_a_long_run_of_old_ones(monkeypatch):
+    # The adobe.wd5.myworkdayjobs.com case, verified live: this tenant's
+    # default order isn't newest-first at all — page 1 mixes a handful of
+    # recent postings with mostly-old ones, several full pages afterward are
+    # entirely old, and then a whole page of genuinely recent postings shows
+    # up again much later. The old "stop at the first old-looking posting"
+    # behavior would have returned only page 1's two recent postings and
+    # missed the later page entirely — this must find both.
+    pages = {
+        0: [
+            _posting("/job/a", "Posted Today"),
+            _posting("/job/b", "Posted 8 Days Ago"),
+        ]
+        + [_posting(f"/job/pad-{i}", "Posted 8 Days Ago") for i in range(18)],
+        workday._WORKDAY_PAGE_SIZE: [_posting(f"/job/old-{i}", "Posted 8 Days Ago") for i in range(20)],
+        workday._WORKDAY_PAGE_SIZE * 2: [_posting("/job/c", "Posted Yesterday"), _posting("/job/d", "Posted 2 Days Ago")],
+    }
+
+    def fake_post(url, json, **kwargs):
+        return FakeResponse(json_data={"jobPostings": pages.get(json["offset"], [])})
+
+    monkeypatch.setattr(workday, "post_with_retry", fake_post)
+    urls = workday._fetch_jobs("acme/wd1/Careers")
+    assert urls == [
+        "https://acme.wd1.myworkdayjobs.com/Careers/job/a",
+        "https://acme.wd1.myworkdayjobs.com/Careers/job/c",
+        "https://acme.wd1.myworkdayjobs.com/Careers/job/d",
+    ]
 
 
 def test_fetch_jobs_stops_after_500_recent_jobs(monkeypatch):
