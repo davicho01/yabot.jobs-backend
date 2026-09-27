@@ -887,7 +887,13 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
     posting.salary_min = fields["salary_min"]
     posting.salary_max = fields["salary_max"]
     posting.salary_currency = _fit(fields["salary_currency"], _SALARY_CURRENCY_MAX)
-    posting.description = _strip_nul(result.description)
+    # Entities decoded here too, same reasoning as title/company/location
+    # above — a scraped Workday description can carry literal "&#xa;" where
+    # a real newline belongs (verified live: an RTX posting's structured
+    # "Date Posted:" / "Country:" / ... fields ran together into one
+    # unreadable line because the browser collapses an un-decoded numeric
+    # entity's whitespace same as any other).
+    posting.description = _strip_nul(decode_entities(result.description))
     posting.extracted_fields = _strip_nul(_merge_extracted_fields(result, llm_extraction))
     posting.raw_source = (
         {"html_excerpt": _strip_nul(result.raw_html_excerpt)} if result.raw_html_excerpt else None

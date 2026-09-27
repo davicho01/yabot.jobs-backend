@@ -68,6 +68,23 @@ def test_upsert_stores_hostile_page_content_cleanly(scan_db, make_source, make_u
     assert "이" in posting.raw_source["html_excerpt"]  # real non-ASCII text is untouched
 
 
+def test_upsert_decodes_entities_in_the_description(scan_db, make_source, make_url):
+    # Regression: a scraped Workday description can carry a literal "&#xa;"
+    # where a real newline belongs — verified live against a real RTX
+    # posting whose structured "Date Posted:"/"Country:"/... fields ran
+    # together into one unreadable line, since the browser collapses an
+    # un-decoded numeric entity's whitespace same as any other. title/
+    # company_name/location already got this treatment; description didn't.
+    url_row = make_url(make_source())
+    result = ScanResult(success=True, title="A Real Job", description="**Date Posted:**\n\n2026-09-27&#xa;&#xa;**Country:**")
+
+    jobs._upsert_posting(scan_db, url_row, result, datetime.now(timezone.utc))
+    scan_db.commit()
+
+    posting = scan_db.query(JobPosting).filter_by(url_id=url_row.id).one()
+    assert posting.description == "**Date Posted:**\n\n2026-09-27\n\n**Country:**"
+
+
 def test_apply_scan_result_keeps_good_data_on_a_later_failed_rescan(scan_db, make_source, make_url):
     """A re-crawl or admin rescan hitting a transient block (WAF challenge,
     timeout, ...) must not wipe out a posting that already has real data
