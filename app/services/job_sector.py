@@ -16,7 +16,6 @@ each sector's keyword list to terms that are genuinely diagnostic of it.
 """
 
 import re
-from functools import lru_cache
 
 from app.models.enums import JobSector
 
@@ -191,15 +190,33 @@ def _normalize(text: str) -> str:
     return " " + _WHITESPACE_RE.sub(" ", text.lower()) + " "
 
 
-@lru_cache(maxsize=None)
-def _keyword_pattern(keyword: str) -> re.Pattern[str]:
-    """A keyword matched as a whole word/phrase, not just a bare substring —
-    plain `keyword in text` let "dba" (database administrator) match inside
-    "Handbags" (verified live: a Macy's "Retail Sales Ambassador - Designer
-    Handbags" listing landed in engineering_tech purely from that). Cached
-    since this runs on every scan; there are only a few hundred keywords
-    total, so this pays for itself after the first classify_sector call."""
-    return re.compile(r"\b" + re.escape(keyword.strip()) + r"\b")
+def _is_word_char(c: str) -> bool:
+    return c.isalnum() or c == "_"
+
+
+def _contains_keyword(text: str, keyword: str) -> bool:
+    """Whether `keyword` occurs in `text` as a whole word/phrase, not just a
+    bare substring — plain `keyword in text` let "dba" (database
+    administrator) match inside "Handbags" (verified live: a Macy's "Retail
+    Sales Ambassador - Designer Handbags" listing landed in engineering_tech
+    purely from that). `str.find` in a loop plus a character check at each
+    candidate's edges, rather than a compiled `\\b...\\b` regex — this runs
+    on every scan and, at the scale of a full backfill (hundreds of
+    thousands of postings x a couple hundred keywords each), the regex
+    engine's per-call overhead measurably added up (~10x slower than this in
+    practice) for no behavioral difference."""
+    start = 0
+    keyword_len = len(keyword)
+    while True:
+        idx = text.find(keyword, start)
+        if idx == -1:
+            return False
+        before_ok = idx == 0 or not _is_word_char(text[idx - 1])
+        after_idx = idx + keyword_len
+        after_ok = after_idx >= len(text) or not _is_word_char(text[after_idx])
+        if before_ok and after_ok:
+            return True
+        start = idx + 1
 
 
 def _match(text: str, *, allow_single_word: bool = True) -> JobSector | None:
@@ -225,7 +242,8 @@ def _match(text: str, *, allow_single_word: bool = True) -> JobSector | None:
             continue
         for sector, keywords in _SECTOR_KEYWORDS:
             for keyword in keywords:
-                if (" " in keyword.strip()) == multi_word and _keyword_pattern(keyword).search(text):
+                stripped = keyword.strip()
+                if (" " in stripped) == multi_word and _contains_keyword(text, stripped):
                     return sector
     return None
 
