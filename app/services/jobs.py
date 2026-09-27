@@ -12,6 +12,7 @@ from sqlalchemy.sql import Select
 
 from app.core.config import settings
 from app.core.rate_limit import RateLimitExceeded
+from app.models.crawl_source import CrawlSource
 from app.models.enums import ApplicationStatus, EmploymentType, FlagReason, ScanStatus, WorkplaceType
 from app.models.job_application import UserJobApplication
 from app.models.job_posting import JobPosting
@@ -844,6 +845,19 @@ def _fit(value: str | None, max_length: int) -> str | None:
     return _strip_nul(value)[:max_length]
 
 
+def _crawl_source_name(db: Session, crawl_source_id: uuid.UUID | None) -> str | None:
+    """Fallback company name for postings whose page left it blank in the
+    scraped data (verified live: Capital One's Workday tenant serves
+    hiringOrganization.name as "" on every job, not just missing — same
+    empty result as no adapter support at all). CrawlSource.name is a
+    human-readable label already on file for anything the crawler
+    discovered on its own, so it beats showing "unknown" to users.
+    """
+    if crawl_source_id is None:
+        return None
+    return db.scalar(select(CrawlSource.name).where(CrawlSource.id == crawl_source_id))
+
+
 def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now: datetime) -> JobPosting:
     """Create or update the single JobPosting row for this URL (url_id is
     unique — one row per URL, updated in place on each scan/rescan, rather
@@ -870,7 +884,8 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
     # Entities are decoded first, so what's stored (and shown) is real text.
     location = decode_entities(fields["location"])
     posting.title = _fit(decode_entities(fields["title"]), _TITLE_MAX)
-    posting.company_name = _fit(decode_entities(fields["company_name"]), _COMPANY_NAME_MAX)
+    company_name = fields["company_name"] or _crawl_source_name(db, url_row.crawl_source_id)
+    posting.company_name = _fit(decode_entities(company_name), _COMPANY_NAME_MAX)
     posting.location = _fit(location, _LOCATION_MAX)
     # From the full string, not the 255-char display value above, so a long
     # list of locations isn't cut off partway for sources that don't

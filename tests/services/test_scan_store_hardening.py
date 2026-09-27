@@ -68,6 +68,51 @@ def test_upsert_stores_hostile_page_content_cleanly(scan_db, make_source, make_u
     assert "이" in posting.raw_source["html_excerpt"]  # real non-ASCII text is untouched
 
 
+def test_upsert_falls_back_to_crawl_source_name_when_company_name_missing(scan_db, make_source, make_url):
+    """Regression: Capital One's Workday tenant serves hiringOrganization.name
+    as "" on every job (verified live), so workday.py's company_name always
+    comes back None for them — same as any adapter that can't find a company
+    name at all. Falling back to the CrawlSource's name (always populated)
+    beats showing "unknown" to users.
+    """
+    source = make_source()
+    source.name = "Capital One"
+    scan_db.commit()
+    url_row = make_url(source)
+    result = ScanResult(success=True, title="Engineer", company_name=None, location="Remote")
+
+    jobs._upsert_posting(scan_db, url_row, result, datetime.now(timezone.utc))
+    scan_db.commit()
+
+    posting = scan_db.query(JobPosting).filter_by(url_id=url_row.id).one()
+    assert posting.company_name == "Capital One"
+
+
+def test_upsert_prefers_scraped_company_name_over_crawl_source(scan_db, make_source, make_url):
+    source = make_source()
+    source.name = "Capital One"
+    scan_db.commit()
+    url_row = make_url(source)
+    result = ScanResult(success=True, title="Engineer", company_name="Real Scraped Co", location="Remote")
+
+    jobs._upsert_posting(scan_db, url_row, result, datetime.now(timezone.utc))
+    scan_db.commit()
+
+    posting = scan_db.query(JobPosting).filter_by(url_id=url_row.id).one()
+    assert posting.company_name == "Real Scraped Co"
+
+
+def test_upsert_leaves_company_name_null_for_user_submitted_url_without_source(scan_db, make_url):
+    url_row = make_url(None)
+    result = ScanResult(success=True, title="Engineer", company_name=None, location="Remote")
+
+    jobs._upsert_posting(scan_db, url_row, result, datetime.now(timezone.utc))
+    scan_db.commit()
+
+    posting = scan_db.query(JobPosting).filter_by(url_id=url_row.id).one()
+    assert posting.company_name is None
+
+
 def test_upsert_decodes_entities_in_the_description(scan_db, make_source, make_url):
     # Regression: a scraped Workday description can carry a literal "&#xa;"
     # where a real newline belongs — verified live against a real RTX
