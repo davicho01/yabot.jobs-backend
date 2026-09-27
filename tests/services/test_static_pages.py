@@ -53,6 +53,7 @@ def make_posting(db):
         flagged_at: datetime | None = None,
         company_name: str = "Acme Corp",
         location: str = "Remote",
+        posted_at: date | None = None,
         salary_min: int | None = None,
         salary_max: int | None = None,
         salary_currency: str | None = None,
@@ -77,6 +78,7 @@ def make_posting(db):
             country=country,
             extraction_status=extraction_status,
             primary_posting_id=primary_posting_id,
+            posted_at=posted_at,
             salary_min=salary_min,
             salary_max=salary_max,
             salary_currency=salary_currency,
@@ -156,6 +158,18 @@ class TestJobsForSectorDay:
         make_posting(created_at=PT_NOON + timedelta(days=1))
         assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
 
+    def test_ordered_by_posted_at_then_title_not_by_when_we_found_it(self, db, make_posting):
+        # Found in reverse of posted order, on purpose — the sort must come
+        # from posted_at/title, not created_at.
+        make_posting(created_at=PT_NOON, title="Zebra Role", posted_at=date(2026, 9, 20))
+        make_posting(created_at=PT_NOON + timedelta(minutes=1), title="Beta Role", posted_at=date(2026, 9, 25))
+        make_posting(created_at=PT_NOON + timedelta(minutes=2), title="Alpha Role", posted_at=date(2026, 9, 25))
+        make_posting(created_at=PT_NOON + timedelta(minutes=3), title="No Date Role", posted_at=None)
+
+        jobs = sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26))
+
+        assert [j.title for j in jobs] == ["Alpha Role", "Beta Role", "Zebra Role", "No Date Role"]
+
 
 class TestManifestShape:
     def test_current_nested_shape_is_recognized(self):
@@ -214,7 +228,7 @@ class TestRendering:
                 title="Senior Backend Engineer",
                 company_name="Acme & Co",
                 location="Austin, TX",
-                posted_at_local=PT_NOON,
+                scanned_at_local=PT_NOON,
             )
         ]
         manifest = sp.add_to_manifest({}, "us", JobSector.ENGINEERING_TECH, date(2026, 9, 26), 1)
@@ -245,7 +259,7 @@ class TestRendering:
                 title="Senior Backend Engineer",
                 company_name="Acme Corp",
                 location="Austin, TX",
-                posted_at_local=PT_NOON,
+                scanned_at_local=PT_NOON,
                 salary_min=120_000,
                 salary_max=150_000,
             )
@@ -274,22 +288,22 @@ class TestRendering:
         }
 
     def test_job_row_salary_display_variants(self):
-        no_salary = sp.JobRow(url_id="x", title="t", company_name=None, location=None, posted_at_local=PT_NOON)
+        no_salary = sp.JobRow(url_id="x", title="t", company_name=None, location=None, scanned_at_local=PT_NOON)
         assert no_salary.salary_display is None
 
         range_usd = sp.JobRow(
-            url_id="x", title="t", company_name=None, location=None, posted_at_local=PT_NOON,
+            url_id="x", title="t", company_name=None, location=None, scanned_at_local=PT_NOON,
             salary_min=90_000, salary_max=110_000,
         )
         assert range_usd.salary_display == "$90,000 – $110,000"
 
         single_value = sp.JobRow(
-            url_id="x", title="t", company_name=None, location=None, posted_at_local=PT_NOON, salary_max=75_000
+            url_id="x", title="t", company_name=None, location=None, scanned_at_local=PT_NOON, salary_max=75_000
         )
         assert single_value.salary_display == "$75,000"
 
         other_currency = sp.JobRow(
-            url_id="x", title="t", company_name=None, location=None, posted_at_local=PT_NOON,
+            url_id="x", title="t", company_name=None, location=None, scanned_at_local=PT_NOON,
             salary_min=50_000, salary_max=60_000, salary_currency="EUR",
         )
         assert other_currency.salary_display == "50,000 EUR – 60,000 EUR"

@@ -96,7 +96,8 @@ class JobRow:
     title: str
     company_name: str | None
     location: str | None
-    posted_at_local: datetime
+    scanned_at_local: datetime  # when we found it — NOT when the employer posted it
+    posted_at: date | None = None  # the employer's own stated posting date, if known
     salary_min: int | None = None
     salary_max: int | None = None
     salary_currency: str | None = None
@@ -122,10 +123,17 @@ class JobRow:
 def jobs_for_sector_day(db: Session, country_iso2: str, sector: JobSector, local_day: date) -> list[JobRow]:
     """Every canonical, successfully-scanned, unflagged `country_iso2` posting
     in `sector` whose JobPostingUrl.created_at falls in `local_day`
-    (DAY_BOUNDARY_TZ), newest first. Same base filter as
-    build_job_search_statement (app.services.jobs) plus the country match — a
-    job appears here iff it would also show up in a normal /jobs search for
-    this sector, nothing looser."""
+    (DAY_BOUNDARY_TZ). Same base filter as build_job_search_statement
+    (app.services.jobs) plus the country match — a job appears here iff it
+    would also show up in a normal /jobs search for this sector, nothing
+    looser.
+
+    Ordered by the employer's own posted_at (newest first) when known, since
+    that's what a reader actually means by "posting date" — created_at
+    (when *we* found it) is not a substitute. posted_at has no time
+    component (just a date), so ties — including every row with no
+    posted_at at all — break on title, alphabetically.
+    """
     start_utc, end_utc = day_bounds_utc(local_day)
     stmt = (
         select(JobPostingUrl, JobPosting)
@@ -140,7 +148,7 @@ def jobs_for_sector_day(db: Session, country_iso2: str, sector: JobSector, local
             JobPostingUrl.created_at >= start_utc,
             JobPostingUrl.created_at < end_utc,
         )
-        .order_by(JobPostingUrl.created_at.desc())
+        .order_by(JobPosting.posted_at.desc().nulls_last(), JobPosting.title.asc())
     )
     rows = db.execute(stmt).all()
     return [
@@ -149,7 +157,8 @@ def jobs_for_sector_day(db: Session, country_iso2: str, sector: JobSector, local
             title=posting.title,
             company_name=posting.company_name,
             location=posting.location,
-            posted_at_local=url_row.created_at.astimezone(DAY_BOUNDARY_TZ),
+            scanned_at_local=url_row.created_at.astimezone(DAY_BOUNDARY_TZ),
+            posted_at=posting.posted_at,
             salary_min=posting.salary_min,
             salary_max=posting.salary_max,
             salary_currency=posting.salary_currency,
@@ -212,7 +221,7 @@ def _build_job_ld_json(jobs: list[JobRow], day_str: str) -> str:
             "title": job.title,
             "hiringOrganization": {"@type": "Organization", "name": job.company_name or ""},
             "jobLocation": {"@type": "Place", "address": job.location or ""},
-            "datePosted": day_str,
+            "datePosted": job.posted_at.isoformat() if job.posted_at else day_str,
             "url": f"{settings.seo_pages_base_url}/jobs/{job.url_id}",
         }
         if job.salary_min is not None or job.salary_max is not None:

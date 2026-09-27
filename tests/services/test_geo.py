@@ -460,8 +460,22 @@ def test_resolve_country(entry, country):
 
 def test_resolve_country_for_locations_takes_the_first_entry_that_resolves():
     assert geo.resolve_country_for_locations(["Remote", "Austin, TX"]) == "US"
-    assert geo.resolve_country_for_locations(["Toronto, Canada", "Austin, TX"]) == "CA"
     assert geo.resolve_country_for_locations(["Remote", "EMEA"]) is None
+    assert geo.resolve_country_for_locations([]) is None
+
+
+def test_resolve_country_for_locations_prefers_us_regardless_of_position():
+    # A posting genuinely open to US applicants belongs on the US pages
+    # even when its US office isn't listed first — verified live against a
+    # real Lam Research posting with 9 worldwide offices, one of them US.
+    assert geo.resolve_country_for_locations(["Toronto, Canada", "Austin, TX"]) == "US"
+    assert geo.resolve_country_for_locations(
+        ["Kulim, Kedah,MY, MY", "Tainan, Tainan City,TW, TW", "Hillsboro, OR,US, US", "Shanghai, Shanghai,CN, CN"]
+    ) == "US"
+
+
+def test_resolve_country_for_locations_falls_back_to_first_non_us_match():
+    assert geo.resolve_country_for_locations(["Toronto, Canada", "London, United Kingdom"]) == "CA"
     assert geo.resolve_country_for_locations([]) is None
 
 

@@ -40,7 +40,7 @@
           {{ job.company_name or "Unknown company" }}
           {% if job.location %} &middot; {{ job.location }}{% endif %}
           {% if job.salary_display %} &middot; {{ job.salary_display }}{% endif %}
-          &middot; Posted {{ job.posted_at_local.strftime('%-I:%M %p') }}
+          {% if job.posted_at %} &middot; Posted {{ job.posted_at.strftime('%b %-d, %Y') }}{% endif %}
         </div>
       </li>
     {% endfor %}

@@ -700,14 +700,24 @@ def resolve_country(entry: str) -> str | None:
 
 
 def resolve_country_for_locations(entries: list[str]) -> str | None:
-    """A posting's country: whichever of its location entries is the first to
-    resolve to one (order-preserving — the primary/first-listed location
-    decides), or None if none of them say."""
+    """A posting's country. "US" wins if *any* entry resolves to it,
+    regardless of position — a posting listing nine offices worldwide plus
+    one in Hillsboro, OR is genuinely open to US applicants and belongs on
+    the US pages just as much as a US-only posting does (verified live: a
+    Lam Research posting exactly like this — order-preserving "first entry
+    wins" had excluded it purely because its US office happened to be listed
+    fourth, behind three unrelated APAC ones). Otherwise, whichever entry is
+    the first to resolve to any other country (order-preserving — the
+    primary/first-listed location decides, useful if a non-US country ever
+    gets its own pages), or None if none of them say."""
+    first_other: str | None = None
     for entry in entries:
         code = resolve_country(entry)
-        if code is not None:
-            return code
-    return None
+        if code == "US":
+            return "US"
+        if code is not None and first_other is None:
+            first_other = code
+    return first_other
 
 
 # ------------------------------------------------------------- radius search
