@@ -318,9 +318,33 @@ def upload_html(key: str, html_content: str) -> None:
 def read_manifest() -> dict:
     try:
         response = _get_s3_client().get_object(Bucket=settings.seo_pages_bucket, Key=MANIFEST_KEY)
-        return json.loads(response["Body"].read())
+        manifest = json.loads(response["Body"].read())
     except _get_s3_client().exceptions.NoSuchKey:
         return {}
+    if not _is_current_manifest_shape(manifest):
+        # Pre-country-segment manifests are flat {sector_slug: {date: count}} —
+        # one level shallower than today's {country_slug: {sector_slug: {date:
+        # count}}}. Rather than migrate it (and rather than requiring a manual
+        # delete of the old S3 object before this code can run), just treat it
+        # as absent: the next run starts a fresh manifest/sitemap under the new
+        # shape, and the old country-less pages it referenced are already the
+        # ones deliberately left to go stale, unlinked from anywhere new.
+        logger.warning("Manifest at %s isn't in the current country-nested shape; starting fresh.", MANIFEST_KEY)
+        return {}
+    return manifest
+
+
+def _is_current_manifest_shape(manifest: dict) -> bool:
+    """True for {country_slug: {sector_slug: {date: count}}}, checked just
+    deep enough to tell it apart from the older flat {sector_slug: {date:
+    count}} shape (whose second level holds ints, not dicts)."""
+    for sectors in manifest.values():
+        if not isinstance(sectors, dict):
+            return False
+        for days in sectors.values():
+            if not isinstance(days, dict):
+                return False
+    return True
 
 
 def write_manifest(manifest: dict) -> None:

@@ -8,6 +8,7 @@ hitting the network.
 """
 
 import itertools
+import json
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
@@ -154,6 +155,30 @@ class TestJobsForSectorDay:
         make_posting(created_at=PT_NOON - timedelta(days=1))
         make_posting(created_at=PT_NOON + timedelta(days=1))
         assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
+
+
+class TestManifestShape:
+    def test_current_nested_shape_is_recognized(self):
+        assert sp._is_current_manifest_shape({"us": {"engineering-tech": {"2026-09-26": 5}}}) is True
+        assert sp._is_current_manifest_shape({}) is True
+
+    def test_old_flat_shape_is_rejected(self):
+        # Pre-country-segment manifests: {sector_slug: {date: count}} — one
+        # level shallower, second-level values are ints, not dicts.
+        assert sp._is_current_manifest_shape({"engineering-tech": {"2026-09-26": 5}}) is False
+
+    def test_read_manifest_discards_an_old_shape_manifest(self, monkeypatch):
+        class _FakeS3:
+            class exceptions:
+                class NoSuchKey(Exception):
+                    pass
+
+            def get_object(self, *, Bucket, Key):
+                body = json.dumps({"engineering-tech": {"2026-09-26": 5}}).encode("utf-8")
+                return {"Body": type("B", (), {"read": lambda self: body})()}
+
+        monkeypatch.setattr(sp, "_get_s3_client", lambda: _FakeS3())
+        assert sp.read_manifest() == {}
 
 
 class TestManifestAndSitemap:
