@@ -446,6 +446,12 @@ def test_resolve_places_gives_coordinates_only_for_entries_that_name_a_city():
         ("Remote", None),  # nothing left to say a country at all
         ("EMEA", None),  # a region, not a country
         ("123 Some Unresolvable Facility Name", None),
+        # Doubled iso2 code instead of a name — verified live, a real Lam
+        # Research posting's non-US offices all use this shape.
+        ("Kulim, Kedah,MY, MY", "MY"),
+        ("Hillsboro, OR,US, US", "US"),  # resolves via the real US city, not the code fallback
+        ("Some Place, ZZ, ZZ", None),  # doubled token that isn't a real iso2 code at all
+        ("Some Place, MY", None),  # a single (non-doubled) code is too ambiguous to trust alone
     ],
 )
 def test_resolve_country(entry, country):

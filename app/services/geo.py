@@ -252,11 +252,17 @@ class _Geo:
         # from the same file/loop as foreign_countries, just also keeping the
         # code each name maps to instead of throwing it away.
         self.country_iso2_by_name: dict[str, str] = {}
+        # Valid iso2 codes, for resolve_country's duplicated-code fallback
+        # below — not used to match a bare code on its own (too ambiguous:
+        # "CA" is California or Canada, "IN" Indiana or India), only a
+        # repeated one.
+        self.valid_iso2_codes: set[str] = set()
         with (_DATA_DIR / "world_countries.tsv").open(encoding="utf-8") as handle:
             for row in csv.DictReader(handle, delimiter="\t"):
                 name = _normalize(row["name"])
                 self.foreign_countries.add(name)
                 self.country_iso2_by_name[name] = row["iso2"]
+                self.valid_iso2_codes.add(row["iso2"].upper())
         self.foreign_countries |= _CANADIAN_REGIONS
         self.foreign_countries -= set(self.state_by_name)
 
@@ -679,6 +685,17 @@ def resolve_country(entry: str) -> str | None:
         code = geo.country_iso2_by_name.get(normalized)
         if code:
             return code
+    # Some ATS location fields spell a non-US country as a doubled iso2 code
+    # instead of a name ("Kulim, Kedah,MY, MY" — verified live, a Lam
+    # Research posting whose non-US offices all use this shape) rather than
+    # "Kulim, Kedah, Malaysia". Only trusted when the code repeats — a lone
+    # "CA" or "IN" is too ambiguous (California/Canada, Indiana/India) on its
+    # own, but the same 2-letter token appearing twice in a row essentially
+    # never happens by coincidence.
+    stripped = [p.strip().upper() for p in parts if p.strip()]
+    if len(stripped) >= 2 and stripped[-1] == stripped[-2] and len(stripped[-1]) == 2:
+        if stripped[-1] in geo.valid_iso2_codes:
+            return stripped[-1]
     return None
 
 
