@@ -55,6 +55,18 @@ class CrawlSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(20), default=CrawlSourceStatus.ACTIVE, nullable=False)
     last_crawled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
+    # Set by crawl_dispatcher.py right before publishing this source's
+    # wake-up, cleared by crawl_worker.py once that crawl finishes (success
+    # or a handled failure) — so a source with an outstanding, not-yet-
+    # processed wake-up is skipped on the next dispatch cycle instead of
+    # getting a duplicate published on top of it. A claim older than
+    # settings.crawl_claim_ttl_seconds is treated as abandoned (a dead
+    # worker, a lost message) and the source becomes dispatchable again —
+    # same reasoning as JobPostingUrl.scan_claimed_at (see
+    # app.services.scan_claims), just one level up: this stops the
+    # *dispatch* messages themselves from piling up, not the scans within
+    # one already-dispatched crawl.
+    crawl_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Politeness cap: how many of this source's job pages may be fetched at
     # the same time (see app.services.scan_claims). Lower it for a site that
     # is sensitive to load, raise it (max 5) for one that can take more.

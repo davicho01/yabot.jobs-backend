@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     scan_lane_deadline_seconds: float = 240.0
     scan_claim_ttl_seconds: float = 600.0
 
+    # How long a CrawlSource.crawl_claimed_at claim (see that column's own
+    # comment, and crawl_dispatcher.py/crawl_worker.py) is honored before a
+    # source becomes dispatchable again regardless — keep it above
+    # crawl-worker's 540s timeout so a crawl that's still genuinely running
+    # is never mistaken for one whose message/worker was lost.
+    crawl_claim_ttl_seconds: float = 600.0
+
     # Retry backoff for a FAILED scan (see app.services.jobs.wake_retryable_failed_scans
     # and retry_failed_scans.py, its hourly-cron entrypoint). Each consecutive failure
     # multiplies the previous wait, capped at scan_retry_max_seconds: base * multiplier

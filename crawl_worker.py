@@ -67,6 +67,7 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
         logger.warning("Failed to list jobs for %s: %s", source.name, exc)
         source.last_error = str(exc)
         source.last_crawled_at = datetime.now(timezone.utc)
+        source.crawl_claimed_at = None  # done with this attempt; dispatchable again next cycle
         return
 
     # Read up front: the rollback in the failure path below expires every
@@ -93,6 +94,7 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
         return
     source.last_crawled_at = datetime.now(timezone.utc)
     source.last_error = f"{failed} of {len(urls)} discovered URL(s) failed to process." if failed else None
+    source.crawl_claimed_at = None  # done; dispatchable again next cycle
     update_coverage(source, len(urls))
     db.commit()  # stats persisted before waking lanes (has_unclaimed_pending ends its transaction)
     logger.info("Crawled %s: %d job URL(s) discovered (%d failed).", source_name, len(urls), failed)

@@ -1,5 +1,7 @@
 """crawl_worker no longer publishes one scan message per discovered URL."""
 
+from datetime import datetime, timezone
+
 import crawl_worker
 from app.models import JobPostingUrl
 from app.models.enums import ScanStatus
@@ -87,3 +89,33 @@ def test_crawl_records_discovered_url_count_for_coverage_monitoring(monkeypatch,
     assert refreshed.coverage_last_count == 7
     assert refreshed.coverage_baseline == 7  # first-ever sample, running mean == the value itself
     assert refreshed.coverage_sample_count == 1
+
+
+def test_crawl_clears_the_dispatch_claim_on_success(monkeypatch, scan_db, make_source):
+    # So crawl_dispatcher.py can dispatch this source again next cycle
+    # instead of skipping it forever — see CrawlSource.crawl_claimed_at.
+    source = make_source()
+    source.crawl_claimed_at = datetime.now(timezone.utc)
+    scan_db.commit()
+
+    _run_crawl(monkeypatch, scan_db, source, ["https://example.com/jobs/1"])
+
+    scan_db.expire_all()
+    assert scan_db.get(type(source), source.id).crawl_claimed_at is None
+
+
+def test_crawl_clears_the_dispatch_claim_even_when_listing_jobs_fails(monkeypatch, scan_db, make_source):
+    source = make_source()
+    source.crawl_claimed_at = datetime.now(timezone.utc)
+    scan_db.commit()
+
+    def broken(ats_type, board_url):
+        raise RuntimeError("ATS API down")
+
+    monkeypatch.setattr(crawl_worker, "list_job_urls", broken)
+
+    crawl_worker._crawl_source(scan_db, source.id)  # must not raise
+    scan_db.commit()
+
+    scan_db.expire_all()
+    assert scan_db.get(type(source), source.id).crawl_claimed_at is None

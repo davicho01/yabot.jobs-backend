@@ -260,6 +260,14 @@ gcloud run services update worker \
   --region="$REGION" \
   --add-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION"
 
+# max-instances=20 (was 8 until 2026-09-27): the earlier cap was set back
+# when Cloud SQL was db-f1-micro and 20 broke the API on connection
+# exhaustion. The instance has since been upgraded (db-custom-1-3840,
+# max_connections=100, ~12 in use at the time of this change) — plenty of
+# headroom, and still well below `worker`'s own max-instances=60 above.
+# crawl_dispatcher.py's claim-before-publish (see CrawlSource.crawl_claimed_at)
+# is the actual fix for the backlog this was masking; this bump just lets
+# crawl-worker drain the existing backlog faster.
 gcloud functions deploy crawl-worker \
   --gen2 \
   --region="$REGION" \
@@ -272,7 +280,7 @@ gcloud functions deploy crawl-worker \
   --set-secrets="$COMMON_SECRETS" \
   --memory=512Mi \
   --timeout=540s \
-  --max-instances=8
+  --max-instances=20
 
 gcloud run services update crawl-worker \
   --region="$REGION" \
