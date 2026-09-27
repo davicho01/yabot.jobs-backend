@@ -176,20 +176,20 @@ class TestJobsForSectorDay:
         make_posting(created_at=PT_NOON, posted_at=date(2026, 9, 25))
         assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
 
-    def test_ordered_by_posted_at_then_title_not_by_when_we_found_it(self, db, make_posting):
-        # Found in reverse of alphabetical order, on purpose — the tiebreak
-        # must come from title, not created_at. All share the same posted_at
-        # (2026-09-26) so posted_at itself doesn't distinguish them; the
-        # null-posted_at one falls back to created_at for inclusion and
-        # sorts last (nulls_last).
+    def test_ordered_by_scan_time_so_newly_found_jobs_land_at_the_top(self, db, make_posting):
+        # Deliberately not alphabetical/posted_at order: this page
+        # regenerates every 30 minutes as more of the day's jobs are found,
+        # so ordering by scan time keeps each run's new arrivals landing
+        # predictably at the top instead of the whole list re-shuffling.
+        # Mixed posted_at (some known, one not) to confirm the sort ignores
+        # it entirely once the day-bucketing filter has already applied.
         make_posting(created_at=PT_NOON, title="Zebra Role", posted_at=date(2026, 9, 26))
-        make_posting(created_at=PT_NOON + timedelta(minutes=1), title="Beta Role", posted_at=date(2026, 9, 26))
-        make_posting(created_at=PT_NOON + timedelta(minutes=2), title="Alpha Role", posted_at=date(2026, 9, 26))
-        make_posting(created_at=PT_NOON + timedelta(minutes=3), title="No Date Role", posted_at=None)
+        make_posting(created_at=PT_NOON + timedelta(minutes=1), title="Alpha Role", posted_at=None)
+        make_posting(created_at=PT_NOON + timedelta(minutes=2), title="Middle Role", posted_at=date(2026, 9, 26))
 
         jobs = sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26))
 
-        assert [j.title for j in jobs] == ["Alpha Role", "Beta Role", "Zebra Role", "No Date Role"]
+        assert [j.title for j in jobs] == ["Middle Role", "Alpha Role", "Zebra Role"]
 
 
 class TestManifestShape:

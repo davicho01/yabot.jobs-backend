@@ -137,11 +137,12 @@ def jobs_for_sector_day(db: Session, country_iso2: str, sector: JobSector, local
     a job appears here iff it would also show up in a normal /jobs search
     for this sector, nothing looser.
 
-    Ordered by the employer's own posted_at (newest first) when known, since
-    that's what a reader actually means by "posting date" — created_at
-    (when *we* found it) is not a substitute. posted_at has no time
-    component (just a date), so ties — including every row with no
-    posted_at at all — break on title, alphabetically.
+    Ordered by JobPostingUrl.created_at (newest scan first) — not by
+    posted_at, deliberately: this page regenerates every 30 minutes as more
+    of the day's postings get discovered, and ordering by scan order keeps
+    each run's newly-found jobs landing at the top rather than the whole
+    list re-shuffling alphabetically (or by posted_at, which many postings
+    share) on every regeneration.
     """
     start_utc, end_utc = day_bounds_utc(local_day)
     stmt = (
@@ -163,7 +164,7 @@ def jobs_for_sector_day(db: Session, country_iso2: str, sector: JobSector, local
                 ),
             ),
         )
-        .order_by(JobPosting.posted_at.desc().nulls_last(), JobPosting.title.asc())
+        .order_by(JobPostingUrl.created_at.desc())
     )
     rows = db.execute(stmt).all()
     return [
