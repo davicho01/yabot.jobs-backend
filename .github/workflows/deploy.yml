@@ -391,6 +391,13 @@ jobs:
       # that module's own docstring on why). GCP_PROJECT_ID alone, not the
       # full COMMON_ENV the database-touching functions use — browser_scaler.py
       # never touches the database or an LLM.
+      #
+      # --max-instances=1: a single Cloud Scheduler job (browser-scaler-tick)
+      # is the only trigger, firing once every 2 minutes — this function
+      # should never have more than one execution in flight, and the
+      # gen2 default of 100 offered no benefit, only the (unlikely but
+      # pointless) risk of two concurrent ticks racing on the same
+      # min-instances decision.
       - name: Deploy browser-scaler
         run: |
           gcloud functions deploy browser-scaler \
@@ -404,4 +411,5 @@ jobs:
             --trigger-http \
             --no-allow-unauthenticated \
             --set-env-vars="GCP_PROJECT_ID=${PROJECT_ID}" \
+            --max-instances=1 \
             --update-labels=function=browser-scaler

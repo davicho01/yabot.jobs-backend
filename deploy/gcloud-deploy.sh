@@ -367,6 +367,11 @@ gcloud scheduler jobs create http crawl-dispatch-hourly \
 #     the database or an LLM, only GCP_PROJECT_ID from COMMON_ENV (see
 #     app.services.gcp_admin's own docstring on why it reads that straight
 #     from the environment instead of importing the full Settings object).
+#
+#     --max-instances=1: browser-scaler-tick is the only trigger, firing
+#     once every 2 minutes — never more than one execution in flight, and
+#     the gen2 default of 100 offered no benefit, only the risk of two
+#     concurrent ticks racing on the same min-instances decision.
 # ---------------------------------------------------------------------------
 
 gcloud functions deploy browser-scaler \
@@ -380,7 +385,8 @@ gcloud functions deploy browser-scaler \
   --no-allow-unauthenticated \
   --set-env-vars="$COMMON_ENV" \
   --memory=256Mi \
-  --timeout=60s
+  --timeout=60s \
+  --max-instances=1
 
 BROWSER_SCALER_FUNCTION_URL="$(gcloud functions describe browser-scaler --gen2 --region="$REGION" --format='value(serviceConfig.uri)')"
 
