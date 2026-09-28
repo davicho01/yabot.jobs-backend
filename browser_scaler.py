@@ -34,12 +34,14 @@ logger = logging.getLogger("app.browser_scaler")
 _BROWSER_SERVICE = "yabot-jobs-browser"
 _SCALER_SCHEDULER_JOB = "browser-scaler-tick"
 
-# Measured live 2026-09-28: 399 of 2,807 active sources (14.2%) use an ATS
-# type that unconditionally needs a browser render. The true figure runs
-# higher because of reactive fallback usage on every other ATS type — start
-# here and tune up against observed 429 rates after this ships, not a
-# derived constant.
-_BROWSER_DEMAND_RATIO = 0.15
+# Started at 0.15 (399 of 2,807 active sources, 14.2%, use an ATS type
+# that unconditionally needs a browser render). Tuned down to 0.10 after
+# the first live runs: observed cost per cycle (~$2.50, mostly
+# yabot-jobs-browser's own warm-instance time) was worth trimming, and the
+# 429 rate has headroom to absorb a lower floor before it'd matter — still
+# not a derived constant, re-tune either direction against real 429/cost
+# numbers as they come in.
+_BROWSER_DEMAND_RATIO = 0.10
 
 # Cost safety rail, not the real ceiling: yabot-jobs-browser's own
 # max-instances=100 still autoscales reactively on top of whatever floor

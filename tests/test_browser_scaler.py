@@ -19,19 +19,18 @@ def _patch(monkeypatch, *, crawl_worker: int, worker: int):
 
 
 def test_scales_up_proportionally_to_combined_instance_count(monkeypatch):
-    # (20 crawl-worker + 60 worker) * 0.15 = 12
+    # (20 crawl-worker + 60 worker) * 0.10 = 8
     set_calls, pause_calls = _patch(monkeypatch, crawl_worker=20, worker=60)
 
     browser_scaler.main()
 
-    assert set_calls == [("yabot-jobs-browser", 12)]
+    assert set_calls == [("yabot-jobs-browser", 8)]
     assert pause_calls == []
 
 
 def test_clamps_to_the_min_instances_cap_under_a_big_burst(monkeypatch):
-    # (24 + 97) * 0.15 = 18.15 -> 18, comfortably under the cap; push higher
-    # to actually exercise the clamp.
-    set_calls, _ = _patch(monkeypatch, crawl_worker=100, worker=200)
+    # (200 + 300) * 0.10 = 50, well past the cap.
+    set_calls, _ = _patch(monkeypatch, crawl_worker=200, worker=300)
 
     browser_scaler.main()
 
