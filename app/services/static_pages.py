@@ -278,6 +278,20 @@ def render_sector_index(*, country_slug: str, sector: JobSector, dates_with_coun
     )
 
 
+def render_country_index(*, country_slug: str, sector_totals: list[tuple[str, str, int]]) -> str:
+    """`sector_totals`: [(sector_slug, sector_name, total_job_count), ...],
+    already ordered how they should list (see sector_totals() below) — this
+    just renders, it doesn't re-sort."""
+    country_name = COUNTRY_NAMES[country_slug]
+    template = _TEMPLATE_ENV.get_template("country_index.html.jinja")
+    return template.render(
+        country_slug=country_slug,
+        country_name=country_name,
+        sector_totals=sector_totals,
+        base_url=settings.seo_pages_base_url,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Manifest / sitemap
 # ---------------------------------------------------------------------------
@@ -298,18 +312,49 @@ def add_to_manifest(manifest: dict, country_slug: str, sector: JobSector, local_
     return updated
 
 
+def sector_totals(manifest: dict, country_slug: str) -> list[tuple[str, str, int]]:
+    """[(sector_slug, sector_name, total_job_count), ...] summed across every
+    day ever recorded for country_slug, sorted alphabetically by sector name
+    (a navigation page, not a ranking — alphabetical is what's actually easy
+    to scan for "find my sector"), skipping any sector with zero jobs (its
+    own sector_index page doesn't exist either in that case — see
+    generate_for_date — so there'd be nothing to link to)."""
+    days_by_sector = manifest.get(country_slug, {})
+    totals = []
+    for sector, slug, name in _SECTOR_INFO:
+        total = sum(days_by_sector.get(slug, {}).values())
+        if total:
+            totals.append((slug, name, total))
+    return sorted(totals, key=lambda entry: entry[1])
+
+
 def build_sitemap_xml(manifest: dict) -> str:
+    # Index pages (no date) are re-rendered from the whole manifest on every
+    # generate_for_date run — several times a day per gcloud-deploy.sh's
+    # "0 10-22/6 * * *" schedule — so they're genuinely daily-changing. Day
+    # pages only get re-touched while local_day == today (add_to_manifest's
+    # docstring: "only today's entry actually changes between runs"); once
+    # that date is in the past nothing regenerates it, so it's frozen.
+    today_str = datetime.now(DAY_BOUNDARY_TZ).date().isoformat()
     base = settings.seo_pages_base_url
-    urls = []
+    entries = []
     for country_slug, sectors in sorted(manifest.items()):
+        entries.append(f"  <url><loc>{base}/jobs/{country_slug}</loc><changefreq>daily</changefreq></url>")
         for sector_slug, days in sorted(sectors.items()):
-            urls.append(f"{base}/jobs/{country_slug}/{sector_slug}")
-            urls.extend(f"{base}/jobs/{country_slug}/{sector_slug}/{day}" for day in sorted(days))
-    entries = "\n".join(f"  <url><loc>{url}</loc></url>" for url in urls)
+            entries.append(
+                f"  <url><loc>{base}/jobs/{country_slug}/{sector_slug}</loc>"
+                "<changefreq>daily</changefreq></url>"
+            )
+            entries.extend(
+                f"  <url><loc>{base}/jobs/{country_slug}/{sector_slug}/{day}</loc>"
+                f"<changefreq>{'daily' if day == today_str else 'never'}</changefreq></url>"
+                for day in sorted(days)
+            )
+    body = "\n".join(entries)
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-        f"{entries}\n"
+        f"{body}\n"
         "</urlset>\n"
     )
 
@@ -393,7 +438,8 @@ class GenerationResult:
 def generate_for_date(db: Session, target_date: date, *, dry_run: bool = False) -> GenerationResult:
     """The whole run: for every country x sector with at least one job on
     `target_date` (DAY_BOUNDARY_TZ), write/overwrite that day's page, refresh
-    the sector's index page, update the manifest, and rebuild
+    the sector's index page, update the manifest, refresh each country's
+    sector-navigation hub page (jobs/{country}), and rebuild
     sitemap-jobs.xml — then invalidate exactly the CloudFront paths touched.
     A combo with zero jobs today is skipped entirely (no page, no manifest
     entry) rather than publishing a thin/empty page.
@@ -435,6 +481,13 @@ def generate_for_date(db: Session, target_date: date, *, dry_run: bool = False) 
 
     if not dry_run and job_counts:
         write_manifest(manifest)
+        for country_slug, _, _ in _COUNTRIES:
+            country_html = render_country_index(
+                country_slug=country_slug, sector_totals=sector_totals(manifest, country_slug)
+            )
+            country_key = f"jobs/{country_slug}"
+            upload_html(country_key, country_html)
+            touched_paths.append(f"/{country_key}")
         _get_s3_client().put_object(
             Bucket=settings.seo_pages_bucket,
             Key=SITEMAP_KEY,

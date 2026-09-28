@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jobs in {{ country_name }}, by Sector | Yabot Jobs</title>
+  <meta name="description" content="Browse jobs in {{ country_name }} on Yabot Jobs, by sector — Engineering, Sales, Healthcare, and more. Free to search and apply." />
+  <link rel="canonical" href="{{ base_url }}/jobs/{{ country_slug }}" />
+  <meta name="robots" content="index, follow" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Yabot Jobs" />
+  <meta property="og:title" content="Jobs in {{ country_name }}, by Sector" />
+  <meta property="og:description" content="Browse jobs in {{ country_name }} on Yabot Jobs, by sector." />
+  <meta property="og:url" content="{{ base_url }}/jobs/{{ country_slug }}" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
+  {% include "_base_style.html.jinja" %}
+</head>
+<body>
+  {% include "_header.html.jinja" %}
+  <main id="main">
+  <div class="wrap">
+    <nav class="breadcrumb">
+      <a href="{{ base_url }}/">Home</a> &rsaquo;
+      <a href="{{ base_url }}/jobs">Jobs</a> &rsaquo;
+      {{ country_name }}
+    </nav>
+    <h1>Jobs in {{ country_name }}, by Sector</h1>
+
+    <ul class="date-list">
+      {% for slug, sector_name, count in sector_totals %}
+      <li>
+        <a href="{{ base_url }}/jobs/{{ country_slug }}/{{ slug }}">{{ sector_name }}</a>
+        &mdash; <span class="count">{{ "{:,}".format(count) }} job{{ '' if count == 1 else 's' }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  </main>
+</body>
+</html>

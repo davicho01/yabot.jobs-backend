@@ -240,6 +240,22 @@ class TestManifestAndSitemap:
         assert "<loc>https://yabot.jobs/jobs/us/engineering-tech/2026-09-26</loc>" in xml
         assert "<loc>https://yabot.jobs/jobs/us/engineering-tech/2026-09-25</loc>" in xml
 
+    def test_build_sitemap_xml_marks_index_daily_today_daily_and_past_day_never(self):
+        today_str = datetime.now(sp.DAY_BOUNDARY_TZ).date().isoformat()
+        manifest = {"us": {"engineering-tech": {today_str: 3, "2020-01-01": 1}}}
+        xml = sp.build_sitemap_xml(manifest)
+        assert (
+            "<loc>https://yabot.jobs/jobs/us/engineering-tech</loc><changefreq>daily</changefreq>" in xml
+        )
+        assert (
+            f"<loc>https://yabot.jobs/jobs/us/engineering-tech/{today_str}</loc>"
+            "<changefreq>daily</changefreq>" in xml
+        )
+        assert (
+            "<loc>https://yabot.jobs/jobs/us/engineering-tech/2020-01-01</loc>"
+            "<changefreq>never</changefreq>" in xml
+        )
+
 
 class TestRendering:
     def test_day_page_contains_job_link_and_valid_json_ld(self):
@@ -341,6 +357,43 @@ class TestRendering:
         assert "/jobs/us/engineering-tech" in html
 
 
+class TestSectorTotals:
+    def test_sums_across_days_and_sorts_alphabetically(self):
+        manifest = {
+            "us": {
+                "sales": {"2026-09-25": 3, "2026-09-26": 2},
+                "engineering-tech": {"2026-09-26": 5},
+            }
+        }
+        assert sp.sector_totals(manifest, "us") == [
+            ("engineering-tech", "Engineering & Technology", 5),
+            ("sales", "Sales", 5),
+        ]
+
+    def test_skips_sectors_with_zero_jobs(self):
+        manifest = {"us": {"sales": {"2026-09-26": 1}}}
+        totals = sp.sector_totals(manifest, "us")
+        assert all(slug == "sales" for slug, _, _ in totals)
+
+    def test_empty_manifest_returns_empty_list(self):
+        assert sp.sector_totals({}, "us") == []
+
+
+class TestRenderCountryIndex:
+    def test_lists_each_sector_with_count_and_link(self):
+        html = sp.render_country_index(
+            country_slug="us",
+            sector_totals=[("engineering-tech", "Engineering & Technology", 5), ("sales", "Sales", 3)],
+        )
+        assert "Engineering &amp; Technology" in html
+        assert "5 jobs" in html
+        assert "Sales" in html
+        assert "3 jobs" in html
+        assert "/jobs/us/engineering-tech" in html
+        assert "/jobs/us/sales" in html
+        assert "United States" in html
+
+
 class TestGenerateForDate:
     def test_dry_run_returns_counts_without_touching_s3(self, db, make_posting, monkeypatch):
         make_posting(created_at=PT_NOON)
@@ -378,6 +431,8 @@ class TestGenerateForDate:
 
         assert result.job_counts == {"us/engineering-tech": 1}
         assert "jobs/us/engineering-tech/2026-09-26" in uploaded
+        assert "jobs/us" in uploaded
+        assert "/jobs/us/engineering-tech" in uploaded["jobs/us"]
         assert "jobs/us/engineering-tech" in uploaded
         assert uploaded["_manifest"] == {"us": {"engineering-tech": {"2026-09-26": 1}}}
         assert "/sitemap-jobs.xml" in uploaded["_invalidated"]
