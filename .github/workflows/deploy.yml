@@ -132,8 +132,10 @@ jobs:
         run: gcloud run deploy api --image="${{ needs.build.outputs.image_tag }}" --region="$REGION" --project="$PROJECT_ID" --update-labels=function=api
 
   # Cloud Functions redeploy from source, not the container image built
-  # above — each of these six jobs checks out the repo itself and only
+  # above — each of these seven jobs checks out the repo itself and only
   # needs `build` to have finished (migrations done), not its image.
+  # crawl-dispatcher used to be one of these too, but is a Cloud Run Job now
+  # (see its own job below) and deploys from the image like api/migrate.
 
   deploy-worker:
     needs: build
@@ -197,8 +199,6 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
       - id: auth
         uses: google-github-actions/auth@v2
         with:
@@ -209,19 +209,19 @@ jobs:
         with:
           version: latest
 
-      # GOOGLE_FUNCTION_SOURCE is required because this repo's own main.py
-      # is the FastAPI app, not the dispatcher entry point.
+      # crawl-dispatcher is a Cloud Run Job, not a Cloud Function, as of
+      # 2026-09-28 — its dispatch loop over ~2,800+ sources routinely took
+      # longer than Cloud Scheduler's attemptDeadline / a Function's own
+      # request timeout, so it's now started fire-and-forget via the Run
+      # Admin API instead of an HTTP call Scheduler waits on (see
+      # deploy/gcloud-deploy.sh's crawl-dispatcher section for the full
+      # story). Deploys from the already-built image, same as api above and
+      # migrate in the build job — not from source, and only --image/
+      # --labels need repeating here: command/args/timeout/retries/secrets/
+      # env vars/Cloud SQL from that one-time setup carry forward untouched
+      # on every redeploy that doesn't explicitly override them.
       - name: Deploy crawl-dispatcher
-        run: |
-          gcloud functions deploy crawl-dispatcher \
-            --gen2 \
-            --region="$REGION" \
-            --project="$PROJECT_ID" \
-            --runtime=python313 \
-            --source=. \
-            --entry-point=dispatch \
-            --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=crawl_dispatcher.py \
-            --update-labels=function=crawl-dispatcher
+        run: gcloud run jobs deploy crawl-dispatcher --image="${{ needs.build.outputs.image_tag }}" --region="$REGION" --project="$PROJECT_ID" --labels=function=crawl-dispatcher
 
   deploy-saved-search-alerts:
     needs: build
