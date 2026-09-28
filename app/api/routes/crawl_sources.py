@@ -15,7 +15,7 @@ from app.services import admin as admin_service
 from app.services.ats_adapters import detect_ats_source, detect_embedded_ats_source
 from app.services.crawl_queue import enqueue_crawl, ensure_topic
 from app.services.job_queue import enqueue_source_scan
-from app.services.job_queue import ensure_topic_and_subscription as ensure_scan_topic_and_subscription
+from app.services.job_queue import ensure_topic as ensure_scan_topic
 
 router = APIRouter(prefix="/admin/crawl-sources", tags=["admin"], dependencies=[Depends(get_current_admin_user)])
 
@@ -144,7 +144,7 @@ def rescan_crawl_source(source_id: uuid.UUID, db: Session = Depends(get_db)) -> 
 
     # One wake-up per allowed lane, not one message per URL: the source's
     # lanes work through the rows at its max_concurrent_scans pace.
-    ensure_scan_topic_and_subscription()
+    ensure_scan_topic()
     enqueue_source_scan(source_id, lanes=source.max_concurrent_scans)
 
     return {"queued": len(url_rows)}

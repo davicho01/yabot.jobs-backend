@@ -21,7 +21,7 @@ import logging
 
 from app.core.log_config import configure_logging
 from app.db.session import SessionLocal
-from app.services.job_queue import ensure_topic_and_subscription
+from app.services.job_queue import ensure_topic
 from app.services.jobs import wake_retryable_failed_scans, wake_sources_with_pending_scans
 
 configure_logging()
@@ -29,7 +29,7 @@ logger = logging.getLogger("app.retry_failed_scans")
 
 
 def main() -> None:
-    ensure_topic_and_subscription()
+    ensure_topic()
 
     db = SessionLocal()
     try:

@@ -41,25 +41,39 @@ def _subscription_path() -> str:
     return pubsub_v1.SubscriberClient.subscription_path(settings.gcp_project_id, settings.pubsub_subscription_id)
 
 
-def ensure_topic_and_subscription() -> None:
-    """Idempotently create the topic/subscription if they don't exist yet.
-
-    Safe to call every time the worker starts: against the local emulator
-    this means zero manual `gcloud` provisioning; against a real GCP project
-    where they already exist, AlreadyExists is caught and ignored.
+def ensure_topic() -> None:
+    """Idempotently create just the job-scan-requests topic — every prod
+    caller that only ever publishes (the API, retry_failed_scans.py,
+    one_off scripts) needs this, not ensure_topic_and_subscription below:
+    in prod, pubsub_subscription_id has no consumer — Eventarc provisions
+    and manages its own separate subscription for the live worker service,
+    entirely independent of this code — so a plain pull subscription with
+    nothing ever reading from it just accumulates a duplicate copy of every
+    message published, forever (verified live: this had built up an
+    89,000+ message backlog on job-scan-requests-worker before this split
+    existed — same bug, same fix, as crawl_queue.py's own ensure_topic
+    already documents for crawl-source-requests).
     """
-    topic_path = _topic_path()
-    subscription_path = _subscription_path()
-
     try:
-        _get_publisher().create_topic(name=topic_path)
-        logger.info("Created Pub/Sub topic %s", topic_path)
+        _get_publisher().create_topic(name=_topic_path())
+        logger.info("Created Pub/Sub topic %s", _topic_path())
     except AlreadyExists:
         pass
 
+
+def ensure_topic_and_subscription() -> None:
+    """Idempotently create the topic *and* a plain pull subscription —
+    only for worker.py's own local-dev pull loop (main(), run against the
+    Pub/Sub emulator), which actually consumes from that subscription.
+    Every prod caller uses ensure_topic() above instead; see its docstring
+    for why. Safe to call every time: against the local emulator this
+    means zero manual `gcloud` provisioning; against a real GCP project
+    where these already exist, AlreadyExists is caught and ignored.
+    """
+    ensure_topic()
     try:
-        _get_subscriber().create_subscription(name=subscription_path, topic=topic_path)
-        logger.info("Created Pub/Sub subscription %s", subscription_path)
+        _get_subscriber().create_subscription(name=_subscription_path(), topic=_topic_path())
+        logger.info("Created Pub/Sub subscription %s", _subscription_path())
     except AlreadyExists:
         pass
 

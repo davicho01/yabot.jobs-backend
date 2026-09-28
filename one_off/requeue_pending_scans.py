@@ -22,7 +22,7 @@ from sqlalchemy import select
 from app.db.session import SessionLocal
 from app.models.enums import ScanStatus
 from app.models.job_url import JobPostingUrl
-from app.services.job_queue import enqueue_scan, ensure_topic_and_subscription
+from app.services.job_queue import enqueue_scan, ensure_topic
 from app.services.jobs import wake_sources_with_pending_scans
 
 logging.basicConfig(level=logging.INFO)
@@ -30,7 +30,7 @@ logger = logging.getLogger("app.requeue_pending_scans")
 
 
 def main() -> None:
-    ensure_topic_and_subscription()
+    ensure_topic()
 
     db = SessionLocal()
     try:
