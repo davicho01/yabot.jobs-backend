@@ -3,7 +3,8 @@ prod incident where a source with an outstanding, unprocessed wake-up got
 another one piled on top of it every single dispatch cycle, building a
 235,000-message backlog against ~2,800 active sources. Runs against an
 in-memory SQLite engine; enqueue_crawl/wake_sources_with_pending_scans are
-monkeypatched so no real Pub/Sub call happens.
+monkeypatched so no real Pub/Sub call happens, and the yabot-jobs-browser
+warmup calls are monkeypatched so no real GCP API call happens.
 """
 
 import itertools
@@ -32,6 +33,8 @@ def session_factory(monkeypatch):
     monkeypatch.setattr(crawl_dispatcher, "SessionLocal", factory)
     monkeypatch.setattr(crawl_dispatcher, "ensure_topic", lambda: None)
     monkeypatch.setattr(crawl_dispatcher, "wake_sources_with_pending_scans", lambda db: 0)
+    monkeypatch.setattr(crawl_dispatcher, "set_min_instances", lambda service, count: False)
+    monkeypatch.setattr(crawl_dispatcher, "resume_scheduler_job", lambda job: None)
     monkeypatch.setattr(sys, "argv", ["crawl_dispatcher.py"])
     return factory
 
@@ -133,3 +136,34 @@ def test_multiple_unclaimed_sources_all_get_dispatched(session_factory, monkeypa
     crawl_dispatcher.main()
 
     assert set(enqueued) == ids
+
+
+def test_warms_the_browser_and_resumes_the_scaler_tick(session_factory, monkeypatch):
+    warmup_calls = []
+    resume_calls = []
+    monkeypatch.setattr(
+        crawl_dispatcher, "set_min_instances", lambda service, count: warmup_calls.append((service, count))
+    )
+    monkeypatch.setattr(crawl_dispatcher, "resume_scheduler_job", lambda job: resume_calls.append(job))
+
+    crawl_dispatcher.main()
+
+    assert warmup_calls == [("yabot-jobs-browser", 3)]
+    assert resume_calls == ["browser-scaler-tick"]
+
+
+def test_dispatch_still_runs_even_if_the_browser_warmup_fails(session_factory, monkeypatch):
+    # Best-effort: warming up yabot-jobs-browser is not allowed to block the
+    # actual dispatch work.
+    source_id = _make_source(session_factory)
+    enqueued = []
+    monkeypatch.setattr(crawl_dispatcher, "enqueue_crawl", lambda sid: enqueued.append(sid))
+
+    def _boom(service, count):
+        raise RuntimeError("Cloud Run Admin API unavailable")
+
+    monkeypatch.setattr(crawl_dispatcher, "set_min_instances", _boom)
+
+    crawl_dispatcher.main()  # must not raise
+
+    assert enqueued == [source_id]

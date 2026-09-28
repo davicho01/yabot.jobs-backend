@@ -8,8 +8,15 @@
 #                     + Pub/Sub trigger on job-scan-requests
 #   - crawl-worker    Cloud Function 2nd gen (crawl_worker.py:handle_crawl_request)
 #                     + Pub/Sub trigger on crawl-source-requests
-#   - crawl-dispatcher  Cloud Function 2nd gen (crawl_dispatcher.py:dispatch)
-#                       + Cloud Scheduler cron trigger
+#   - crawl-dispatcher  Cloud Run Job (crawl_dispatcher.py)
+#                       + Cloud Scheduler cron trigger (fire-and-forget via
+#                       the Run Admin API — see that section for why)
+#   - browser-scaler    Cloud Function 2nd gen (browser_scaler.py:dispatch)
+#                       + a normally-paused Cloud Scheduler job that
+#                       crawl-dispatcher resumes on each run and this
+#                       function pauses again once crawl-worker/worker go
+#                       quiet — matches yabot-jobs-browser's min-instances
+#                       to real demand instead of a flat guess
 #   - saved-search-alerts  Cloud Function 2nd gen (saved_search_alerts.py:dispatch)
 #                       + Cloud Scheduler cron trigger
 #   - follow-up-reminders  Cloud Function 2nd gen (follow_up_reminders.py:dispatch)
@@ -177,7 +184,8 @@ gcloud run jobs deploy migrate \
   --command=alembic --args=upgrade,head \
   --set-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION" \
   --set-env-vars="$COMMON_ENV" \
-  --set-secrets="$COMMON_SECRETS"
+  --set-secrets="$COMMON_SECRETS" \
+  --labels=function=migrate
 
 gcloud run jobs execute migrate --region="$REGION" --wait
 
@@ -201,7 +209,8 @@ gcloud run jobs deploy backfill-country \
   --set-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION" \
   --set-env-vars="$COMMON_ENV" \
   --set-secrets="$COMMON_SECRETS" \
-  --task-timeout=3600
+  --task-timeout=3600 \
+  --labels=function=backfill-country
 
 # ---------------------------------------------------------------------------
 # 4. api — Cloud Run service
@@ -218,7 +227,8 @@ gcloud run deploy api \
   --set-secrets="$COMMON_SECRETS" \
   --min-instances=0 \
   --max-instances=10 \
-  --allow-unauthenticated
+  --allow-unauthenticated \
+  --update-labels=function=api
 
 # ---------------------------------------------------------------------------
 # 5. worker / crawl-worker — Cloud Functions (2nd gen), Pub/Sub-triggered
@@ -254,7 +264,8 @@ gcloud functions deploy worker \
   --set-secrets="$COMMON_SECRETS" \
   --memory=512Mi \
   --timeout=540s \
-  --max-instances=60
+  --max-instances=60 \
+  --update-labels=function=worker
 
 gcloud run services update worker \
   --region="$REGION" \
@@ -280,77 +291,149 @@ gcloud functions deploy crawl-worker \
   --set-secrets="$COMMON_SECRETS" \
   --memory=512Mi \
   --timeout=540s \
-  --max-instances=20
+  --max-instances=20 \
+  --update-labels=function=crawl-worker
 
 gcloud run services update crawl-worker \
   --region="$REGION" \
   --add-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION"
 
 # ---------------------------------------------------------------------------
-# 6. crawl-dispatcher — Cloud Function (2nd gen), triggered hourly by Scheduler
-#    Deploys from source (this repo), entry point is dispatch() in
-#    crawl_dispatcher.py.
+# 6. crawl-dispatcher — Cloud Run Job, triggered by Scheduler via a
+#    fire-and-forget call to the Run Admin API (NOT an HTTP Cloud Function
+#    Scheduler waits on for a response).
 #
-#    `gcloud functions deploy` has NO --set-cloudsql-instances flag (2nd gen
-#    functions are Cloud Run services under the hood, but the functions CLI
-#    doesn't expose this). Deploy the function first, then attach Cloud SQL
-#    to its underlying Cloud Run service with `gcloud run services update`.
-#
-#    The Python buildpack looks for the entry-point function in main.py by
-#    default — but this repo's own main.py is the FastAPI app, not the
-#    dispatcher, so deploy fails with "main.py is expected to contain a
-#    function named 'dispatch'". GOOGLE_FUNCTION_SOURCE points the buildpack
-#    at crawl_dispatcher.py instead.
+#    This has to walk every active, currently-unclaimed CrawlSource (~2,800+
+#    and growing) one at a time — a claim commit plus a blocking Pub/Sub
+#    publish per source, deliberately paced that way (see enqueue_crawl's
+#    own docstring: an all-at-once burst overloaded crawl-worker and the
+#    shared browser-rendering service once already, see one_off/
+#    recrawl_sources.py's DEFAULT_BATCH_SIZE comment) — which reliably takes
+#    well past both Cloud Scheduler's attemptDeadline (max 30min) and a
+#    Cloud Function/Run service's own request timeout. Verified live
+#    2026-09-28: every crawl-dispatch-hourly run was failing
+#    DEADLINE_EXCEEDED while the dispatch itself kept working in the
+#    background regardless, un-tracked, until it got killed mid-sweep.
+#    A Cloud Run Job has no such deadline riding on an HTTP round-trip —
+#    Scheduler just tells it to start and walks away, same as the
+#    `migrate`/`backfill-country` jobs above. Same image, same pattern.
 # ---------------------------------------------------------------------------
 
-gcloud functions deploy crawl-dispatcher \
+gcloud run jobs deploy crawl-dispatcher \
+  --image="$IMAGE_TAG" \
+  --region="$REGION" \
+  --command=python --args=crawl_dispatcher.py \
+  --set-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION" \
+  --set-env-vars="$COMMON_ENV" \
+  --set-secrets="$COMMON_SECRETS" \
+  --task-timeout=7200 \
+  --max-retries=0 \
+  --labels=function=crawl-dispatcher
+
+gcloud run jobs add-iam-policy-binding crawl-dispatcher \
+  --region="$REGION" \
+  --member="serviceAccount:${PROJECT_ID}@appspot.gserviceaccount.com" \
+  --role="roles/run.invoker"
+
+# Every 6 hours, 9am-9pm America/New_York. No runs overnight US-wide.
+# --oauth-service-account-email (not --oidc-...) because the target is the
+# Run Admin REST API, not the job's own service URL.
+
+gcloud scheduler jobs create http crawl-dispatch-hourly \
+  --location="$REGION" \
+  --schedule="0 9-21/6 * * *" \
+  --time-zone="America/New_York" \
+  --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/crawl-dispatcher:run" \
+  --http-method=POST \
+  --oauth-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com"
+
+# ---------------------------------------------------------------------------
+# 6b. browser-scaler — Cloud Function (2nd gen) + a *normally-paused* Cloud
+#     Scheduler job, browser-scaler-tick. Matches yabot-jobs-browser's warm
+#     capacity to real crawl-worker/worker demand instead of a flat,
+#     always-on min-instances guess — see browser_scaler.py's own docstring.
+#
+#     crawl_dispatcher.py resumes browser-scaler-tick at the top of its own
+#     main() (whether that run came from the 3x/day schedule above or a
+#     manual `gcloud run jobs execute crawl-dispatcher`); browser_scaler.py
+#     pauses it again itself once it observes crawl-worker and worker have
+#     both been idle for a full lookback window — crawl_dispatcher.py
+#     finishing isn't the same signal, see that module's own docstring for
+#     why. Deploy this section before crawl-dispatcher's next redeploy:
+#     crawl_dispatcher.py's startup calls assume this Cloud Function and the
+#     (paused) Scheduler job already exist.
+#
+#     No --set-secrets here, deliberately: browser_scaler.py never touches
+#     the database or an LLM, only GCP_PROJECT_ID from COMMON_ENV (see
+#     app.services.gcp_admin's own docstring on why it reads that straight
+#     from the environment instead of importing the full Settings object).
+# ---------------------------------------------------------------------------
+
+gcloud functions deploy browser-scaler \
   --gen2 \
   --region="$REGION" \
   --runtime=python313 \
   --source=. \
   --entry-point=dispatch \
-  --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=crawl_dispatcher.py \
+  --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=browser_scaler.py \
   --trigger-http \
   --no-allow-unauthenticated \
   --set-env-vars="$COMMON_ENV" \
-  --set-secrets="$COMMON_SECRETS" \
-  --memory=512Mi \
-  --timeout=540s
+  --memory=256Mi \
+  --timeout=60s
 
-gcloud run services update crawl-dispatcher \
-  --region="$REGION" \
-  --add-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION"
+BROWSER_SCALER_FUNCTION_URL="$(gcloud functions describe browser-scaler --gen2 --region="$REGION" --format='value(serviceConfig.uri)')"
 
-# Give Cloud Scheduler's service account permission to invoke the function,
-# then wire up the hourly cron trigger via OIDC (no public HTTP exposure).
-
-FUNCTION_URL="$(gcloud functions describe crawl-dispatcher --gen2 --region="$REGION" --format='value(serviceConfig.uri)')"
-
-gcloud functions add-invoker-policy-binding crawl-dispatcher \
+gcloud functions add-invoker-policy-binding browser-scaler \
   --gen2 \
   --region="$REGION" \
   --member="serviceAccount:${PROJECT_ID}@appspot.gserviceaccount.com"
 
-gcloud scheduler jobs create http crawl-dispatch-hourly \
+gcloud scheduler jobs create http browser-scaler-tick \
   --location="$REGION" \
-  --schedule="0 */2 * * *" \
-  --uri="$FUNCTION_URL" \
+  --schedule="*/2 * * * *" \
+  --uri="$BROWSER_SCALER_FUNCTION_URL" \
   --http-method=POST \
   --oidc-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com" \
-  --oidc-token-audience="$FUNCTION_URL"
+  --oidc-token-audience="$BROWSER_SCALER_FUNCTION_URL"
+
+# Starts off — only crawl_dispatcher.py's main() turns it on (see above).
+gcloud scheduler jobs pause browser-scaler-tick --location="$REGION"
+
+# browser_scaler.py and crawl_dispatcher.py both run as DEFAULT_COMPUTE_SA
+# (see the account's own comment near the top of this file) and both need
+# these to talk to Cloud Monitoring / Cloud Run Admin / Cloud Scheduler
+# Admin:
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${DEFAULT_COMPUTE_SA}" \
+  --role="roles/monitoring.viewer" --condition=None
+
+gcloud run services add-iam-policy-binding yabot-jobs-browser \
+  --region="$REGION" \
+  --member="serviceAccount:${DEFAULT_COMPUTE_SA}" \
+  --role="roles/run.developer"
+
+# Cloud Scheduler has no per-job IAM bindings, so this has to be
+# project-scoped — same tradeoff as the cloudsql.client/secretAccessor
+# bindings near the top of this file.
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${DEFAULT_COMPUTE_SA}" \
+  --role="roles/cloudscheduler.admin" --condition=None
 
 # ---------------------------------------------------------------------------
-# 7. saved-search-alerts — Cloud Function (2nd gen), triggered hourly by
-#    Scheduler. Deploys from source (this repo), entry point is dispatch()
-#    in saved_search_alerts.py — same shape as crawl-dispatcher above in
-#    every respect (HTTP-triggered, no-allow-unauthenticated, OIDC-invoked
-#    by Scheduler, Cloud SQL attached to the underlying Cloud Run service
+# 7. saved-search-alerts — Cloud Function (2nd gen), triggered by Scheduler.
+#    Deploys from source (this repo), entry point is dispatch() in
+#    saved_search_alerts.py — same shape as crawl-dispatcher above in every
+#    respect (HTTP-triggered, no-allow-unauthenticated, OIDC-invoked by
+#    Scheduler, Cloud SQL attached to the underlying Cloud Run service
 #    afterward since `gcloud functions deploy` has no --set-cloudsql-instances
-#    flag). Hourly, not every-2-hours like crawl-dispatcher: unlike the
-#    discovery crawl there's no natural "once a day is enough" cadence here
-#    (new postings show up continuously via scanning), and a sweep that
-#    finds nothing new is a no-op (see sweep_saved_searches), so there's no
-#    cost to checking more often.
+#    flag). 3x/day, an hour after each crawl-dispatch run (9am/3pm/9pm
+#    America/New_York) rather than hourly: new postings only actually show
+#    up in bursts right after a dispatch now that crawl-dispatch itself only
+#    runs 3x/day (see that section above), so an hourly sweep was mostly
+#    finding nothing new. Verified live 2026-09-28: a 9am dispatch's new
+#    rows stop appearing by ~9:25am, so the 1-hour buffer before the 10am
+#    run has ~35 minutes to spare.
 # ---------------------------------------------------------------------------
 
 gcloud functions deploy saved-search-alerts \
@@ -365,7 +448,8 @@ gcloud functions deploy saved-search-alerts \
   --set-env-vars="$COMMON_ENV" \
   --set-secrets="$COMMON_SECRETS" \
   --memory=512Mi \
-  --timeout=540s
+  --timeout=540s \
+  --update-labels=function=saved-search-alerts
 
 gcloud run services update saved-search-alerts \
   --region="$REGION" \
@@ -380,7 +464,8 @@ gcloud functions add-invoker-policy-binding saved-search-alerts \
 
 gcloud scheduler jobs create http saved-search-alerts-hourly \
   --location="$REGION" \
-  --schedule="0 * * * *" \
+  --schedule="0 10-22/6 * * *" \
+  --time-zone="America/New_York" \
   --uri="$SAVED_SEARCH_ALERTS_FUNCTION_URL" \
   --http-method=POST \
   --oidc-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com" \
@@ -409,7 +494,8 @@ gcloud functions deploy follow-up-reminders \
   --set-env-vars="$COMMON_ENV" \
   --set-secrets="$COMMON_SECRETS" \
   --memory=512Mi \
-  --timeout=540s
+  --timeout=540s \
+  --update-labels=function=follow-up-reminders
 
 gcloud run services update follow-up-reminders \
   --region="$REGION" \
@@ -455,7 +541,8 @@ gcloud functions deploy retry-failed-scans \
   --set-env-vars="$COMMON_ENV" \
   --set-secrets="$COMMON_SECRETS" \
   --memory=512Mi \
-  --timeout=540s
+  --timeout=540s \
+  --update-labels=function=retry-failed-scans
 
 gcloud run services update retry-failed-scans \
   --region="$REGION" \
@@ -477,16 +564,21 @@ gcloud scheduler jobs create http retry-failed-scans-hourly \
   --oidc-token-audience="$RETRY_FAILED_SCANS_FUNCTION_URL"
 
 # ---------------------------------------------------------------------------
-# 10. generate-static-job-pages — Cloud Function (2nd gen), triggered every
-#     30 minutes by Scheduler. Deploys from source (this repo), entry point
-#     is dispatch() in generate_static_job_pages.py — same shape as the
-#     functions above in every respect except what it talks to: it writes
-#     straight into the *frontend's* S3 bucket/CloudFront distribution
+# 10. generate-static-job-pages — Cloud Function (2nd gen), triggered by
+#     Scheduler. Deploys from source (this repo), entry point is dispatch()
+#     in generate_static_job_pages.py — same shape as the functions above in
+#     every respect except what it talks to: it writes straight into the
+#     *frontend's* S3 bucket/CloudFront distribution
 #     (SEO_PAGES_BUCKET/SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID above), not
-#     Postgres/Pub/Sub. Its own independent cadence, deliberately not synced
-#     to crawl-dispatcher's 2h schedule or chained off crawl-worker — see
-#     generate_static_job_pages.py's own docstring for why. 30 minutes is
-#     the freshness/cost tradeoff picked for how "live" these pages feel.
+#     Postgres/Pub/Sub. 3x/day, an hour after each crawl-dispatch run
+#     (9am/3pm/9pm America/New_York) — was every 30 minutes on its own
+#     independent cadence (see generate_static_job_pages.py's own docstring
+#     for the original freshness/cost reasoning), but that predates
+#     crawl-dispatch itself dropping to 3x/day: postings now only actually
+#     land in bursts right after a dispatch, so a 30-minute sweep was mostly
+#     re-rendering unchanged pages. Verified live 2026-09-28: a 9am
+#     dispatch's new rows stop appearing by ~9:25am, so the 1-hour buffer
+#     before the 10am run has ~35 minutes to spare.
 #
 #     IMPORTANT: the yabot-jobs-backend IAM user (whose key/secret are
 #     already in the resume-storage-access-key/resume-storage-secret-key
@@ -508,7 +600,8 @@ gcloud functions deploy generate-static-job-pages \
   --set-env-vars="$COMMON_ENV" \
   --set-secrets="$COMMON_SECRETS" \
   --memory=512Mi \
-  --timeout=540s
+  --timeout=540s \
+  --update-labels=function=generate-static-job-pages
 
 gcloud run services update generate-static-job-pages \
   --region="$REGION" \
@@ -523,7 +616,8 @@ gcloud functions add-invoker-policy-binding generate-static-job-pages \
 
 gcloud scheduler jobs create http generate-static-job-pages-30min \
   --location="$REGION" \
-  --schedule="*/30 * * * *" \
+  --schedule="0 10-22/6 * * *" \
+  --time-zone="America/New_York" \
   --uri="$GENERATE_STATIC_JOB_PAGES_FUNCTION_URL" \
   --http-method=POST \
   --oidc-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com" \
@@ -533,21 +627,28 @@ gcloud scheduler jobs create http generate-static-job-pages-30min \
 # Redeploys after this point (new image/source, no infra changes) — this is
 # also exactly what .github/workflows/deploy.yml runs on every push to main:
 #   gcloud builds submit --tag "${IMAGE}:$(git rev-parse --short HEAD)" --project="$PROJECT_ID" .
-#   gcloud run jobs deploy migrate --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID"
+#   gcloud run jobs deploy migrate --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID" --labels=function=migrate
 #   gcloud run jobs execute migrate --region="$REGION" --project="$PROJECT_ID" --wait
-#   gcloud run deploy api --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID"
+#   gcloud run deploy api --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID" --update-labels=function=api
 #   gcloud functions deploy worker --gen2 --region="$REGION" --project="$PROJECT_ID" \
-#     --source=. --entry-point=handle_scan_request --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=worker.py
+#     --source=. --entry-point=handle_scan_request --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=worker.py \
+#     --update-labels=function=worker
 #   gcloud functions deploy crawl-worker --gen2 --region="$REGION" --project="$PROJECT_ID" \
-#     --source=. --entry-point=handle_crawl_request --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=crawl_worker.py
+#     --source=. --entry-point=handle_crawl_request --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=crawl_worker.py \
+#     --update-labels=function=crawl-worker
 #   gcloud functions deploy crawl-dispatcher --gen2 --region="$REGION" --project="$PROJECT_ID" \
-#     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=crawl_dispatcher.py
+#     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=crawl_dispatcher.py \
+#     --update-labels=function=crawl-dispatcher
 #   gcloud functions deploy saved-search-alerts --gen2 --region="$REGION" --project="$PROJECT_ID" \
-#     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=saved_search_alerts.py
+#     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=saved_search_alerts.py \
+#     --update-labels=function=saved-search-alerts
 #   gcloud functions deploy follow-up-reminders --gen2 --region="$REGION" --project="$PROJECT_ID" \
-#     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=follow_up_reminders.py
+#     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=follow_up_reminders.py \
+#     --update-labels=function=follow-up-reminders
 #   gcloud functions deploy retry-failed-scans --gen2 --region="$REGION" --project="$PROJECT_ID" \
-#     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=retry_failed_scans.py
+#     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=retry_failed_scans.py \
+#     --update-labels=function=retry-failed-scans
 #   gcloud functions deploy generate-static-job-pages --gen2 --region="$REGION" --project="$PROJECT_ID" \
-#     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=generate_static_job_pages.py
+#     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=generate_static_job_pages.py \
+#     --update-labels=function=generate-static-job-pages
 # ---------------------------------------------------------------------------

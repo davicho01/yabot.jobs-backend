@@ -166,7 +166,7 @@ def handle_crawl_request(event, context) -> None:
     once per message published to crawl-source-requests and scales to zero
     between messages, instead of a worker pool instance running 24/7 to
     poll for work. No functions_framework/cloudevents import here — same
-    reasoning as crawl_dispatcher.py's dispatch(): the buildpack wraps this
+    reasoning as worker.py's handle_scan_request(): the buildpack wraps this
     by signature at deploy time. Undecorated + this two-arg (event, context)
     signature is what the buildpack actually invokes for a --trigger-topic
     deploy (confirmed against a real deploy — a single-arg CloudEvent-typed

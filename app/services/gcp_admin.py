@@ -1,0 +1,141 @@
+"""Thin REST clients for the handful of Google Cloud control-plane APIs
+crawl_dispatcher.py and browser_scaler.py need to scale yabot-jobs-browser
+to match real crawl-worker/worker demand: Cloud Monitoring (how many
+instances are actually running), Cloud Run Admin (how many to keep warm),
+and Cloud Scheduler Admin (turn browser_scaler.py's own tick on/off).
+
+Plain httpx + an OAuth access token from ambient credentials, same
+lightweight-REST style as browser_fetch.py's ID-token client, rather than
+pulling in the heavier google-cloud-run/-monitoring/-scheduler SDKs for a
+handful of one-off calls.
+
+Reads GCP_PROJECT_ID straight from the environment rather than importing
+app.core.config.settings: browser_scaler.py — the whole reason this module
+exists — deliberately isn't granted DATABASE_URL/API keys/any of the other
+secrets Settings() requires (it never touches the database or an LLM), so
+importing the full settings singleton here would crash it at startup. Read
+lazily (a function, not a module-level constant) for the same reason
+crawl_queue.py builds its Pub/Sub clients lazily: reading os.environ at
+import time would blow up `import browser_scaler` itself — including for
+anything that merely imports this module in a test — before a caller ever
+gets the chance to set the var or monkeypatch anything.
+"""
+
+import logging
+import os
+from datetime import datetime, timedelta, timezone
+
+import httpx
+from google.auth import default as google_auth_default
+from google.auth.transport.requests import Request as GoogleAuthRequest
+
+logger = logging.getLogger("app.gcp_admin")
+
+
+def _project_id() -> str:
+    return os.environ["GCP_PROJECT_ID"]
+
+
+# Every service this module touches lives here — same region every other
+# Cloud Run resource in deploy/gcloud-deploy.sh uses.
+_REGION = "us-central1"
+
+_credentials = None
+
+
+def _access_token() -> str:
+    # Cached across calls within one process (a Cloud Function invocation),
+    # refreshed automatically once expired — same ambient-credentials
+    # pattern as browser_fetch.py's ID token, just an OAuth access token
+    # instead (these control-plane APIs check IAM permissions, not a
+    # per-service invoker binding).
+    global _credentials
+    if _credentials is None:
+        _credentials, _ = google_auth_default()
+    _credentials.refresh(GoogleAuthRequest())
+    return _credentials.token
+
+
+def _headers() -> dict[str, str]:
+    return {"Authorization": f"Bearer {_access_token()}"}
+
+
+def get_instance_count(service_name: str, *, lookback_minutes: int = 5) -> int:
+    """Max concurrent Cloud Run instance count for `service_name` over the
+    last `lookback_minutes` — deliberately a window, not an instant point,
+    so a momentary dip to 0 between scan-lane wake-ups doesn't read as
+    "idle" (see browser_scaler.py). Returns 0 if the metric has no data
+    (nothing has run recently)."""
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(minutes=lookback_minutes)
+    response = httpx.get(
+        f"https://monitoring.googleapis.com/v3/projects/{_project_id()}/timeSeries",
+        headers=_headers(),
+        params={
+            "filter": (
+                'metric.type="run.googleapis.com/container/instance_count" '
+                f'AND resource.labels.service_name="{service_name}"'
+            ),
+            "interval.startTime": start.isoformat(),
+            "interval.endTime": now.isoformat(),
+            "aggregation.alignmentPeriod": f"{lookback_minutes * 60}s",
+            "aggregation.perSeriesAligner": "ALIGN_MAX",
+            "aggregation.crossSeriesReducer": "REDUCE_SUM",
+            "aggregation.groupByFields": "resource.labels.service_name",
+        },
+        timeout=30.0,
+    )
+    response.raise_for_status()
+    series = response.json().get("timeSeries", [])
+    if not series or not series[0].get("points"):
+        return 0
+    return int(series[0]["points"][0]["value"]["int64Value"])
+
+
+def get_min_instances(service_name: str) -> int:
+    response = httpx.get(
+        f"https://run.googleapis.com/v2/projects/{_project_id()}/locations/{_REGION}/services/{service_name}",
+        headers=_headers(),
+        timeout=30.0,
+    )
+    response.raise_for_status()
+    return int(response.json().get("template", {}).get("scaling", {}).get("minInstanceCount", 0))
+
+
+def set_min_instances(service_name: str, count: int) -> bool:
+    """PATCH `service_name`'s min-instances to `count`, skipping the call
+    (and the new revision it would create) if it's already there. Returns
+    whether it actually changed anything."""
+    if get_min_instances(service_name) == count:
+        return False
+    response = httpx.patch(
+        f"https://run.googleapis.com/v2/projects/{_project_id()}/locations/{_REGION}/services/{service_name}",
+        headers=_headers(),
+        params={"updateMask": "template.scaling.minInstanceCount"},
+        json={"template": {"scaling": {"minInstanceCount": count}}},
+        timeout=30.0,
+    )
+    response.raise_for_status()
+    logger.info("Set %s min-instances to %d.", service_name, count)
+    return True
+
+
+def _set_scheduler_job_paused(job_name: str, *, paused: bool) -> None:
+    action = "pause" if paused else "resume"
+    response = httpx.post(
+        f"https://cloudscheduler.googleapis.com/v1/projects/{_project_id()}/locations/{_REGION}/jobs/{job_name}:{action}",
+        headers=_headers(),
+        timeout=30.0,
+    )
+    response.raise_for_status()
+    logger.info("%sd Cloud Scheduler job %s.", action.capitalize(), job_name)
+
+
+def pause_scheduler_job(job_name: str) -> None:
+    _set_scheduler_job_paused(job_name, paused=True)
+
+
+def resume_scheduler_job(job_name: str) -> None:
+    # Resuming an already-ENABLED job is a documented no-op, so callers
+    # don't need to check current state first.
+    _set_scheduler_job_paused(job_name, paused=False)

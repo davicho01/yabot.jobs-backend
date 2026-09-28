@@ -88,15 +88,15 @@ def handle_scan_request(event, context) -> None:
     Prod deploys this instead of running main()'s pull loop: GCP invokes it
     once per message published to job-scan-requests and scales to zero
     between messages, instead of a worker pool instance running 24/7 to
-    poll for work. No functions_framework/cloudevents import here — same
-    reasoning as crawl_dispatcher.py's dispatch(): the buildpack wraps this
-    by signature at deploy time. Undecorated + this two-arg (event, context)
-    signature is what the buildpack actually invokes for a --trigger-topic
-    deploy (confirmed against a real deploy — a single-arg CloudEvent-typed
-    signature gets called as function(data, context) and blows up with
-    "takes 1 positional argument but 2 were given"), and it keeps this file
-    importable for local dev (`python worker.py`, see main() below) without
-    functions-framework installed.
+    poll for work. No functions_framework/cloudevents import here — the
+    buildpack wraps this by signature at deploy time. Undecorated + this
+    two-arg (event, context) signature is what the buildpack actually
+    invokes for a --trigger-topic deploy (confirmed against a real deploy —
+    a single-arg CloudEvent-typed signature gets called as
+    function(data, context) and blows up with "takes 1 positional argument
+    but 2 were given"), and it keeps this file importable for local dev
+    (`python worker.py`, see main() below) without functions-framework
+    installed.
     """
     data = base64.b64decode(event["data"])
     try:
