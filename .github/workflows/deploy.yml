@@ -380,6 +380,17 @@ jobs:
       # same reason as retry-failed-scans: this is that function's
       # first-ever deploy, before deploy/gcloud-deploy.sh's one-time setup
       # has applied its trigger config.
+      #
+      # Unlike retry-failed-scans/the others, --set-env-vars can't be
+      # omitted here: this function never got a manual first deploy via
+      # deploy/gcloud-deploy.sh's one-time setup (that command was blocked
+      # in the session that wrote it), so CI's deploy is the *only* config
+      # it's ever had — verified live 2026-09-28: without this, every
+      # invocation crashed with KeyError: 'GCP_PROJECT_ID'
+      # (app.services.gcp_admin reads it straight from the environment, see
+      # that module's own docstring on why). GCP_PROJECT_ID alone, not the
+      # full COMMON_ENV the database-touching functions use — browser_scaler.py
+      # never touches the database or an LLM.
       - name: Deploy browser-scaler
         run: |
           gcloud functions deploy browser-scaler \
@@ -392,4 +403,5 @@ jobs:
             --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=browser_scaler.py \
             --trigger-http \
             --no-allow-unauthenticated \
+            --set-env-vars="GCP_PROJECT_ID=${PROJECT_ID}" \
             --update-labels=function=browser-scaler
