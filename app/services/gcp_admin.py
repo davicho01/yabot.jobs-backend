@@ -139,3 +139,28 @@ def resume_scheduler_job(job_name: str) -> None:
     # Resuming an already-ENABLED job is a documented no-op, so callers
     # don't need to check current state first.
     _set_scheduler_job_paused(job_name, paused=False)
+
+
+_BROWSER_SERVICE = "yabot-jobs-browser"
+_BROWSER_SCALER_SCHEDULER_JOB = "browser-scaler-tick"
+_BROWSER_WARMUP_MIN_INSTANCES = 3
+
+
+def warm_up_browser_scaler() -> None:
+    """Warm up yabot-jobs-browser immediately and turn browser_scaler.py's
+    tick back on, for any caller whose own work might need a browser render
+    (see app.services.browser_fetch) — crawl_dispatcher.py's 3x/day and
+    manually-triggered runs, and retry_failed_scans.py's hourly sweep, both
+    call this at the top of their own main(). Without it, a scan that falls
+    between crawl_dispatcher.py runs hits a cold (min-instances=0) browser
+    with nothing warming it back up — verified live 2026-09-28: an IBM scan
+    retry failed hitting exactly that gap. browser_scaler.py itself pauses
+    the tick again once crawl-worker/worker go quiet; see that module's own
+    docstring. Best-effort: a failure here shouldn't block the caller's own
+    actual work.
+    """
+    try:
+        set_min_instances(_BROWSER_SERVICE, _BROWSER_WARMUP_MIN_INSTANCES)
+        resume_scheduler_job(_BROWSER_SCALER_SCHEDULER_JOB)
+    except Exception:
+        logger.exception("Failed to warm up %s / resume the scaler tick.", _BROWSER_SERVICE)

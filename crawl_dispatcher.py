@@ -36,31 +36,21 @@ from app.db.session import SessionLocal
 from app.models.crawl_source import CrawlSource
 from app.models.enums import CrawlSourceStatus
 from app.services.crawl_queue import enqueue_crawl, ensure_topic
-from app.services.gcp_admin import resume_scheduler_job, set_min_instances
+from app.services.gcp_admin import warm_up_browser_scaler
 from app.services.jobs import wake_sources_with_pending_scans
 
 configure_logging()
 logger = logging.getLogger("app.crawl_dispatcher")
-
-_BROWSER_SERVICE = "yabot-jobs-browser"
-_BROWSER_SCALER_SCHEDULER_JOB = "browser-scaler-tick"
-_BROWSER_WARMUP_MIN_INSTANCES = 3
 
 
 def main() -> None:
     # yabot-jobs-browser (the shared headless-Chromium rendering service
     # several ATS adapters need — see app.services.browser_fetch) sits at
     # min-instances=0 between dispatch cycles to avoid paying for warm
-    # Chromium instances 24/7. Warm it up immediately rather than waiting
-    # for the first browser_scaler.py tick, and turn that tick back on —
-    # it's normally paused, and browser_scaler.py itself pauses it again
-    # once crawl-worker/worker go quiet (see that module's own docstring).
-    # Best-effort: a failure here shouldn't block the actual dispatch work.
-    try:
-        set_min_instances(_BROWSER_SERVICE, _BROWSER_WARMUP_MIN_INSTANCES)
-        resume_scheduler_job(_BROWSER_SCALER_SCHEDULER_JOB)
-    except Exception:
-        logger.exception("Failed to warm up %s / resume the scaler tick.", _BROWSER_SERVICE)
+    # Chromium instances 24/7 — see gcp_admin.warm_up_browser_scaler's own
+    # docstring for why this has to happen here (and in
+    # retry_failed_scans.py) rather than relying on browser_scaler.py alone.
+    warm_up_browser_scaler()
 
     ensure_topic()
 

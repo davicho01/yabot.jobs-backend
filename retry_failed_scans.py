@@ -21,6 +21,7 @@ import logging
 
 from app.core.log_config import configure_logging
 from app.db.session import SessionLocal
+from app.services.gcp_admin import warm_up_browser_scaler
 from app.services.job_queue import ensure_topic
 from app.services.jobs import wake_retryable_failed_scans, wake_sources_with_pending_scans
 
@@ -29,6 +30,14 @@ logger = logging.getLogger("app.retry_failed_scans")
 
 
 def main() -> None:
+    # A retried scan can need yabot-jobs-browser (see app.services.browser_fetch)
+    # just as much as a fresh crawl-dispatch-driven one — without this, a
+    # retry that falls between crawl_dispatcher.py runs hits a cold
+    # (min-instances=0) browser with nothing warming it back up. Verified
+    # live 2026-09-28: an IBM scan retry failed hitting exactly that gap.
+    # See gcp_admin.warm_up_browser_scaler's own docstring for the rest.
+    warm_up_browser_scaler()
+
     ensure_topic()
 
     db = SessionLocal()
