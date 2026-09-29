@@ -28,6 +28,7 @@
       {{ sector_name }}
     </nav>
     <h1>{{ sector_name }} Jobs in {{ country_name }}, by Day</h1>
+    {% include "_scan_notice.html.jinja" %}
 
     {% for month_label, days in months %}
     <h2 class="month-heading">{{ month_label }}</h2>

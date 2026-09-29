@@ -27,6 +27,7 @@
       {{ country_name }}
     </nav>
     <h1>Jobs in {{ country_name }}, by Sector</h1>
+    {% include "_scan_notice.html.jinja" %}
 
     <ul class="date-list">
       {% for slug, sector_name, count in sector_totals %}
