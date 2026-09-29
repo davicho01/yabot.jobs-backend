@@ -10,7 +10,7 @@ from app.api.deps import get_current_admin_user, get_db
 from app.models.crawl_source import CrawlSource
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
-from app.schemas.admin import AdminDashboardRead, ScanDayCount, ScanHourCount
+from app.schemas.admin import AdminDashboardRead, ScanDayCount, ScanHourCount, ScanMonthCount, ScanWeekCount
 from app.schemas.job import JobDetailRead, JobListRead
 from app.services import admin as admin_service
 from app.services.jobs import dismiss_job_flag, to_job_detail
@@ -29,8 +29,22 @@ def get_scans_by_day(days: int = Query(90, ge=1, le=365), db: Session = Depends(
 
 
 @router.get("/scans-by-hour", response_model=list[ScanHourCount])
-def get_scans_by_hour(hours: int = Query(24, ge=1, le=168), db: Session = Depends(get_db)) -> list[dict]:
-    return admin_service.get_scans_by_hour(db, hours=hours)
+def get_scans_by_hour(
+    hours: int = Query(24, ge=1, le=168),
+    end: datetime | None = Query(None),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    return admin_service.get_scans_by_hour(db, hours=hours, end=end)
+
+
+@router.get("/scans-by-week", response_model=list[ScanWeekCount])
+def get_scans_by_week(weeks: int = Query(26, ge=1, le=104), db: Session = Depends(get_db)) -> list[dict]:
+    return admin_service.get_scans_by_week(db, weeks=weeks)
+
+
+@router.get("/scans-by-month", response_model=list[ScanMonthCount])
+def get_scans_by_month(months: int = Query(6, ge=1, le=60), db: Session = Depends(get_db)) -> list[dict]:
+    return admin_service.get_scans_by_month(db, months=months)
 
 
 JOB_SORT_COLUMNS = {

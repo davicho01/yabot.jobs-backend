@@ -19,6 +19,20 @@ class ScanHourCount(BaseModel):
     count: int
 
 
+class ScanWeekCount(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    week: date
+    count: int
+
+
+class ScanMonthCount(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    month: date
+    count: int
+
+
 class WindowCounts(BaseModel):
     last_24h: int
     last_7d: int

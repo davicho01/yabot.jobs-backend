@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import ColumnElement, func, select
@@ -97,12 +97,25 @@ def get_scans_by_day(db: Session, days: int, crawl_source_id: uuid.UUID | None =
     ]
 
 
-def get_scans_by_hour(db: Session, hours: int, crawl_source_id: uuid.UUID | None = None) -> list[dict]:
-    """Hourly scan counts for the last `hours` hours (current hour inclusive),
-    with zero-filled gaps so the chart has one point per hour regardless of
-    scan activity."""
+def get_scans_by_hour(
+    db: Session, hours: int, crawl_source_id: uuid.UUID | None = None, end: datetime | None = None
+) -> list[dict]:
+    """Hourly scan counts for a `hours`-hour window ending at `end`'s hour
+    (current hour inclusive by default), with zero-filled gaps so the chart
+    has one point per hour regardless of scan activity. `end` lets a caller
+    page the window into the past — it's clamped so the window can never
+    reach past the real current hour."""
     now = datetime.now(timezone.utc)
-    start = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=hours - 1)
+    current_hour = now.replace(minute=0, second=0, microsecond=0)
+    if end is not None:
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+        else:
+            end = end.astimezone(timezone.utc)
+        end_hour = min(end.replace(minute=0, second=0, microsecond=0), current_hour)
+    else:
+        end_hour = current_hour
+    start = end_hour - timedelta(hours=hours - 1)
 
     stmt = (
         select(
@@ -110,6 +123,7 @@ def get_scans_by_hour(db: Session, hours: int, crawl_source_id: uuid.UUID | None
             func.count().label("count"),
         )
         .where(JobPostingUrl.last_scanned_at >= start)
+        .where(JobPostingUrl.last_scanned_at < end_hour + timedelta(hours=1))
         .group_by("hour")
     )
     if crawl_source_id is not None:
@@ -120,6 +134,66 @@ def get_scans_by_hour(db: Session, hours: int, crawl_source_id: uuid.UUID | None
     return [
         {"hour": hour, "count": counts_by_hour.get(hour, 0)}
         for hour in (start + timedelta(hours=i) for i in range(hours))
+    ]
+
+
+def get_scans_by_week(db: Session, weeks: int, crawl_source_id: uuid.UUID | None = None) -> list[dict]:
+    """Weekly (Monday-start, matching the frontend's ISO-week bucketing)
+    scan counts for the last `weeks` weeks (current week inclusive), with
+    zero-filled gaps so the chart has one point per week regardless of scan
+    activity."""
+    now = datetime.now(timezone.utc)
+    current_week_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    start = current_week_start - timedelta(weeks=weeks - 1)
+
+    stmt = (
+        select(
+            func.date_trunc("week", JobPostingUrl.last_scanned_at).label("week"),
+            func.count().label("count"),
+        )
+        .where(JobPostingUrl.last_scanned_at >= start)
+        .group_by("week")
+    )
+    if crawl_source_id is not None:
+        stmt = stmt.where(JobPostingUrl.crawl_source_id == crawl_source_id)
+
+    counts_by_week = {row.week.date(): row.count for row in db.execute(stmt).all()}
+
+    return [
+        {"week": week, "count": counts_by_week.get(week, 0)}
+        for week in (start.date() + timedelta(weeks=i) for i in range(weeks))
+    ]
+
+
+def _add_months(d: date, months: int) -> date:
+    total = d.month - 1 + months
+    return date(d.year + total // 12, total % 12 + 1, 1)
+
+
+def get_scans_by_month(db: Session, months: int, crawl_source_id: uuid.UUID | None = None) -> list[dict]:
+    """Calendar-month scan counts for the last `months` months (current
+    month inclusive), with zero-filled gaps so the chart has one point per
+    month regardless of scan activity."""
+    now = datetime.now(timezone.utc)
+    current_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    start = _add_months(current_month_start.date(), -(months - 1))
+
+    stmt = (
+        select(
+            func.date_trunc("month", JobPostingUrl.last_scanned_at).label("month"),
+            func.count().label("count"),
+        )
+        .where(JobPostingUrl.last_scanned_at >= start)
+        .group_by("month")
+    )
+    if crawl_source_id is not None:
+        stmt = stmt.where(JobPostingUrl.crawl_source_id == crawl_source_id)
+
+    counts_by_month = {row.month.date(): row.count for row in db.execute(stmt).all()}
+
+    return [
+        {"month": month, "count": counts_by_month.get(month, 0)}
+        for month in (_add_months(start, i) for i in range(months))
     ]
 
 
