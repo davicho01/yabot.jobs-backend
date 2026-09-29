@@ -335,13 +335,17 @@ gcloud run jobs add-iam-policy-binding crawl-dispatcher \
   --member="serviceAccount:${PROJECT_ID}@appspot.gserviceaccount.com" \
   --role="roles/run.invoker"
 
-# Every 6 hours, 9am-9pm America/New_York. No runs overnight US-wide.
+# 2x/day, 1pm and 9pm America/New_York: postings trickle in through business
+# hours (~9am-6pm local, so ~9am-9pm ET once PT is folded in), so a morning
+# run would mostly just re-serve the prior night's crawl. 1pm catches the
+# ET/CT morning wave; 9pm catches the rest of the day including PT (whose
+# posting activity has already tailed off by 9pm ET = 6pm PT).
 # --oauth-service-account-email (not --oidc-...) because the target is the
 # Run Admin REST API, not the job's own service URL.
 
 gcloud scheduler jobs create http crawl-dispatch-hourly \
   --location="$REGION" \
-  --schedule="0 9-21/6 * * *" \
+  --schedule="0 13,21 * * *" \
   --time-zone="America/New_York" \
   --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/crawl-dispatcher:run" \
   --http-method=POST \
@@ -433,13 +437,14 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
 #    respect (HTTP-triggered, no-allow-unauthenticated, OIDC-invoked by
 #    Scheduler, Cloud SQL attached to the underlying Cloud Run service
 #    afterward since `gcloud functions deploy` has no --set-cloudsql-instances
-#    flag). 3x/day, an hour after each crawl-dispatch run (9am/3pm/9pm
-#    America/New_York) rather than hourly: new postings only actually show
-#    up in bursts right after a dispatch now that crawl-dispatch itself only
-#    runs 3x/day (see that section above), so an hourly sweep was mostly
-#    finding nothing new. Verified live 2026-09-28: a 9am dispatch's new
-#    rows stop appearing by ~9:25am, so the 1-hour buffer before the 10am
-#    run has ~35 minutes to spare.
+#    flag). 2x/day, an hour after each crawl-dispatch run (2pm/10pm
+#    America/New_York, one hour after the 1pm/9pm dispatch above) rather
+#    than hourly: new postings only actually show up in bursts right after a
+#    dispatch now that crawl-dispatch itself only runs 2x/day (see that
+#    section above), so an hourly sweep was mostly finding nothing new.
+#    Verified live 2026-09-28 (back when dispatch ran at 9am): new rows
+#    stopped appearing ~25 minutes after dispatch, so the 1-hour buffer
+#    before this alerts run has margin to spare.
 # ---------------------------------------------------------------------------
 
 gcloud functions deploy saved-search-alerts \
@@ -470,7 +475,7 @@ gcloud functions add-invoker-policy-binding saved-search-alerts \
 
 gcloud scheduler jobs create http saved-search-alerts-hourly \
   --location="$REGION" \
-  --schedule="0 10-22/6 * * *" \
+  --schedule="0 14,22 * * *" \
   --time-zone="America/New_York" \
   --uri="$SAVED_SEARCH_ALERTS_FUNCTION_URL" \
   --http-method=POST \
