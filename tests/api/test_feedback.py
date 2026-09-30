@@ -73,6 +73,18 @@ def test_submit_feedback_emails_admins(db, no_email, monkeypatch):
     assert no_email.call_args.kwargs["from_user_email"] == user.email
 
 
+def test_submit_feedback_emails_role_admins_even_without_admin_emails(db, no_email, monkeypatch):
+    monkeypatch.setattr(settings, "admin_emails", "")
+    admin = m.User(id=uuid.uuid4(), email="boss@example.com", role="admin")
+    db.add(admin)
+    db.commit()
+    user = _make_user(db)
+
+    submit_feedback(FeedbackCreate(message="Hi"), _request(), current_user=user, db=db)
+
+    assert no_email.call_args.args[0] == ["boss@example.com"]
+
+
 def test_submit_feedback_survives_a_failed_notification(db, no_email, monkeypatch):
     monkeypatch.setattr(settings, "admin_emails", "a@example.com")
     no_email.side_effect = RuntimeError("SES down")

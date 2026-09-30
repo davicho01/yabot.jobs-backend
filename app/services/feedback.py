@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.rate_limit import RateLimitExceeded
+from app.models.enums import UserRole
 from app.models.feedback import Feedback
 from app.models.user import User
 from app.schemas.feedback import FeedbackCreate
@@ -24,6 +25,15 @@ def _enforce_feedback_rate_limit(db: Session, user_id: uuid.UUID, now: datetime)
     )
     if count >= settings.feedback_rate_limit_max_per_user:
         raise RateLimitExceeded("You've sent a lot of feedback recently. Try again in a little while.")
+
+
+def _admin_recipients(db: Session) -> list[str]:
+    """Everyone with the admin role, plus ADMIN_EMAILS. The role on the user
+    row is what matters: ADMIN_EMAILS only promotes people at sign-in, and
+    isn't necessarily set everywhere the app runs (production's deploy
+    doesn't set it), so relying on it alone silently emailed nobody."""
+    role_admins = db.scalars(select(User.email).where(User.role == UserRole.ADMIN)).all()
+    return sorted(set(role_admins) | settings.admin_email_set)
 
 
 def create_feedback(
@@ -55,7 +65,7 @@ def create_feedback(
     db.add(feedback)
     db.flush()
 
-    admin_emails = sorted(settings.admin_email_set)
+    admin_emails = _admin_recipients(db)
     if admin_emails:
         try:
             send_feedback_notification_email(
