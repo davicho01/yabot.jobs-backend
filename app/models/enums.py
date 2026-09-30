@@ -249,6 +249,10 @@ class AtsType(StrEnum):
     # the generic JSON-LD scanner's browser-render fallback (see
     # adapters/intuitive.py).
     INTUITIVE = "intuitive"
+    # Fly.io's own in-house careers page (fly.io/jobs) — a small static
+    # site whose own Atom feed (fly.io/jobs/feed.xml) lists every current
+    # opening directly, no ATS involved at all (see adapters/flyio.py).
+    FLYIO = "flyio"
 
 
 class CrawlSourceStatus(StrEnum):
