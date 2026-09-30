@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     system_llm_model: str | None = None  # e.g. "claude-opus-5"
     system_llm_api_key: str | None = None
     system_llm_base_url: str | None = None  # only for provider="other"/custom endpoints
+    # Free job evaluations a user without their own key gets on the system
+    # key above (see app.services.ai_access). 0 turns the trial off; it's
+    # also off whenever the system key isn't configured.
+    free_evaluation_limit: int = 5
 
     # Google Cloud Pub/Sub — job scanning is queued here instead of running
     # inline in POST /jobs (page fetches + LLM calls can take well over a

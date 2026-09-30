@@ -1,0 +1,69 @@
+from datetime import datetime, timezone
+
+from sqlalchemy import exists, select
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
+from app.models.job_application import UserJobApplication
+from app.models.resume import Resume, ResumeScore
+from app.models.user import User
+from app.schemas.onboarding import AiAccessRead, OnboardingRead, OnboardingStepRead
+from app.services.ai_access import (
+    free_evaluations_remaining,
+    free_trial_enabled,
+    get_own_default_key,
+)
+
+
+def get_ai_access(db: Session, user: User) -> AiAccessRead:
+    return AiAccessRead(
+        has_own_key=get_own_default_key(db, user.id) is not None,
+        free_trial_enabled=free_trial_enabled(),
+        free_evaluation_limit=settings.free_evaluation_limit,
+        free_evaluations_used=user.free_evaluations_used,
+        free_evaluations_remaining=free_evaluations_remaining(user),
+    )
+
+
+def get_onboarding(db: Session, user: User, *, now: datetime | None = None) -> OnboardingRead:
+    """The getting-started checklist: upload a resume, set up AI access (own
+    key or free trial), start an application, get a first evaluation.
+
+    Each step is derived from the user's actual data rather than stored, so
+    it's right on every device and no route has to remember to tick it off.
+    The first time every step is done, completed_at is stamped so the
+    checklist stays finished even if a step later un-completes (e.g. the
+    free trial runs out — that's the AI-access prompt's job, not this one's).
+    """
+    ai_access = get_ai_access(db, user)
+    steps = [
+        OnboardingStepRead(
+            key="resume", done=bool(db.scalar(select(exists().where(Resume.user_id == user.id))))
+        ),
+        OnboardingStepRead(
+            key="ai_access", done=ai_access.has_own_key or ai_access.free_evaluations_remaining > 0
+        ),
+        OnboardingStepRead(
+            key="application",
+            done=bool(db.scalar(select(exists().where(UserJobApplication.user_id == user.id)))),
+        ),
+        OnboardingStepRead(
+            key="evaluation", done=bool(db.scalar(select(exists().where(ResumeScore.user_id == user.id))))
+        ),
+    ]
+    if user.onboarding_completed_at is None and all(step.done for step in steps):
+        user.onboarding_completed_at = now or datetime.now(timezone.utc)
+        db.flush()
+    return OnboardingRead(
+        steps=steps,
+        completed_at=user.onboarding_completed_at,
+        dismissed_at=user.onboarding_dismissed_at,
+        ai_access=ai_access,
+    )
+
+
+def dismiss_onboarding(db: Session, user: User, *, now: datetime | None = None) -> OnboardingRead:
+    if user.onboarding_dismissed_at is None:
+        user.onboarding_dismissed_at = now or datetime.now(timezone.utc)
+        db.flush()
+    return get_onboarding(db, user, now=now)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import Boolean, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -41,6 +41,14 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # this is the one place to turn it back off without deleting every
     # saved search individually.
     email_alerts_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Free-trial job evaluations spent on the system LLM key — see
+    # app.services.ai_access, the only writer.
+    free_evaluations_used: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    # Set once the user finishes (or hides) the getting-started checklist,
+    # so it stays gone even if a step later "un-completes" (e.g. they delete
+    # their only resume). See app.services.onboarding.
+    onboarding_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    onboarding_dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     magic_link_tokens: Mapped[list["MagicLinkToken"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"

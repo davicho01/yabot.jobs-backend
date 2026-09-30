@@ -16,6 +16,7 @@ from app.api.routes import (
     feedback,
     jobs,
     oauth,
+    onboarding,
     resumes,
     saved_searches,
 )
@@ -61,6 +62,7 @@ app.include_router(crawl_sources.router)
 app.include_router(resumes.router)
 app.include_router(saved_searches.router)
 app.include_router(feedback.router)
+app.include_router(onboarding.router)
 app.include_router(admin.router)
 
 

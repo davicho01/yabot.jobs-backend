@@ -39,6 +39,7 @@ Set these in `.env` (loaded automatically by `app/core/config.py`).
 | `SYSTEM_LLM_MODEL` | No | unset | Model id, e.g. `claude-opus-5`. Optional only for `anthropic` (defaults to `claude-opus-5`); required for every other provider. |
 | `SYSTEM_LLM_API_KEY` | No | unset | API key for `SYSTEM_LLM_PROVIDER`. |
 | `SYSTEM_LLM_BASE_URL` | No | unset | Only needed when `SYSTEM_LLM_PROVIDER=other` (a custom OpenAI-compatible endpoint). |
+| `FREE_EVALUATION_LIMIT` | No | `5` | Free job evaluations (a fit score plus its first breakdown) a user with no AI API key of their own gets on the `SYSTEM_LLM_*` key, so they can try the app before adding one. `0` turns the free trial off; it's also off whenever `SYSTEM_LLM_PROVIDER`/`SYSTEM_LLM_API_KEY` aren't set. See `app/services/ai_access.py`. |
 | `GCP_PROJECT_ID` | **Yes** | — | GCP project used for Pub/Sub queueing. Any string works against the local emulator (e.g. `local-dev`); use your real project id when pointing at real GCP. |
 | `PUBSUB_TOPIC_ID` | No | `job-scan-requests` | Pub/Sub topic name for individual job scans. |
 | `PUBSUB_SUBSCRIPTION_ID` | No | `job-scan-requests-worker` | Pub/Sub pull-subscription name, consumed by `worker.py`. |

@@ -47,6 +47,7 @@ from app.schemas.resume import (
     TailoredResumeScoreUpload,
     TailoredResumeUpload,
 )
+from app.services.ai_access import evaluation_breakdown_credentials, use_free_evaluation
 from app.services.llm_client import LlmError
 from app.services.resume_llm import (
     apply_skill_additions_with_llm,
@@ -949,20 +950,28 @@ def score_main_resume(
 ) -> ResumeScore:
     resume = _resolve_resume(db, current_user.id, resume_id)
     posting = _get_job_posting(db, job_posting_id)
-    key = get_users_default_llm_key(db, current_user.id)
+    # Own key if the user has one, else one of their free evaluations — see
+    # app.services.ai_access. A failed LLM call below rolls the whole request
+    # back, free evaluation included.
+    credentials = use_free_evaluation(db, current_user)
 
     try:
         result = quick_score_resume_with_llm(
             resume.parsed_text,
             posting.description or "",
-            provider=key.provider,
-            model=key.model,
-            api_key=key.get_plaintext_key(),
-            base_url=key.base_url,
+            provider=credentials.provider,
+            model=credentials.model,
+            api_key=credentials.api_key,
+            base_url=credentials.base_url,
         )
     except LlmError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM request failed: {exc}") from exc
 
+    raw_response: dict = {"score": result.raw_response}
+    if credentials.is_free_trial:
+        # Lets the follow-up breakdown (evaluate_main_resume) ride along on
+        # the same free evaluation.
+        raw_response["free_trial"] = True
     score = ResumeScore(
         resume_id=resume.id,
         user_id=current_user.id,
@@ -972,7 +981,7 @@ def score_main_resume(
         missing_keywords=result.missing_keywords,
         summary=result.summary,
         overqualification_note=result.overqualification_note,
-        raw_response={"score": result.raw_response},
+        raw_response=raw_response,
     )
     db.add(score)
     db.flush()
@@ -994,7 +1003,6 @@ def evaluate_main_resume(
     """
     resume = _resolve_resume(db, current_user.id, resume_id)
     posting = _get_job_posting(db, job_posting_id)
-    key = get_users_default_llm_key(db, current_user.id)
 
     score = db.scalar(
         select(ResumeScore)
@@ -1006,16 +1014,22 @@ def evaluate_main_resume(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No score yet for this job — POST /resumes/main/score first.",
         )
+    credentials = evaluation_breakdown_credentials(
+        db,
+        current_user,
+        score_was_free_trial=bool((score.raw_response or {}).get("free_trial")),
+        already_evaluated=bool(score.category_scores),
+    )
 
     try:
         result = evaluate_resume_with_llm(
             resume.parsed_text,
             posting.description or "",
             score.overall_score,
-            provider=key.provider,
-            model=key.model,
-            api_key=key.get_plaintext_key(),
-            base_url=key.base_url,
+            provider=credentials.provider,
+            model=credentials.model,
+            api_key=credentials.api_key,
+            base_url=credentials.base_url,
         )
     except LlmError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM request failed: {exc}") from exc
