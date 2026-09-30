@@ -398,7 +398,9 @@ One-time setup, in test mode first:
    a recurring monthly Price. Put its `price_…` id in `STRIPE_PRICE_ID`.
 2. Put the secret key in `STRIPE_SECRET_KEY`.
 3. Turn on the customer portal (Settings → Billing → Customer portal) and
-   allow customers to cancel and update payment methods.
+   allow customers to update payment methods and cancel, with cancellation
+   set to "at the end of the billing period" (the app's Help page promises
+   users keep the plan until then).
 4. Add a webhook endpoint at `https://<api host>/billing/webhook` for
    `checkout.session.completed`, `customer.subscription.created`,
    `customer.subscription.updated` and `customer.subscription.deleted`. Put
