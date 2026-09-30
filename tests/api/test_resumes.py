@@ -606,6 +606,25 @@ def test_structure_resume_propagates_422_when_no_llm_access(db, monkeypatch):
     assert resume.structured_content is None
 
 
+def test_structure_resume_retries_once_on_llm_error(db, monkeypatch):
+    user_id = uuid.uuid4()
+    resume = _make_resume(db, user_id, is_main=True)
+    monkeypatch.setattr(resumes_routes, "structure_llm_credentials", lambda db, user: _fake_key())
+    replies = iter([LlmError("cut off"), TailoredResumeContent(summary="Ok.", sections=[], contact=None, raw_response={})])
+
+    def flaky(*a, **k):
+        reply = next(replies)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    monkeypatch.setattr(resumes_routes, "extract_resume_structure_with_llm", flaky)
+
+    result = structure_resume(resume.id, current_user=m.User(id=user_id), db=db)
+
+    assert result.structured_content["summary"] == "Ok."
+
+
 def test_structure_resume_502s_on_llm_error(db, monkeypatch):
     user_id = uuid.uuid4()
     resume = _make_resume(db, user_id, is_main=True)

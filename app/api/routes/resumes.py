@@ -252,13 +252,24 @@ def _structure_resume(db: Session, current_user: User, resume: Resume) -> dict:
     (e.g. upload) must catch those themselves.
     """
     key = structure_llm_credentials(db, current_user)
-    result = extract_resume_structure_with_llm(
-        resume.parsed_text,
-        provider=key.provider,
-        model=key.model,
-        api_key=key.api_key,
-        base_url=key.base_url,
-    )
+    # One automatic retry: the model now and then returns a reply that's cut
+    # off or isn't valid JSON, and a second try almost always works — better
+    # than showing the user an error for a hiccup. Either way it's one
+    # restructure, not two.
+    for attempt in (1, 2):
+        try:
+            result = extract_resume_structure_with_llm(
+                resume.parsed_text,
+                provider=key.provider,
+                model=key.model,
+                api_key=key.api_key,
+                base_url=key.base_url,
+            )
+            break
+        except LlmError as exc:
+            logger.warning("Structuring resume %s failed (attempt %d): %s", resume.id, attempt, exc)
+            if attempt == 2:
+                raise
     content = TailoredResumeUpload(
         summary=result.summary,
         sections=[ResumeSectionContent(**section) for section in result.sections],
