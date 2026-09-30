@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 from typing import Literal
 
@@ -20,6 +21,8 @@ class AiAccessRead(BaseModel):
     free_evaluation_limit: int
     free_evaluations_used: int
     free_evaluations_remaining: int
+    # Jobs unlocked with a free evaluation: every AI feature for these is free.
+    free_trial_job_ids: list[uuid.UUID]
     # The paid plan (see app.services.billing). subscription_status is
     # Stripe's own value, null if the user never subscribed.
     subscription_available: bool

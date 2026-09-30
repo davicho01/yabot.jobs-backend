@@ -47,7 +47,7 @@ from app.schemas.resume import (
     TailoredResumeScoreUpload,
     TailoredResumeUpload,
 )
-from app.services.ai_access import evaluation_breakdown_credentials, resolve_llm_credentials, use_free_evaluation
+from app.services.ai_access import job_llm_credentials, resolve_llm_credentials
 from app.services.llm_client import LlmError
 from app.services.resume_llm import (
     apply_skill_additions_with_llm,
@@ -952,10 +952,10 @@ def score_main_resume(
 ) -> ResumeScore:
     resume = _resolve_resume(db, current_user.id, resume_id)
     posting = _get_job_posting(db, job_posting_id)
-    # Own key if the user has one, else one of their free evaluations — see
+    # Plan, own key, or the free trial (which unlocks this job) — see
     # app.services.ai_access. A failed LLM call below rolls the whole request
     # back, free evaluation included.
-    credentials = use_free_evaluation(db, current_user)
+    credentials = job_llm_credentials(db, current_user, posting.id)
 
     try:
         result = quick_score_resume_with_llm(
@@ -969,11 +969,6 @@ def score_main_resume(
     except LlmError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM request failed: {exc}") from exc
 
-    raw_response: dict = {"score": result.raw_response}
-    if credentials.is_free_trial:
-        # Lets the follow-up breakdown (evaluate_main_resume) ride along on
-        # the same free evaluation.
-        raw_response["free_trial"] = True
     score = ResumeScore(
         resume_id=resume.id,
         user_id=current_user.id,
@@ -983,7 +978,7 @@ def score_main_resume(
         missing_keywords=result.missing_keywords,
         summary=result.summary,
         overqualification_note=result.overqualification_note,
-        raw_response=raw_response,
+        raw_response={"score": result.raw_response},
     )
     db.add(score)
     db.flush()
@@ -1016,12 +1011,7 @@ def evaluate_main_resume(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No score yet for this job — POST /resumes/main/score first.",
         )
-    credentials = evaluation_breakdown_credentials(
-        db,
-        current_user,
-        score_was_free_trial=bool((score.raw_response or {}).get("free_trial")),
-        already_evaluated=bool(score.category_scores),
-    )
+    credentials = job_llm_credentials(db, current_user, posting.id)
 
     try:
         result = evaluate_resume_with_llm(
@@ -1179,7 +1169,7 @@ def generate_main_tailored_resume(
 ) -> TailoredResume:
     resume = _resolve_resume(db, current_user.id, resume_id)
     posting = _get_job_posting(db, job_posting_id)
-    key = resolve_llm_credentials(db, current_user)
+    key = job_llm_credentials(db, current_user, posting.id)
     fitness_score = _latest_resume_score_dict(db, resume.id, posting.id)
 
     try:
@@ -1250,7 +1240,7 @@ def score_tailored_resume(
 ) -> TailoredResumeScore:
     tailored = _get_owned_tailored_resume(db, current_user.id, tailored_id)
     posting = _get_job_posting(db, tailored.job_posting_id)
-    key = resolve_llm_credentials(db, current_user)
+    key = job_llm_credentials(db, current_user, posting.id)
 
     try:
         result = quick_score_resume_with_llm(
@@ -1292,7 +1282,7 @@ def evaluate_tailored_resume(
     """
     tailored = _get_owned_tailored_resume(db, current_user.id, tailored_id)
     posting = _get_job_posting(db, tailored.job_posting_id)
-    key = resolve_llm_credentials(db, current_user)
+    key = job_llm_credentials(db, current_user, posting.id)
 
     score = db.scalar(
         select(TailoredResumeScore)
@@ -1447,7 +1437,7 @@ def generate_main_cover_letter(
 ) -> CoverLetter:
     resume = _resolve_current_version(db, current_user.id, resume_id)
     posting = _get_job_posting(db, job_posting_id)
-    key = resolve_llm_credentials(db, current_user)
+    key = job_llm_credentials(db, current_user, posting.id)
 
     # Prefer the resume already tailored to this job, if one exists — it has
     # the job-matched bullets/skill additions baked in, which is exactly what
@@ -1563,7 +1553,7 @@ def generate_main_interview_prep(
 ) -> InterviewPrep:
     resume = _resolve_resume(db, current_user.id, resume_id)
     posting = _get_job_posting(db, job_posting_id)
-    key = resolve_llm_credentials(db, current_user)
+    key = job_llm_credentials(db, current_user, posting.id)
 
     try:
         generated = generate_interview_prep_with_llm(

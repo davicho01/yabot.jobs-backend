@@ -10,12 +10,13 @@ In order of preference:
    stay put and take over again once the plan ends.
 2. The user's own default API key (bring-your-own-key) — unlimited, and
    billed by their provider, not us.
-3. The free trial: `settings.free_evaluation_limit` job evaluations on the
-   system key, so a new user can see what the app does before being asked
-   for a key or a subscription. A "free evaluation" is one POST
-   /resumes/main/score for a job, plus that score's first POST
-   /resumes/main/evaluation breakdown at no extra cost — together they're
-   what the Apply page calls a fit check. Nothing else is covered by it.
+3. The free trial: `settings.free_evaluation_limit` jobs on the system
+   key, so a new user can see the whole product before being asked for a
+   key or a subscription. The first AI request for a job (whichever feature
+   it is) unlocks that job and spends one free evaluation; every AI feature
+   for that job is then free — score, breakdown, tailored resume, cover
+   letter, interview prep (see job_llm_credentials). Features that aren't
+   about one job (e.g. structuring or reviewing a resume) aren't covered.
 
 Metered use (a subscription request or a free evaluation) is taken up front
 with a conditional UPDATE, so concurrent requests can't overspend it. The
@@ -30,11 +31,13 @@ from typing import Literal
 
 from fastapi import HTTPException, status
 from sqlalchemy import case, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.api_key import UserApiKey
 from app.models.enums import LlmProvider
+from app.models.free_trial_job import FreeTrialJob
 from app.models.user import User
 
 # Stripe subscription statuses that grant access. past_due is deliberately
@@ -151,8 +154,8 @@ def active_source(db: Session, user: User) -> tuple[CredentialSource | None, Use
     """What the user's next AI request would run on, and their default key
     (returned even when the plan outranks it, so the UI can say it's unused).
     Same order as the resolvers below, but read-only: nothing is metered.
-    "free_trial" only means free evaluations are left — the trial covers job
-    scoring alone, not every feature."""
+    "free_trial" means free evaluations are left for new jobs; the trial
+    covers job features only, not resume-wide ones."""
     key = get_own_default_key(db, user.id)
     if has_active_subscription(user):
         return "subscription", key
@@ -198,9 +201,10 @@ def _use_subscription_request(db: Session, user: User) -> LlmCredentials:
 
 
 def resolve_llm_credentials(db: Session, user: User) -> LlmCredentials:
-    """Credentials for any resume LLM feature: the user's subscription, else
-    their own key. The free trial doesn't cover these — see
-    use_free_evaluation for the one feature it does."""
+    """Credentials for a resume LLM feature that isn't about one job (e.g.
+    structuring or reviewing the resume): the user's subscription, else
+    their own key. The free trial doesn't cover these — job features go
+    through job_llm_credentials instead."""
     if has_active_subscription(user):
         return _use_subscription_request(db, user)
     key = get_own_default_key(db, user.id)
@@ -209,9 +213,44 @@ def resolve_llm_credentials(db: Session, user: User) -> LlmCredentials:
     raise _unprocessable(no_access_message())
 
 
-def use_free_evaluation(db: Session, user: User) -> LlmCredentials:
-    """Credentials for a new job score (POST /resumes/main/score):
-    subscription, else own key, else one of the user's free evaluations."""
+def _is_unlocked(db: Session, user: User, job_posting_id: uuid.UUID) -> bool:
+    return (
+        db.scalar(
+            select(FreeTrialJob.id).where(
+                FreeTrialJob.user_id == user.id, FreeTrialJob.job_posting_id == job_posting_id
+            )
+        )
+        is not None
+    )
+
+
+def _unlock_job(db: Session, user: User, job_posting_id: uuid.UUID) -> None:
+    """Spend one free evaluation on this job. The row goes in first, inside a
+    savepoint: if a concurrent request (say, a double click) is unlocking the
+    same job, the unique constraint makes this one wait and then find it
+    already unlocked, rather than spending a second evaluation on it."""
+    try:
+        with db.begin_nested():
+            db.add(FreeTrialJob(user_id=user.id, job_posting_id=job_posting_id))
+    except IntegrityError:
+        return
+    spent = db.execute(
+        update(User)
+        .where(User.id == user.id, User.free_evaluations_used < settings.free_evaluation_limit)
+        .values(free_evaluations_used=User.free_evaluations_used + 1)
+        .execution_options(synchronize_session=False)
+    ).rowcount
+    if spent == 0:
+        # The route's rollback takes the FreeTrialJob row back out too.
+        raise _unprocessable(trial_exhausted_message())
+    db.refresh(user, attribute_names=["free_evaluations_used"])
+
+
+def job_llm_credentials(db: Session, user: User, job_posting_id: uuid.UUID) -> LlmCredentials:
+    """Credentials for an AI feature about one job — its score or breakdown,
+    tailored resume (and that version's score), cover letter, interview prep.
+    Subscription, else own key, else the free trial: free if this job is
+    already unlocked, otherwise unlocking it spends one free evaluation."""
     if has_active_subscription(user):
         return _use_subscription_request(db, user)
     key = get_own_default_key(db, user.id)
@@ -219,33 +258,10 @@ def use_free_evaluation(db: Session, user: User) -> LlmCredentials:
         return _own_credentials(key)
     if not free_trial_enabled():
         raise _unprocessable(no_access_message())
-
-    result = db.execute(
-        update(User)
-        .where(User.id == user.id, User.free_evaluations_used < settings.free_evaluation_limit)
-        .values(free_evaluations_used=User.free_evaluations_used + 1)
-        .execution_options(synchronize_session=False)
-    )
-    if result.rowcount == 0:
-        raise _unprocessable(trial_exhausted_message())
-    db.refresh(user, attribute_names=["free_evaluations_used"])
+    if not _is_unlocked(db, user, job_posting_id):
+        _unlock_job(db, user, job_posting_id)
     return _system_credentials("free_trial")
 
 
-def evaluation_breakdown_credentials(
-    db: Session, user: User, *, score_was_free_trial: bool, already_evaluated: bool
-) -> LlmCredentials:
-    """Credentials for a score's detailed breakdown (POST
-    /resumes/main/evaluation). The first breakdown of a score that was itself
-    a free evaluation comes with it; anything else (re-running a breakdown,
-    or breaking down a score made with a key that's since been removed)
-    needs the user's own key or a subscription.
-    """
-    if has_active_subscription(user):
-        return _use_subscription_request(db, user)
-    key = get_own_default_key(db, user.id)
-    if key is not None:
-        return _own_credentials(key)
-    if already_evaluated or not score_was_free_trial or not free_trial_enabled():
-        raise _unprocessable(no_access_message())
-    return _system_credentials("free_trial")
+def free_trial_job_ids(db: Session, user: User) -> list[uuid.UUID]:
+    return list(db.scalars(select(FreeTrialJob.job_posting_id).where(FreeTrialJob.user_id == user.id)).all())

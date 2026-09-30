@@ -33,7 +33,7 @@ def engine():
     engine = create_engine(
         "sqlite:///:memory:", poolclass=StaticPool, connect_args={"check_same_thread": False}
     )
-    Base.metadata.create_all(engine, tables=[m.User.__table__, m.UserApiKey.__table__])
+    Base.metadata.create_all(engine, tables=[m.User.__table__, m.UserApiKey.__table__, m.FreeTrialJob.__table__])
     with engine.begin() as conn:
         conn.execute(text("DROP INDEX IF EXISTS uq_user_api_keys_one_default_per_user"))
     return engine
@@ -368,13 +368,10 @@ def test_subscription_beats_a_saved_key(db):
 
     for resolve in (
         ai_access.resolve_llm_credentials,
-        ai_access.use_free_evaluation,
-        lambda db, user: ai_access.evaluation_breakdown_credentials(
-            db, user, score_was_free_trial=False, already_evaluated=True
-        ),
+        lambda db, user: ai_access.job_llm_credentials(db, user, uuid.uuid4()),
     ):
         assert resolve(db, user).source == "subscription"
-    assert user.subscription_usage_count == 3
+    assert user.subscription_usage_count == 2
 
 
 def test_saved_key_takes_over_when_the_plan_ends(db):
@@ -410,7 +407,7 @@ def test_subscriber_scores_dont_spend_free_evaluations(db, monkeypatch):
     monkeypatch.setattr(settings, "free_evaluation_limit", 5)
     user = _subscribed_user(db)
 
-    credentials = ai_access.use_free_evaluation(db, user)
+    credentials = ai_access.job_llm_credentials(db, user, uuid.uuid4())
 
     assert credentials.source == "subscription"
     assert user.free_evaluations_used == 0

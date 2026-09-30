@@ -9,12 +9,12 @@ from sqlalchemy.orm import Session, sessionmaker
 import app.models as m
 from app.api.routes import resumes as resumes_routes
 from app.api.routes.onboarding import dismiss, read_ai_access, read_onboarding
-from app.api.routes.resumes import evaluate_main_resume, score_main_resume
+from app.api.routes.resumes import evaluate_main_resume, generate_main_tailored_resume, score_main_resume
 from app.core.config import settings
 from app.db.base import Base
 from app.services import ai_access
 from app.services.llm_client import LlmError
-from app.services.resume_llm import ResumeEvaluationResult, ResumeQuickScoreResult
+from app.services.resume_llm import ResumeEvaluationResult, ResumeQuickScoreResult, TailoredResumeContent
 
 _counter = itertools.count()
 
@@ -32,6 +32,8 @@ def db() -> Session:
             m.JobPostingUrl.__table__,
             m.JobPosting.__table__,
             m.UserJobApplication.__table__,
+            m.FreeTrialJob.__table__,
+            m.TailoredResume.__table__,
         ],
     )
     with engine.begin() as conn:
@@ -136,7 +138,7 @@ def test_own_key_is_used_and_no_free_evaluation_spent(db, trial_on):
     user = _make_user(db)
     _make_key(db, user)
 
-    credentials = ai_access.use_free_evaluation(db, user)
+    credentials = ai_access.job_llm_credentials(db, user, uuid.uuid4())
 
     assert credentials.api_key == "own-key"
     assert credentials.is_free_trial is False
@@ -147,7 +149,7 @@ def test_no_key_and_no_trial_asks_for_a_key(db, trial_off):
     user = _make_user(db)
 
     with pytest.raises(HTTPException) as exc_info:
-        ai_access.use_free_evaluation(db, user)
+        ai_access.job_llm_credentials(db, user, uuid.uuid4())
 
     assert exc_info.value.status_code == 422
     assert exc_info.value.detail == ai_access.no_access_message()
@@ -165,26 +167,47 @@ def test_trial_needs_a_model_unless_anthropic(trial_on, monkeypatch):
     assert ai_access.free_trial_enabled() is False
 
 
-def test_free_evaluations_are_spent_until_the_limit(db, trial_on):
+def test_each_new_job_spends_one_free_evaluation_until_the_limit(db, trial_on):
     user = _make_user(db)
+    job_a, job_b, job_c = _make_posting(db), _make_posting(db), _make_posting(db)
 
-    first = ai_access.use_free_evaluation(db, user)
-    ai_access.use_free_evaluation(db, user)
+    first = ai_access.job_llm_credentials(db, user, job_a.id)
+    ai_access.job_llm_credentials(db, user, job_b.id)
 
     assert first.api_key == "system-key"
     assert first.is_free_trial is True
     assert user.free_evaluations_used == 2
+    assert set(ai_access.free_trial_job_ids(db, user)) == {job_a.id, job_b.id}
     with pytest.raises(HTTPException) as exc_info:
-        ai_access.use_free_evaluation(db, user)
+        ai_access.job_llm_credentials(db, user, job_c.id)
     assert exc_info.value.status_code == 422
     assert "used all 2 free evaluations" in exc_info.value.detail
+
+
+def test_an_unlocked_job_stays_free_after_the_limit(db, trial_on):
+    user = _make_user(db)
+    job = _make_posting(db)
+    ai_access.job_llm_credentials(db, user, job.id)
+    ai_access.job_llm_credentials(db, user, _make_posting(db).id)
+
+    # Out of new unlocks, but everything on an unlocked job keeps working.
+    for _ in range(3):
+        assert ai_access.job_llm_credentials(db, user, job.id).is_free_trial is True
     assert user.free_evaluations_used == 2
 
 
-# ------------------------------------------------------------ score/evaluate routes
+def test_resume_wide_features_are_not_covered_by_the_trial(db, trial_on):
+    user = _make_user(db)
+
+    with pytest.raises(HTTPException) as exc_info:
+        ai_access.resolve_llm_credentials(db, user)
+    assert exc_info.value.status_code == 422
 
 
-def test_score_on_free_trial_marks_the_score_and_spends_one(db, trial_on, fake_llm):
+# ------------------------------------------------------------ routes
+
+
+def test_score_on_free_trial_unlocks_the_job(db, trial_on, fake_llm):
     user = _make_user(db)
     _make_resume(db, user)
     posting = _make_posting(db)
@@ -192,27 +215,27 @@ def test_score_on_free_trial_marks_the_score_and_spends_one(db, trial_on, fake_l
     score = _score(db, user, posting)
 
     assert score.overall_score == 80
-    assert score.raw_response["free_trial"] is True
     assert user.free_evaluations_used == 1
+    assert ai_access.free_trial_job_ids(db, user) == [posting.id]
     assert fake_llm[0][1]["api_key"] == "system-key"
 
 
-def test_score_with_own_key_is_not_marked_free(db, trial_on, fake_llm):
+def test_score_with_own_key_spends_nothing(db, trial_on, fake_llm):
     user = _make_user(db)
     _make_key(db, user)
     _make_resume(db, user)
     posting = _make_posting(db)
 
-    score = _score(db, user, posting)
+    _score(db, user, posting)
 
-    assert "free_trial" not in score.raw_response
     assert user.free_evaluations_used == 0
+    assert ai_access.free_trial_job_ids(db, user) == []
     assert fake_llm[0][1]["api_key"] == "own-key"
 
 
 def test_score_llm_failure_is_a_502(db, trial_on, monkeypatch):
     # get_db rolls the request back on this exception, which is what
-    # returns the free evaluation — see ai_access.use_free_evaluation.
+    # returns the free evaluation and the unlock.
     user = _make_user(db)
     _make_resume(db, user)
     posting = _make_posting(db)
@@ -227,37 +250,52 @@ def test_score_llm_failure_is_a_502(db, trial_on, monkeypatch):
     assert exc_info.value.status_code == 502
 
 
-def test_first_breakdown_of_a_free_score_is_included(db, trial_on, fake_llm):
+def test_breakdowns_on_an_unlocked_job_are_free_and_repeatable(db, trial_on, fake_llm):
     user = _make_user(db)
     _make_resume(db, user)
     posting = _make_posting(db)
     _score(db, user, posting)
 
-    score = evaluate_main_resume(posting.id, resume_id=None, current_user=user, db=db)
+    for _ in range(2):
+        score = evaluate_main_resume(posting.id, resume_id=None, current_user=user, db=db)
 
     assert score.category_scores == [{"category": "skills", "score": 80}]
-    assert score.raw_response["free_trial"] is True
     assert user.free_evaluations_used == 1
 
-    # Re-running it isn't.
-    with pytest.raises(HTTPException) as exc_info:
-        evaluate_main_resume(posting.id, resume_id=None, current_user=user, db=db)
-    assert exc_info.value.status_code == 422
 
-
-def test_breakdown_of_a_score_made_with_a_removed_key_needs_a_key(db, trial_on, fake_llm):
+def test_tailoring_an_unlocked_job_is_free(db, trial_on, fake_llm, monkeypatch):
     user = _make_user(db)
-    key = _make_key(db, user)
     _make_resume(db, user)
     posting = _make_posting(db)
     _score(db, user, posting)
-    db.delete(key)
-    db.commit()
+    monkeypatch.setattr(
+        resumes_routes,
+        "generate_tailored_resume_with_llm",
+        lambda *a, **k: TailoredResumeContent(summary="Tailored.", sections=[], contact=None, raw_response={}),
+    )
+    monkeypatch.setattr(resumes_routes, "upload_file", lambda *a, **k: None)
 
-    with pytest.raises(HTTPException) as exc_info:
-        evaluate_main_resume(posting.id, resume_id=None, current_user=user, db=db)
-    assert exc_info.value.status_code == 422
-    assert exc_info.value.detail == ai_access.no_access_message()
+    tailored = generate_main_tailored_resume(posting.id, resume_id=None, current_user=user, db=db)
+
+    assert tailored.content["summary"] == "Tailored."
+    assert user.free_evaluations_used == 1
+
+
+def test_tailoring_first_unlocks_the_job_too(db, trial_on, monkeypatch):
+    user = _make_user(db)
+    _make_resume(db, user)
+    posting = _make_posting(db)
+    monkeypatch.setattr(
+        resumes_routes,
+        "generate_tailored_resume_with_llm",
+        lambda *a, **k: TailoredResumeContent(summary="Tailored.", sections=[], contact=None, raw_response={}),
+    )
+    monkeypatch.setattr(resumes_routes, "upload_file", lambda *a, **k: None)
+
+    generate_main_tailored_resume(posting.id, resume_id=None, current_user=user, db=db)
+
+    assert user.free_evaluations_used == 1
+    assert ai_access.free_trial_job_ids(db, user) == [posting.id]
 
 
 # ------------------------------------------------------------------ onboarding
