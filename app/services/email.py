@@ -368,3 +368,30 @@ def send_follow_up_reminder_email(to_email: str, *, title: str | None, company_n
     except ClientError:
         logger.exception("Failed to send follow-up reminder email to %s", to_email)
         raise
+
+
+def send_feedback_notification_email(
+    to_emails: list[str], *, from_user_email: str, kind: str, message: str, page_url: str | None
+) -> None:
+    """Tell admins a user sent feedback or a support question — see
+    app.services.feedback.create_feedback, the only caller. Plain text only:
+    it's an internal notification, not something users ever see. Same
+    log-only local-dev fallback as send_magic_link_email.
+    """
+    subject = f"[Yabot feedback] {kind} from {from_user_email}"
+    body = f"{message}\n\nFrom: {from_user_email}\nPage: {page_url or 'unknown'}\n\nTriage: {settings.frontend_base_url}/admin/feedback"
+
+    if settings.email_sender_access_key_id is None:
+        logger.info("Feedback notification to %s: %s\n%s", to_emails, subject, body)
+        return
+
+    try:
+        _get_client().send_email(
+            FromEmailAddress=settings.email_from_address,
+            Destination={"ToAddresses": to_emails},
+            ReplyToAddresses=[from_user_email],
+            Content={"Simple": {"Subject": {"Data": subject}, "Body": {"Text": {"Data": body}}}},
+        )
+    except ClientError:
+        logger.exception("Failed to send feedback notification email to %s", to_emails)
+        raise

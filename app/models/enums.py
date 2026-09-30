@@ -300,3 +300,20 @@ class FlagReason(StrEnum):
     BROKEN_OR_EXPIRED = "broken_or_expired"
     GARBLED_DESCRIPTION = "garbled_description"
     OTHER = "other"
+
+
+class FeedbackKind(StrEnum):
+    """What a Feedback submission is about — one form serves both the
+    "Feedback" button and the Help page's contact form, so a support
+    question is just kind=QUESTION rather than a separate ticket system."""
+
+    BUG = "bug"
+    QUESTION = "question"
+    IDEA = "idea"
+    OTHER = "other"
+
+
+class FeedbackStatus(StrEnum):
+    NEW = "new"
+    READ = "read"
+    RESOLVED = "resolved"

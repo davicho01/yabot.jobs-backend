@@ -1,6 +1,7 @@
 from app.models.api_key import UserApiKey
 from app.models.auth import MagicLinkToken, PersonalAccessToken, UserSession
 from app.models.crawl_source import CrawlSource
+from app.models.feedback import Feedback
 from app.models.job_application import UserJobApplication
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
@@ -28,4 +29,5 @@ __all__ = [
     "OAuthClient",
     "OAuthAuthorizationRequest",
     "OAuthRefreshToken",
+    "Feedback",
 ]

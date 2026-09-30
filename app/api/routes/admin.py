@@ -4,13 +4,16 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import asc, desc, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_admin_user, get_db
 from app.models.crawl_source import CrawlSource
+from app.models.enums import FeedbackKind, FeedbackStatus
+from app.models.feedback import Feedback
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
 from app.schemas.admin import AdminDashboardRead, ScanDayCount, ScanHourCount, ScanMonthCount, ScanWeekCount
+from app.schemas.feedback import AdminFeedbackListRead, AdminFeedbackRead, FeedbackStatusUpdate
 from app.schemas.job import JobDetailRead, JobListRead
 from app.services import admin as admin_service
 from app.services.jobs import dismiss_job_flag, to_job_detail
@@ -119,3 +122,58 @@ def dismiss_listing_flag(url_id: uuid.UUID, db: Session = Depends(get_db)) -> Jo
     db.flush()
     db.refresh(url_row)
     return to_job_detail(url_row, include_flag=True)
+
+
+def _to_admin_feedback(feedback: Feedback) -> AdminFeedbackRead:
+    return AdminFeedbackRead(
+        id=feedback.id,
+        kind=feedback.kind,
+        message=feedback.message,
+        rating=feedback.rating,
+        page_url=feedback.page_url,
+        status=feedback.status,
+        created_at=feedback.created_at,
+        user_id=feedback.user_id,
+        user_email=feedback.user.email,
+        user_agent=feedback.user_agent,
+    )
+
+
+@router.get("/feedback", response_model=AdminFeedbackListRead)
+def list_feedback(
+    status_filter: FeedbackStatus | None = Query(None, alias="status"),
+    kind: FeedbackKind | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> AdminFeedbackListRead:
+    """The triage queue for POST /feedback submissions, newest first.
+    `new_count` ignores the filters so the page can always show how many
+    are still waiting."""
+    stmt = select(Feedback)
+    if status_filter is not None:
+        stmt = stmt.where(Feedback.status == status_filter)
+    if kind is not None:
+        stmt = stmt.where(Feedback.kind == kind)
+
+    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    new_count = db.scalar(select(func.count()).select_from(Feedback).where(Feedback.status == FeedbackStatus.NEW)) or 0
+    rows = db.scalars(
+        stmt.options(joinedload(Feedback.user))
+        .order_by(Feedback.created_at.desc())
+        .limit(page_size)
+        .offset((page - 1) * page_size)
+    ).all()
+    return AdminFeedbackListRead(items=[_to_admin_feedback(row) for row in rows], total=total, new_count=new_count)
+
+
+@router.patch("/feedback/{feedback_id}", response_model=AdminFeedbackRead)
+def update_feedback_status(
+    feedback_id: uuid.UUID, payload: FeedbackStatusUpdate, db: Session = Depends(get_db)
+) -> AdminFeedbackRead:
+    feedback = db.get(Feedback, feedback_id)
+    if feedback is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback not found.")
+    feedback.status = payload.status
+    db.flush()
+    return _to_admin_feedback(feedback)

@@ -133,6 +133,12 @@ class Settings(BaseSettings):
     job_submission_rate_limit_window_minutes: float = 60.0
     job_submission_rate_limit_max_new_urls: int = 20
 
+    # Per-user cap on in-app feedback/support submissions
+    # (app.services.feedback.create_feedback) — each one can email every
+    # admin, so this keeps one stuck form or script from flooding inboxes.
+    feedback_rate_limit_window_minutes: float = 60.0
+    feedback_rate_limit_max_per_user: int = 10
+
     # Per-user cap on saved searches (app.api.routes.saved_searches) — each
     # one gets re-run against every posting on every alert sweep
     # (saved_search_alerts.py), so this also bounds that sweep's per-user cost.

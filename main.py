@@ -13,6 +13,7 @@ from app.api.routes import (
     auth,
     auth_tokens,
     crawl_sources,
+    feedback,
     jobs,
     oauth,
     resumes,
@@ -59,6 +60,7 @@ app.include_router(applications.router)
 app.include_router(crawl_sources.router)
 app.include_router(resumes.router)
 app.include_router(saved_searches.router)
+app.include_router(feedback.router)
 app.include_router(admin.router)
 
 
