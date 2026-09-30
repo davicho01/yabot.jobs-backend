@@ -55,7 +55,7 @@ def _client() -> stripe.StripeClient:
 
 
 def _return_url(query: str = "") -> str:
-    # The AI API Keys page is where the plan is bought and managed.
+    # The AI access page (/api-keys) is where the plan is bought and managed.
     return f"{settings.frontend_base_url}/api-keys{query}"
 
 
@@ -75,7 +75,7 @@ def _ensure_customer(db: Session, user: User, client: stripe.StripeClient) -> st
 def create_checkout_session(db: Session, user: User) -> str:
     """Start a Stripe Checkout for the plan and return its URL."""
     if has_active_subscription(user):
-        raise BillingError("You're already subscribed. Manage your plan from AI API Keys.")
+        raise BillingError("You're already subscribed. Manage your plan from AI access.")
     if user.subscription_status in PAYMENT_ISSUE_STATUSES:
         raise BillingError("Your last payment didn't go through. Update your card from Manage billing instead.")
     client = _client()

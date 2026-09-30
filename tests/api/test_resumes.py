@@ -596,7 +596,7 @@ def test_structure_resume_propagates_422_when_no_llm_access(db, monkeypatch):
     resume = _make_resume(db, user_id, is_main=True)
 
     def raise_no_key(db, user):
-        raise HTTPException(status_code=422, detail="Add an AI API key in AI API Keys to use this feature.")
+        raise HTTPException(status_code=422, detail="Add an AI API key in AI access to use this feature.")
 
     monkeypatch.setattr(resumes_routes, "resolve_llm_credentials", raise_no_key)
 

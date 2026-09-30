@@ -129,21 +129,21 @@ def _system_credentials(source: CredentialSource) -> LlmCredentials:
 def no_access_message() -> str:
     if subscriptions_enabled():
         return (
-            f"Add an AI API key in AI API Keys, or subscribe for {settings.subscription_price_label}, "
+            f"Add an AI API key in AI access, or subscribe for {settings.subscription_price_label}, "
             "to use this feature."
         )
-    return "Add an AI API key in AI API Keys to use this feature."
+    return "Add an AI API key in AI access to use this feature."
 
 
 def trial_exhausted_message() -> str:
     if subscriptions_enabled():
         return (
             f"You've used all {settings.free_evaluation_limit} free evaluations. Add your own AI API key in "
-            f"AI API Keys, or subscribe for {settings.subscription_price_label}, to keep going."
+            f"AI access, or subscribe for {settings.subscription_price_label}, to keep going."
         )
     return (
         f"You've used all {settings.free_evaluation_limit} free evaluations. "
-        "Add your own AI API key in AI API Keys to keep going."
+        "Add your own AI API key in AI access to keep going."
     )
 
 
@@ -190,7 +190,7 @@ def _use_subscription_request(db: Session, user: User) -> LlmCredentials:
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=(
                 f"You've used this month's {limit} AI requests. They reset{renews}. "
-                "You can also add your own AI API key in AI API Keys for unlimited use."
+                "You can also add your own AI API key in AI access for unlimited use."
             ),
         )
     db.refresh(user, attribute_names=["subscription_usage_count", "subscription_usage_period_end"])
