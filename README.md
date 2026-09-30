@@ -44,7 +44,7 @@ Set these in `.env` (loaded automatically by `app/core/config.py`).
 | `STRIPE_WEBHOOK_SECRET` | No | unset | Signing secret (`whsec_…`) of the webhook endpoint pointing at `POST /billing/webhook`. |
 | `STRIPE_PRICE_ID` | No | unset | The recurring Price (`price_…`) Checkout sells, e.g. $5/month. |
 | `SUBSCRIPTION_PRICE_LABEL` | No | `$5/month` | How the price reads in the app and in error messages. Keep it in sync with the Stripe price. |
-| `SUBSCRIPTION_MONTHLY_REQUEST_LIMIT` | No | `200` | AI requests a subscriber gets per billing period on the system key (scores, tailoring, cover letters…), so one heavy user can't cost more than the plan brings in. `0` means unlimited. Users with their own key are never counted. |
+| `SUBSCRIPTION_MONTHLY_REQUEST_LIMIT` | No | `0` | Optional cap on AI requests a subscriber gets per billing period on the system key (scores, tailoring, cover letters…). `0` means unlimited, the default: at DeepSeek pricing heavy use stays well under the plan price, so this is only a lever in case of abuse. Usage is counted either way, and users with their own key are never counted. |
 | `GCP_PROJECT_ID` | **Yes** | — | GCP project used for Pub/Sub queueing. Any string works against the local emulator (e.g. `local-dev`); use your real project id when pointing at real GCP. |
 | `PUBSUB_TOPIC_ID` | No | `job-scan-requests` | Pub/Sub topic name for individual job scans. |
 | `PUBSUB_SUBSCRIPTION_ID` | No | `job-scan-requests-worker` | Pub/Sub pull-subscription name, consumed by `worker.py`. |
@@ -381,8 +381,8 @@ that's what most ATS parsers actually handle reliably, not a designed PDF.
 ## Paid plan (Stripe)
 
 Users who'd rather not manage their own AI API key can subscribe (e.g.
-$5/month) and run every resume feature on the `SYSTEM_LLM_*` key, up to
-`SUBSCRIPTION_MONTHLY_REQUEST_LIMIT` requests per billing period. Access is
+$5/month) and run every resume feature on the `SYSTEM_LLM_*` key (with an
+optional per-period cap, `SUBSCRIPTION_MONTHLY_REQUEST_LIMIT`). Access is
 checked in this order (see `app/services/ai_access.py`): the user's own key,
 then an active subscription, then free-trial evaluations.
 

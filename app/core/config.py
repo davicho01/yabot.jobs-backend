@@ -42,9 +42,11 @@ class Settings(BaseSettings):
     stripe_price_id: str | None = None
     # Shown in the UI and error messages — keep in sync with the Stripe price.
     subscription_price_label: str = "$5/month"
-    # Cap on system-key requests per billing period per subscriber, so one
-    # heavy user can't cost more than the plan brings in. 0 means unlimited.
-    subscription_monthly_request_limit: int = 200
+    # Optional cap on system-key requests per billing period per subscriber.
+    # 0 (the default) means unlimited: at DeepSeek pricing even heavy use
+    # costs well under the plan price (see ROADMAP.md in the frontend repo),
+    # so this is only a lever in case abuse shows up.
+    subscription_monthly_request_limit: int = 0
 
     # Google Cloud Pub/Sub — job scanning is queued here instead of running
     # inline in POST /jobs (page fetches + LLM calls can take well over a
