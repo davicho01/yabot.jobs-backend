@@ -42,6 +42,24 @@ def get_ai_access(db: Session, user: User) -> AiAccessRead:
     )
 
 
+def _ai_access_step_done(user: User, ai_access: AiAccessRead) -> bool:
+    """The "Set up AI access" step. A key or the plan completes it. The free
+    trial only does once the user has seen the AI access page (or already
+    used a free evaluation): it's on for everyone, so it would otherwise tick
+    this step off before they ever saw their options."""
+    if ai_access.has_own_key or ai_access.subscribed:
+        return True
+    seen = user.ai_access_seen_at is not None or user.free_evaluations_used > 0
+    return seen and ai_access.free_evaluations_remaining > 0
+
+
+def mark_ai_access_seen(db: Session, user: User, *, now: datetime | None = None) -> OnboardingRead:
+    if user.ai_access_seen_at is None:
+        user.ai_access_seen_at = now or datetime.now(timezone.utc)
+        db.flush()
+    return get_onboarding(db, user, now=now)
+
+
 def get_onboarding(db: Session, user: User, *, now: datetime | None = None) -> OnboardingRead:
     """The getting-started checklist: upload a resume, set up AI access (own
     key, subscription, or free trial), start an application, get a first
@@ -58,10 +76,7 @@ def get_onboarding(db: Session, user: User, *, now: datetime | None = None) -> O
         OnboardingStepRead(
             key="resume", done=bool(db.scalar(select(exists().where(Resume.user_id == user.id))))
         ),
-        OnboardingStepRead(
-            key="ai_access",
-            done=ai_access.has_own_key or ai_access.subscribed or ai_access.free_evaluations_remaining > 0,
-        ),
+        OnboardingStepRead(key="ai_access", done=_ai_access_step_done(user, ai_access)),
         OnboardingStepRead(
             key="application",
             done=bool(db.scalar(select(exists().where(UserJobApplication.user_id == user.id)))),

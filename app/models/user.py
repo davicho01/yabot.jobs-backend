@@ -49,6 +49,11 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # their only resume). See app.services.onboarding.
     onboarding_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     onboarding_dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # First time the user opened the AI access page (POST
+    # /onboarding/ai-access-seen). The free trial is on for everyone, so
+    # without this the getting-started "Set up AI access" step would be done
+    # before they ever saw their options. See app.services.onboarding.
+    ai_access_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Stripe billing (see app.services.billing, the only writer). Mirrors the
     # user's subscription as Stripe last reported it via webhook, so access

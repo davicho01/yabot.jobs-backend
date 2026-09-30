@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 import app.models as m
 from app.api.routes import resumes as resumes_routes
-from app.api.routes.onboarding import dismiss, read_ai_access, read_onboarding
+from app.api.routes.onboarding import ai_access_seen, dismiss, read_ai_access, read_onboarding
 from app.api.routes.resumes import evaluate_main_resume, generate_main_tailored_resume, score_main_resume
 from app.core.config import settings
 from app.db.base import Base
@@ -316,13 +316,36 @@ def test_onboarding_for_a_brand_new_user(db, trial_off):
     assert result.dismissed_at is None
 
 
-def test_free_trial_counts_as_ai_access(db, trial_on):
+def test_free_trial_counts_as_ai_access_once_the_page_is_seen(db, trial_on):
+    # The trial is on for everyone, so it only completes the step after the
+    # user has opened AI access — otherwise the step would be skipped.
     user = _make_user(db)
-    assert _steps(read_onboarding(current_user=user, db=db))["ai_access"] is True
+    assert _steps(read_onboarding(current_user=user, db=db))["ai_access"] is False
+
+    result = ai_access_seen(current_user=user, db=db)
+    assert _steps(result)["ai_access"] is True
+    first_seen = user.ai_access_seen_at
+    ai_access_seen(current_user=user, db=db)
+    assert user.ai_access_seen_at == first_seen
 
     user.free_evaluations_used = settings.free_evaluation_limit
     db.commit()
     assert _steps(read_onboarding(current_user=user, db=db))["ai_access"] is False
+
+
+def test_having_used_a_free_evaluation_counts_as_seen(db, trial_on):
+    user = _make_user(db)
+    user.free_evaluations_used = 1
+    db.commit()
+
+    assert _steps(read_onboarding(current_user=user, db=db))["ai_access"] is True
+
+
+def test_a_key_completes_ai_access_without_visiting(db, trial_on):
+    user = _make_user(db)
+    _make_key(db, user)
+
+    assert _steps(read_onboarding(current_user=user, db=db))["ai_access"] is True
 
 
 def test_onboarding_completes_and_stays_completed(db, trial_on, fake_llm):
