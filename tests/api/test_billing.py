@@ -352,17 +352,58 @@ def test_zero_limit_means_unlimited(db, monkeypatch):
     assert user.subscription_usage_count == 10
 
 
-def test_own_key_beats_subscription(db):
-    user = _subscribed_user(db)
+def _add_own_key(db, user: m.User) -> m.UserApiKey:
     key = m.UserApiKey(user_id=user.id, provider="openai", label="default", model="own", is_default=True)
     key.set_plaintext_key("own-key")
     db.add(key)
     db.commit()
+    return key
+
+
+def test_subscription_beats_a_saved_key(db):
+    # Someone paying for the plan must never also be billed by their own
+    # provider without realizing it.
+    user = _subscribed_user(db)
+    _add_own_key(db, user)
+
+    for resolve in (
+        ai_access.resolve_llm_credentials,
+        ai_access.use_free_evaluation,
+        lambda db, user: ai_access.evaluation_breakdown_credentials(
+            db, user, score_was_free_trial=False, already_evaluated=True
+        ),
+    ):
+        assert resolve(db, user).source == "subscription"
+    assert user.subscription_usage_count == 3
+
+
+def test_saved_key_takes_over_when_the_plan_ends(db):
+    user = _subscribed_user(db, subscription_status="canceled")
+    _add_own_key(db, user)
 
     credentials = ai_access.resolve_llm_credentials(db, user)
 
     assert credentials.api_key == "own-key"
     assert user.subscription_usage_count == 0
+
+
+def test_ai_access_reports_what_requests_run_on(db, monkeypatch):
+    monkeypatch.setattr(settings, "free_evaluation_limit", 5)
+    user = _subscribed_user(db)
+    _add_own_key(db, user)
+
+    summary = read_ai_access(current_user=user, db=db)
+    assert summary.active_source == "subscription"
+    assert summary.has_own_key is True
+    assert (summary.own_key_provider, summary.own_key_model) == ("openai", "own")
+
+    user.subscription_status = "canceled"
+    assert read_ai_access(current_user=user, db=db).active_source == "own_key"
+
+    other = _make_user(db)
+    assert read_ai_access(current_user=other, db=db).active_source == "free_trial"
+    other.free_evaluations_used = 5
+    assert read_ai_access(current_user=other, db=db).active_source is None
 
 
 def test_subscriber_scores_dont_spend_free_evaluations(db, monkeypatch):

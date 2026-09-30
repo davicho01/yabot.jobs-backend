@@ -9,6 +9,13 @@ class AiAccessRead(BaseModel):
     subscription, the free trial, or nothing yet. See app.services.ai_access."""
 
     has_own_key: bool
+    # What the next AI request runs on: "subscription", "own_key",
+    # "free_trial", or null when nothing is set up (or free evaluations ran
+    # out). A subscription outranks a saved key.
+    active_source: Literal["subscription", "own_key", "free_trial"] | None
+    # The user's default key, even while the plan outranks it.
+    own_key_provider: str | None
+    own_key_model: str | None
     free_trial_enabled: bool
     free_evaluation_limit: int
     free_evaluations_used: int

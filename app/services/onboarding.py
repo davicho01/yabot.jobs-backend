@@ -9,9 +9,9 @@ from app.models.resume import Resume, ResumeScore
 from app.models.user import User
 from app.schemas.onboarding import AiAccessRead, OnboardingRead, OnboardingStepRead
 from app.services.ai_access import (
+    active_source,
     free_evaluations_remaining,
     free_trial_enabled,
-    get_own_default_key,
     has_active_subscription,
     subscription_requests_used,
     subscriptions_enabled,
@@ -19,8 +19,12 @@ from app.services.ai_access import (
 
 
 def get_ai_access(db: Session, user: User) -> AiAccessRead:
+    source, key = active_source(db, user)
     return AiAccessRead(
-        has_own_key=get_own_default_key(db, user.id) is not None,
+        has_own_key=key is not None,
+        active_source=source,
+        own_key_provider=key.provider if key else None,
+        own_key_model=key.model if key else None,
         free_trial_enabled=free_trial_enabled(),
         free_evaluation_limit=settings.free_evaluation_limit,
         free_evaluations_used=user.free_evaluations_used,

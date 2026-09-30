@@ -2,12 +2,14 @@
 
 In order of preference:
 
-1. The user's own default API key (bring-your-own-key) — unlimited, and
+1. A paid subscription (see app.services.billing): every resume feature
+   runs on the system-wide key (SYSTEM_LLM_*), with an optional
+   `settings.subscription_monthly_request_limit` per billing period. It
+   wins over a saved key on purpose: someone paying for the plan must never
+   also be billed by their own provider without realizing it. Saved keys
+   stay put and take over again once the plan ends.
+2. The user's own default API key (bring-your-own-key) — unlimited, and
    billed by their provider, not us.
-2. A paid subscription (see app.services.billing): every resume feature
-   runs on the system-wide key (SYSTEM_LLM_*), up to
-   `settings.subscription_monthly_request_limit` requests per billing
-   period.
 3. The free trial: `settings.free_evaluation_limit` job evaluations on the
    system key, so a new user can see what the app does before being asked
    for a key or a subscription. A "free evaluation" is one POST
@@ -145,6 +147,22 @@ def trial_exhausted_message() -> str:
     )
 
 
+def active_source(db: Session, user: User) -> tuple[CredentialSource | None, UserApiKey | None]:
+    """What the user's next AI request would run on, and their default key
+    (returned even when the plan outranks it, so the UI can say it's unused).
+    Same order as the resolvers below, but read-only: nothing is metered.
+    "free_trial" only means free evaluations are left — the trial covers job
+    scoring alone, not every feature."""
+    key = get_own_default_key(db, user.id)
+    if has_active_subscription(user):
+        return "subscription", key
+    if key is not None:
+        return "own_key", key
+    if free_evaluations_remaining(user) > 0:
+        return "free_trial", None
+    return None, None
+
+
 def _unprocessable(detail: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=detail)
 
@@ -180,25 +198,25 @@ def _use_subscription_request(db: Session, user: User) -> LlmCredentials:
 
 
 def resolve_llm_credentials(db: Session, user: User) -> LlmCredentials:
-    """Credentials for any resume LLM feature: the user's own key, else their
-    subscription. The free trial doesn't cover these — see use_free_evaluation
-    for the one feature it does."""
+    """Credentials for any resume LLM feature: the user's subscription, else
+    their own key. The free trial doesn't cover these — see
+    use_free_evaluation for the one feature it does."""
+    if has_active_subscription(user):
+        return _use_subscription_request(db, user)
     key = get_own_default_key(db, user.id)
     if key is not None:
         return _own_credentials(key)
-    if has_active_subscription(user):
-        return _use_subscription_request(db, user)
     raise _unprocessable(no_access_message())
 
 
 def use_free_evaluation(db: Session, user: User) -> LlmCredentials:
-    """Credentials for a new job score (POST /resumes/main/score): own key,
-    else subscription, else one of the user's free evaluations."""
+    """Credentials for a new job score (POST /resumes/main/score):
+    subscription, else own key, else one of the user's free evaluations."""
+    if has_active_subscription(user):
+        return _use_subscription_request(db, user)
     key = get_own_default_key(db, user.id)
     if key is not None:
         return _own_credentials(key)
-    if has_active_subscription(user):
-        return _use_subscription_request(db, user)
     if not free_trial_enabled():
         raise _unprocessable(no_access_message())
 
@@ -223,11 +241,11 @@ def evaluation_breakdown_credentials(
     or breaking down a score made with a key that's since been removed)
     needs the user's own key or a subscription.
     """
+    if has_active_subscription(user):
+        return _use_subscription_request(db, user)
     key = get_own_default_key(db, user.id)
     if key is not None:
         return _own_credentials(key)
-    if has_active_subscription(user):
-        return _use_subscription_request(db, user)
     if already_evaluated or not score_was_free_trial or not free_trial_enabled():
         raise _unprocessable(no_access_message())
     return _system_credentials("free_trial")

@@ -383,8 +383,10 @@ that's what most ATS parsers actually handle reliably, not a designed PDF.
 Users who'd rather not manage their own AI API key can subscribe (e.g.
 $5/month) and run every resume feature on the `SYSTEM_LLM_*` key (with an
 optional per-period cap, `SUBSCRIPTION_MONTHLY_REQUEST_LIMIT`). Access is
-checked in this order (see `app/services/ai_access.py`): the user's own key,
-then an active subscription, then free-trial evaluations.
+checked in this order (see `app/services/ai_access.py`): an active
+subscription, then the user's own key, then free-trial evaluations. The plan
+outranks a saved key so a subscriber is never also billed by their own
+provider; the key takes over again when the plan ends.
 
 Stripe is the source of truth. The app sends users to Stripe Checkout to
 subscribe (`POST /billing/checkout`) and to the Stripe customer portal to
