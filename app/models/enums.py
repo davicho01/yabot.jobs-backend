@@ -253,6 +253,12 @@ class AtsType(StrEnum):
     # site whose own Atom feed (fly.io/jobs/feed.xml) lists every current
     # opening directly, no ATS involved at all (see adapters/flyio.py).
     FLYIO = "flyio"
+    # Comeet (rebranded "Spark Hire Recruit") — a multi-tenant ATS at
+    # www.comeet.com/jobs/{slug}/{uid}/..., every page a client-rendered
+    # SPA that embeds its own hydration data as a plain JS object literal
+    # (COMPANY_POSITIONS_DATA / POSITION_DATA) — no browser needed, a JSON
+    # decoder reads it directly (see adapters/comeet.py).
+    COMEET = "comeet"
 
 
 class CrawlSourceStatus(StrEnum):
