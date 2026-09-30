@@ -100,7 +100,9 @@ def scan_job_url(url: str) -> ScanResult | None:
         return ScanResult(success=False, error="Browser-render fallback failed fetching Tesla's job API.")
     data = _extract_json(rendered.html)
     if data is None:
-        return ScanResult(success=False, error="Couldn't parse Tesla's job API response.")
+        return ScanResult(
+            success=False, error=f"Couldn't parse Tesla's job API response. DEBUG: {rendered.html[:500]!r}"
+        )
 
     description = _description_of(data)
     salary_min, salary_max, salary_currency = salary_from_text(description)
