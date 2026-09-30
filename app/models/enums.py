@@ -259,6 +259,10 @@ class AtsType(StrEnum):
     # (COMPANY_POSITIONS_DATA / POSITION_DATA) — no browser needed, a JSON
     # decoder reads it directly (see adapters/comeet.py).
     COMEET = "comeet"
+    # Valve's in-house careers site (valvesoftware.com/en/jobs) — jobs
+    # server-rendered as plain ?job_id= links, no ATS platform involved
+    # (see adapters/valve.py).
+    VALVE = "valve"
 
 
 class CrawlSourceStatus(StrEnum):
