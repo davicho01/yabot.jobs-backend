@@ -255,6 +255,18 @@ def test_cancel_at_period_end_keeps_access_until_then(db, fake_stripe):
     assert ai_access.has_active_subscription(user) is True
 
 
+def test_a_scheduled_cancel_at_counts_as_not_renewing(db, fake_stripe):
+    # What the customer portal sends on newer API versions: cancel_at set,
+    # cancel_at_period_end left false.
+    user = _subscribed_user(db)
+    fake_stripe.subscriptions["sub_1"] = {**_subscription(), "cancel_at": PERIOD_END}
+
+    billing.handle_event(db, {"type": "customer.subscription.updated", "data": {"object": {"id": "sub_1"}}})
+
+    assert user.subscription_cancel_at_period_end is True
+    assert ai_access.has_active_subscription(user) is True
+
+
 def test_a_late_cancellation_of_an_old_subscription_is_ignored(db, fake_stripe):
     user = _subscribed_user(db)
     user.stripe_subscription_id = "sub_new"

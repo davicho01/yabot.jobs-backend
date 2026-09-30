@@ -146,7 +146,12 @@ def sync_subscription(db: Session, subscription: dict) -> User | None:
     user.stripe_subscription_id = subscription.get("id")
     user.subscription_status = subscription.get("status")
     user.subscription_current_period_end = _period_end(subscription)
-    user.subscription_cancel_at_period_end = bool(subscription.get("cancel_at_period_end"))
+    # "Won't renew". Newer Stripe API versions schedule a cancellation with a
+    # `cancel_at` timestamp (the customer portal does this) and leave the
+    # older `cancel_at_period_end` flag false, so either one means it.
+    user.subscription_cancel_at_period_end = bool(
+        subscription.get("cancel_at_period_end") or subscription.get("cancel_at")
+    )
     db.flush()
     return user
 
