@@ -243,6 +243,12 @@ class AtsType(StrEnum):
     # server-rendered as plain anchors on the /jobs listing page, no
     # pagination or public API found (see adapters/jobvite.py).
     JOBVITE = "jobvite"
+    # Intuitive Surgical's in-house career site (careers.intuitive.com) —
+    # every path except sitemap.xml sits behind a Cloudflare JS challenge, so
+    # discovery reads the unprotected sitemap directly and scanning relies on
+    # the generic JSON-LD scanner's browser-render fallback (see
+    # adapters/intuitive.py).
+    INTUITIVE = "intuitive"
 
 
 class CrawlSourceStatus(StrEnum):
