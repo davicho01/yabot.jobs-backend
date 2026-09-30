@@ -2,6 +2,7 @@ import itertools
 import uuid
 
 import pytest
+from cryptography.fernet import Fernet
 from fastapi import HTTPException
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
@@ -17,6 +18,14 @@ from app.services.llm_client import LlmError
 from app.services.resume_llm import ResumeEvaluationResult, ResumeQuickScoreResult, TailoredResumeContent
 
 _counter = itertools.count()
+
+
+@pytest.fixture(autouse=True)
+def real_encryption_key(monkeypatch):
+    # These tests store real UserApiKey rows, which encrypts them. CI's
+    # API_KEY_ENCRYPTION_KEY is a deliberate non-key placeholder, so give
+    # each test a throwaway valid one instead of depending on the local .env.
+    monkeypatch.setattr(settings, "api_key_encryption_key", Fernet.generate_key().decode())
 
 
 @pytest.fixture

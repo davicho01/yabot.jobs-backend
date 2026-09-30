@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from cryptography.fernet import Fernet
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
@@ -24,6 +25,14 @@ from app.services import ai_access, billing
 
 WEBHOOK_SECRET = "whsec_test"
 PERIOD_END = 1_900_000_000  # 2030-03-17
+
+
+@pytest.fixture(autouse=True)
+def real_encryption_key(monkeypatch):
+    # These tests store real UserApiKey rows, which encrypts them. CI's
+    # API_KEY_ENCRYPTION_KEY is a deliberate non-key placeholder, so give
+    # each test a throwaway valid one instead of depending on the local .env.
+    monkeypatch.setattr(settings, "api_key_encryption_key", Fernet.generate_key().decode())
 
 
 @pytest.fixture
