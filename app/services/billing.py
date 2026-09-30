@@ -34,6 +34,12 @@ SUBSCRIPTION_EVENTS = frozenset(
 )
 
 
+# A subscription that still exists but whose payment failed. The fix is a
+# new card in the customer portal; a second Checkout would start a second,
+# parallel subscription.
+PAYMENT_ISSUE_STATUSES = frozenset({"past_due", "unpaid", "incomplete"})
+
+
 class BillingError(Exception):
     """A user-facing billing problem (routes surface the message as a 4xx)."""
 
@@ -70,6 +76,8 @@ def create_checkout_session(db: Session, user: User) -> str:
     """Start a Stripe Checkout for the plan and return its URL."""
     if has_active_subscription(user):
         raise BillingError("You're already subscribed. Manage your plan from AI API Keys.")
+    if user.subscription_status in PAYMENT_ISSUE_STATUSES:
+        raise BillingError("Your last payment didn't go through. Update your card from Manage billing instead.")
     client = _client()
     customer_id = _ensure_customer(db, user, client)
     session = client.v1.checkout.sessions.create(

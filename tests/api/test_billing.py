@@ -120,14 +120,13 @@ def _subscription(sub_id="sub_1", customer="cus_1", status="active", period_end=
 
 
 def _subscribed_user(db, **fields) -> m.User:
-    return _make_user(
-        db,
-        stripe_customer_id="cus_1",
-        stripe_subscription_id="sub_1",
-        subscription_status="active",
-        subscription_current_period_end=datetime.fromtimestamp(PERIOD_END, tz=timezone.utc),
-        **fields,
-    )
+    defaults = {
+        "stripe_customer_id": "cus_1",
+        "stripe_subscription_id": "sub_1",
+        "subscription_status": "active",
+        "subscription_current_period_end": datetime.fromtimestamp(PERIOD_END, tz=timezone.utc),
+    }
+    return _make_user(db, **{**defaults, **fields})
 
 
 # ------------------------------------------------------------------ settings
@@ -168,6 +167,15 @@ def test_checkout_refuses_an_already_active_subscriber(db, fake_stripe):
     with pytest.raises(HTTPException) as exc_info:
         start_checkout(current_user=user, db=db)
     assert exc_info.value.status_code == 409
+
+
+def test_checkout_refuses_a_subscription_with_a_failed_payment(db, fake_stripe):
+    user = _subscribed_user(db, subscription_status="past_due")
+
+    with pytest.raises(HTTPException) as exc_info:
+        start_checkout(current_user=user, db=db)
+    assert exc_info.value.status_code == 409
+    assert "Update your card" in exc_info.value.detail
 
 
 def test_checkout_503s_when_subscriptions_are_off(db, fake_stripe, monkeypatch):
