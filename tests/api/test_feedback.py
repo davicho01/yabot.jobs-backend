@@ -156,3 +156,40 @@ def test_admin_update_feedback_status_404s_for_unknown_id(db):
     with pytest.raises(HTTPException) as exc_info:
         admin_routes.update_feedback_status(uuid.uuid4(), FeedbackStatusUpdate(status=FeedbackStatus.READ), db=db)
     assert exc_info.value.status_code == 404
+
+
+def test_notification_reads_like_a_message_from_the_user(monkeypatch):
+    from app.services import email as email_service
+
+    sent = Mock()
+    monkeypatch.setattr(settings, "email_sender_access_key_id", "AKIA-test")
+    monkeypatch.setattr(settings, "frontend_base_url", "https://yabot.jobs")
+    monkeypatch.setattr(email_service, "_get_client", lambda: Mock(send_email=sent))
+
+    email_service.send_feedback_notification_email(
+        ["admin@example.com"],
+        from_user_email="jane@example.com",
+        from_user_name='Jane "JD" Doe',
+        kind="question",
+        message="How do I add a second resume?\nI only see one upload button.",
+        page_url="/resume",
+    )
+
+    kwargs = sent.call_args.kwargs
+    assert kwargs["FromEmailAddress"] == '"Jane JD Doe via Yabot Jobs" <noreply@yabot.jobs>'
+    assert kwargs["ReplyToAddresses"] == ["jane@example.com"]
+    content = kwargs["Content"]["Simple"]
+    # The message's line break is folded into the one-line subject.
+    assert content["Subject"]["Data"] == (
+        'Question from Jane "JD" Doe: How do I add a second resume? I only see one upload button.'
+    )
+    body = content["Body"]["Text"]["Data"]
+    assert body.startswith("How do I add a second resume?\nI only see one upload button.\n\n-- \n")
+    assert "Page: https://yabot.jobs/resume" in body
+
+
+def test_long_messages_are_trimmed_in_the_subject():
+    from app.services.email import _subject_snippet
+
+    assert _subject_snippet("x" * 80) == "x" * 59 + "…"
+    assert _subject_snippet("short") == "short"

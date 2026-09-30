@@ -370,24 +370,60 @@ def send_follow_up_reminder_email(to_email: str, *, title: str | None, company_n
         raise
 
 
+_FEEDBACK_KIND_LABELS = {"bug": "Bug report", "question": "Question", "idea": "Idea", "other": "Feedback"}
+
+
+def _subject_snippet(message: str, limit: int = 60) -> str:
+    first_line = " ".join(message.split())
+    return first_line if len(first_line) <= limit else first_line[: limit - 1].rstrip() + "…"
+
+
 def send_feedback_notification_email(
-    to_emails: list[str], *, from_user_email: str, kind: str, message: str, page_url: str | None
+    to_emails: list[str],
+    *,
+    from_user_email: str,
+    from_user_name: str | None,
+    kind: str,
+    message: str,
+    page_url: str | None,
 ) -> None:
     """Tell admins a user sent feedback or a support question — see
-    app.services.feedback.create_feedback, the only caller. Plain text only:
-    it's an internal notification, not something users ever see. Same
-    log-only local-dev fallback as send_magic_link_email.
+    app.services.feedback.create_feedback, the only caller.
+
+    Deliberately a plain, conversational email rather than one of the branded
+    templates above: it reads like a message from the person (their name in
+    From, their words first), and Reply-To is their address, so answering it
+    is just replying in your mail client. The app context goes in a short
+    signature-style footer. Same log-only local-dev fallback as
+    send_magic_link_email.
     """
-    subject = f"[Yabot feedback] {kind} from {from_user_email}"
-    body = f"{message}\n\nFrom: {from_user_email}\nPage: {page_url or 'unknown'}\n\nTriage: {settings.frontend_base_url}/admin/feedback"
+    sender = from_user_name or from_user_email
+    label = _FEEDBACK_KIND_LABELS.get(kind, "Feedback")
+    subject = f"{label} from {sender}: {_subject_snippet(message)}"
+    context = [f"{label} sent from Yabot Jobs by {sender} <{from_user_email}>"]
+    if page_url:
+        context.append(f"Page: {settings.frontend_base_url}{page_url}")
+    context.append(f"All feedback: {settings.frontend_base_url}/admin/feedback")
+    body = f"{message}\n\n-- \n" + "\n".join(context) + "\n"
+    # Display name only; the address stays ours (SES only sends from
+    # verified identities). Quotes/angle brackets would break the header.
+    display_name = sender.replace('"', "").replace("<", "").replace(">", "")
+    from_address = f'"{display_name} via Yabot Jobs" <{settings.email_from_address}>'
 
     if settings.email_sender_access_key_id is None:
-        logger.info("Feedback notification to %s: %s\n%s", to_emails, subject, body)
+        logger.info(
+            "Feedback notification (not sent: no SES credentials)\nTo: %s\nFrom: %s\nReply-To: %s\nSubject: %s\n\n%s",
+            ", ".join(to_emails),
+            from_address,
+            from_user_email,
+            subject,
+            body,
+        )
         return
 
     try:
         _get_client().send_email(
-            FromEmailAddress=settings.email_from_address,
+            FromEmailAddress=from_address,
             Destination={"ToAddresses": to_emails},
             ReplyToAddresses=[from_user_email],
             Content={"Simple": {"Subject": {"Data": subject}, "Body": {"Text": {"Data": body}}}},

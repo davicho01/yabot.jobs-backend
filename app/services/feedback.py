@@ -71,6 +71,7 @@ def create_feedback(
             send_feedback_notification_email(
                 admin_emails,
                 from_user_email=user.email,
+                from_user_name=user.display_name,
                 kind=feedback.kind,
                 message=feedback.message,
                 page_url=feedback.page_url,
