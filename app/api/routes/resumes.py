@@ -47,7 +47,7 @@ from app.schemas.resume import (
     TailoredResumeScoreUpload,
     TailoredResumeUpload,
 )
-from app.services.ai_access import job_llm_credentials, resolve_llm_credentials
+from app.services.ai_access import job_llm_credentials, resolve_llm_credentials, structure_llm_credentials
 from app.services.llm_client import LlmError
 from app.services.resume_llm import (
     apply_skill_additions_with_llm,
@@ -247,11 +247,11 @@ def _structure_resume(db: Session, current_user: User, resume: Resume) -> dict:
     extract_resume_structure_with_llm) and store it on resume.structured_content
     — same TailoredResumeUpload shape as a tailored resume, just faithful to
     the resume as-is rather than tailored to a job. Raises the same
-    HTTPException (no key or subscription) / LlmError as every other resume LLM
-    endpoint on failure; callers that want best-effort (e.g. upload) must
-    catch those themselves.
+    HTTPException (no key, plan, or free restructure left) / LlmError as
+    every other resume LLM endpoint on failure; callers that want best-effort
+    (e.g. upload) must catch those themselves.
     """
-    key = resolve_llm_credentials(db, current_user)
+    key = structure_llm_credentials(db, current_user)
     result = extract_resume_structure_with_llm(
         resume.parsed_text,
         provider=key.provider,
@@ -500,9 +500,9 @@ def structure_resume(
 ) -> Resume:
     """(Re)generate this resume's structured_content via the LLM — see
     _structure_resume. Unlike the best-effort attempt on upload, this raises
-    the usual 422 if the user has no default LLM key yet, so the frontend
-    can surface that directly (e.g. a link to add one) rather than silently
-    leaving structured_content null.
+    the usual 422 when there's no key, plan, or free restructure left, so the
+    frontend can surface that directly (e.g. a link to AI access) rather than
+    silently leaving structured_content null.
     """
     resume = db.scalar(select(Resume).where(Resume.id == resume_id, Resume.user_id == current_user.id))
     if resume is None:

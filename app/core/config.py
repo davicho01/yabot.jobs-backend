@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     # key above (see app.services.ai_access). 0 turns the trial off; it's
     # also off whenever the system key isn't configured.
     free_evaluation_limit: int = 5
+    # Free resume structurings (the AI turning an uploaded resume into
+    # editable sections) for a user without their own key or the plan,
+    # counted separately from free_evaluation_limit. Each upload uses one
+    # automatically; 0 turns it off. Same system key.
+    free_restructure_limit: int = 5
 
     # Stripe billing for the paid plan (see app.services.billing): subscribers
     # use every resume feature on the system key above instead of their own.

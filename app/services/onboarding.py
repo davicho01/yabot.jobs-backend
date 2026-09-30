@@ -11,6 +11,8 @@ from app.schemas.onboarding import AiAccessRead, OnboardingRead, OnboardingStepR
 from app.services.ai_access import (
     active_source,
     free_evaluations_remaining,
+    free_restructures_enabled,
+    free_restructures_remaining,
     free_trial_enabled,
     free_trial_job_ids,
     has_active_subscription,
@@ -31,6 +33,8 @@ def get_ai_access(db: Session, user: User) -> AiAccessRead:
         free_evaluations_used=user.free_evaluations_used,
         free_evaluations_remaining=free_evaluations_remaining(user),
         free_trial_job_ids=free_trial_job_ids(db, user),
+        free_restructure_limit=settings.free_restructure_limit if free_restructures_enabled() else 0,
+        free_restructures_remaining=free_restructures_remaining(user),
         subscription_available=subscriptions_enabled(),
         subscription_price_label=settings.subscription_price_label,
         subscribed=has_active_subscription(user),

@@ -44,6 +44,9 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Free-trial job evaluations spent on the system LLM key — see
     # app.services.ai_access, the only writer.
     free_evaluations_used: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    # Free resume structurings spent on the system key (see
+    # app.services.ai_access.structure_llm_credentials, the only writer).
+    free_restructures_used: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     # Set once the user finishes (or hides) the getting-started checklist,
     # so it stays gone even if a step later "un-completes" (e.g. they delete
     # their only resume). See app.services.onboarding.

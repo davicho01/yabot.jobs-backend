@@ -393,3 +393,93 @@ def test_ai_access_summary(db, trial_on):
 
     _make_key(db, user)
     assert read_ai_access(current_user=user, db=db).has_own_key is True
+
+
+# ------------------------------------------------------------------ free restructures
+
+
+def test_free_restructures_are_counted_separately_until_the_limit(db, trial_on, monkeypatch):
+    monkeypatch.setattr(settings, "free_restructure_limit", 2)
+    user = _make_user(db)
+
+    first = ai_access.structure_llm_credentials(db, user)
+    ai_access.structure_llm_credentials(db, user)
+
+    assert first.api_key == "system-key"
+    assert user.free_restructures_used == 2
+    assert user.free_evaluations_used == 0
+    with pytest.raises(HTTPException) as exc_info:
+        ai_access.structure_llm_credentials(db, user)
+    assert exc_info.value.status_code == 422
+    assert "used all 2 free resume restructures" in exc_info.value.detail
+
+
+def test_restructuring_with_own_key_spends_nothing(db, trial_on):
+    user = _make_user(db)
+    _make_key(db, user)
+
+    assert ai_access.structure_llm_credentials(db, user).api_key == "own-key"
+    assert user.free_restructures_used == 0
+
+
+def test_free_restructures_off_without_a_system_key(db, trial_off):
+    user = _make_user(db)
+
+    with pytest.raises(HTTPException) as exc_info:
+        ai_access.structure_llm_credentials(db, user)
+    assert exc_info.value.status_code == 422
+
+
+def test_ai_access_reports_free_restructures(db, trial_on, monkeypatch):
+    monkeypatch.setattr(settings, "free_restructure_limit", 5)
+    user = _make_user(db)
+    ai_access.structure_llm_credentials(db, user)
+
+    summary = read_ai_access(current_user=user, db=db)
+
+    assert summary.free_restructure_limit == 5
+    assert summary.free_restructures_remaining == 4
+
+
+def _upload(db, user, monkeypatch):
+    import io
+
+    from fastapi import UploadFile
+    from starlette.datastructures import Headers
+
+    from app.api.routes.resumes import upload_resume
+
+    monkeypatch.setattr(resumes_routes, "extract_text", lambda data, content_type: "Python engineer")
+    monkeypatch.setattr(resumes_routes, "upload_file", lambda *a, **k: None)
+    file = UploadFile(
+        file=io.BytesIO(b"pdf bytes"), filename="resume.pdf", headers=Headers({"content-type": "application/pdf"})
+    )
+    return upload_resume(file=file, current_user=user, db=db)
+
+
+def test_upload_on_the_free_trial_is_structured_automatically(db, trial_on, monkeypatch):
+    monkeypatch.setattr(
+        resumes_routes,
+        "extract_resume_structure_with_llm",
+        lambda *a, **k: TailoredResumeContent(summary="Engineer.", sections=[], contact=None, raw_response={}),
+    )
+    user = _make_user(db)
+
+    resume = _upload(db, user, monkeypatch)
+
+    assert resume.structured_content["summary"] == "Engineer."
+    assert user.free_restructures_used == 1
+
+
+def test_a_failed_structuring_at_upload_is_not_counted(db, trial_on, monkeypatch):
+    def boom(*a, **k):
+        raise LlmError("down")
+
+    monkeypatch.setattr(resumes_routes, "extract_resume_structure_with_llm", boom)
+    user = _make_user(db)
+
+    resume = _upload(db, user, monkeypatch)
+
+    assert resume.structured_content is None
+    db.refresh(user)
+    assert user.free_restructures_used == 0

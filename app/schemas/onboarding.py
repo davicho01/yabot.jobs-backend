@@ -23,6 +23,9 @@ class AiAccessRead(BaseModel):
     free_evaluations_remaining: int
     # Jobs unlocked with a free evaluation: every AI feature for these is free.
     free_trial_job_ids: list[uuid.UUID]
+    # Free resume restructures (turning an upload into editable sections).
+    free_restructure_limit: int
+    free_restructures_remaining: int
     # The paid plan (see app.services.billing). subscription_status is
     # Stripe's own value, null if the user never subscribed.
     subscription_available: bool

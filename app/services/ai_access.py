@@ -87,6 +87,16 @@ def has_active_subscription(user: User) -> bool:
     return user.subscription_status in ACTIVE_SUBSCRIPTION_STATUSES and system_llm_configured()
 
 
+def free_restructures_enabled() -> bool:
+    return settings.free_restructure_limit > 0 and system_llm_configured()
+
+
+def free_restructures_remaining(user: User) -> int:
+    if not free_restructures_enabled():
+        return 0
+    return max(0, settings.free_restructure_limit - user.free_restructures_used)
+
+
 def free_evaluations_remaining(user: User) -> int:
     if not free_trial_enabled():
         return 0
@@ -265,3 +275,31 @@ def job_llm_credentials(db: Session, user: User, job_posting_id: uuid.UUID) -> L
 
 def free_trial_job_ids(db: Session, user: User) -> list[uuid.UUID]:
     return list(db.scalars(select(FreeTrialJob.job_posting_id).where(FreeTrialJob.user_id == user.id)).all())
+
+
+def structure_llm_credentials(db: Session, user: User) -> LlmCredentials:
+    """Credentials for structuring a resume (turning it into editable
+    sections — on upload, or POST /resumes/{id}/structure). Plan, else own
+    key, else one of the user's `free_restructure_limit` free restructures,
+    taken with a conditional UPDATE like the other metered uses (and handed
+    back by the route's rollback if the LLM call fails)."""
+    if has_active_subscription(user):
+        return _use_subscription_request(db, user)
+    key = get_own_default_key(db, user.id)
+    if key is not None:
+        return _own_credentials(key)
+    if not free_restructures_enabled():
+        raise _unprocessable(no_access_message())
+    spent = db.execute(
+        update(User)
+        .where(User.id == user.id, User.free_restructures_used < settings.free_restructure_limit)
+        .values(free_restructures_used=User.free_restructures_used + 1)
+        .execution_options(synchronize_session=False)
+    ).rowcount
+    if spent == 0:
+        raise _unprocessable(
+            f"You've used all {settings.free_restructure_limit} free resume restructures. "
+            + no_access_message()
+        )
+    db.refresh(user, attribute_names=["free_restructures_used"])
+    return _system_credentials("free_trial")

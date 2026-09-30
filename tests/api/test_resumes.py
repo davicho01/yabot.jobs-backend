@@ -563,7 +563,7 @@ def test_tailored_resume_text_renders_entries_not_just_flat_bullets():
 def test_structure_resume_stores_structured_content(db, monkeypatch):
     user_id = uuid.uuid4()
     resume = _make_resume(db, user_id, is_main=True)
-    monkeypatch.setattr(resumes_routes, "resolve_llm_credentials", lambda db, user: _fake_key())
+    monkeypatch.setattr(resumes_routes, "structure_llm_credentials", lambda db, user: _fake_key())
     monkeypatch.setattr(
         resumes_routes,
         "extract_resume_structure_with_llm",
@@ -598,7 +598,7 @@ def test_structure_resume_propagates_422_when_no_llm_access(db, monkeypatch):
     def raise_no_key(db, user):
         raise HTTPException(status_code=422, detail="Add an AI API key in AI access to use this feature.")
 
-    monkeypatch.setattr(resumes_routes, "resolve_llm_credentials", raise_no_key)
+    monkeypatch.setattr(resumes_routes, "structure_llm_credentials", raise_no_key)
 
     with pytest.raises(HTTPException) as exc_info:
         structure_resume(resume.id, current_user=m.User(id=user_id), db=db)
@@ -609,7 +609,7 @@ def test_structure_resume_propagates_422_when_no_llm_access(db, monkeypatch):
 def test_structure_resume_502s_on_llm_error(db, monkeypatch):
     user_id = uuid.uuid4()
     resume = _make_resume(db, user_id, is_main=True)
-    monkeypatch.setattr(resumes_routes, "resolve_llm_credentials", lambda db, user: _fake_key())
+    monkeypatch.setattr(resumes_routes, "structure_llm_credentials", lambda db, user: _fake_key())
 
     def raise_llm_error(*a, **k):
         raise LlmError("model returned garbage")
