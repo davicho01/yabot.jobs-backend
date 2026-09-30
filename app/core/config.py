@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # editable sections) for a user without their own key or the plan,
     # counted separately from free_evaluation_limit. Each upload uses one
     # automatically; 0 turns it off. Same system key.
-    free_restructure_limit: int = 5
+    free_restructure_limit: int = 3
 
     # Stripe billing for the paid plan (see app.services.billing): subscribers
     # use every resume feature on the system key above instead of their own.
