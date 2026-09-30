@@ -47,7 +47,7 @@ from app.schemas.resume import (
     TailoredResumeScoreUpload,
     TailoredResumeUpload,
 )
-from app.services.ai_access import evaluation_breakdown_credentials, use_free_evaluation
+from app.services.ai_access import evaluation_breakdown_credentials, resolve_llm_credentials, use_free_evaluation
 from app.services.llm_client import LlmError
 from app.services.resume_llm import (
     apply_skill_additions_with_llm,
@@ -57,7 +57,6 @@ from app.services.resume_llm import (
     generate_cover_letter_with_llm,
     generate_interview_prep_with_llm,
     generate_tailored_resume_with_llm,
-    get_users_default_llm_key,
     quick_score_resume_with_llm,
     review_resume_with_llm,
 )
@@ -248,16 +247,16 @@ def _structure_resume(db: Session, current_user: User, resume: Resume) -> dict:
     extract_resume_structure_with_llm) and store it on resume.structured_content
     — same TailoredResumeUpload shape as a tailored resume, just faithful to
     the resume as-is rather than tailored to a job. Raises the same
-    HTTPException (missing default key) / LlmError as every other resume LLM
+    HTTPException (no key or subscription) / LlmError as every other resume LLM
     endpoint on failure; callers that want best-effort (e.g. upload) must
     catch those themselves.
     """
-    key = get_users_default_llm_key(db, current_user.id)
+    key = resolve_llm_credentials(db, current_user)
     result = extract_resume_structure_with_llm(
         resume.parsed_text,
         provider=key.provider,
         model=key.model,
-        api_key=key.get_plaintext_key(),
+        api_key=key.api_key,
         base_url=key.base_url,
     )
     content = TailoredResumeUpload(
@@ -323,12 +322,15 @@ def upload_resume(
     db.flush()
 
     # Best-effort: a brand-new user very plausibly hasn't added an LLM key
-    # yet (get_users_default_llm_key 422s in that case), and an upload must
+    # yet (resolve_llm_credentials 422s in that case), and an upload must
     # never fail just because structuring couldn't happen — the raw file is
     # still fully usable either way. The frontend can retry later via
-    # POST /resumes/{id}/structure once a key is in place.
+    # POST /resumes/{id}/structure once a key or subscription is in place.
+    # The savepoint undoes a subscription request this may have used if
+    # structuring then fails, same as a failed request anywhere else.
     try:
-        _structure_resume(db, current_user, resume)
+        with db.begin_nested():
+            _structure_resume(db, current_user, resume)
     except (HTTPException, LlmError) as exc:
         logger.info("Skipped auto-structuring resume %s at upload: %s", resume.id, exc)
 
@@ -712,14 +714,14 @@ def get_resume_roles(
         if roles is not None:
             return ResumeRolesRead(roles=roles)
 
-    key = get_users_default_llm_key(db, current_user.id)
+    key = resolve_llm_credentials(db, current_user)
 
     try:
         result = extract_resume_roles_with_llm(
             resume.parsed_text,
             provider=key.provider,
             model=key.model,
-            api_key=key.get_plaintext_key(),
+            api_key=key.api_key,
             base_url=key.base_url,
         )
     except LlmError as exc:
@@ -825,7 +827,7 @@ def apply_resume_skill_additions(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Add at least one skill first — POST /resumes/{resume_id}/skill-additions.",
         )
-    key = get_users_default_llm_key(db, current_user.id)
+    key = resolve_llm_credentials(db, current_user)
 
     try:
         result = apply_skill_additions_with_llm(
@@ -836,7 +838,7 @@ def apply_resume_skill_additions(
             ],
             provider=key.provider,
             model=key.model,
-            api_key=key.get_plaintext_key(),
+            api_key=key.api_key,
             base_url=key.base_url,
         )
     except LlmError as exc:
@@ -897,14 +899,14 @@ def review_main_resume(
     db: Session = Depends(get_db),
 ) -> ResumeReview:
     resume = _resolve_resume(db, current_user.id, resume_id)
-    key = get_users_default_llm_key(db, current_user.id)
+    key = resolve_llm_credentials(db, current_user)
 
     try:
         result = review_resume_with_llm(
             resume.parsed_text,
             provider=key.provider,
             model=key.model,
-            api_key=key.get_plaintext_key(),
+            api_key=key.api_key,
             base_url=key.base_url,
         )
     except LlmError as exc:
@@ -1177,7 +1179,7 @@ def generate_main_tailored_resume(
 ) -> TailoredResume:
     resume = _resolve_resume(db, current_user.id, resume_id)
     posting = _get_job_posting(db, job_posting_id)
-    key = get_users_default_llm_key(db, current_user.id)
+    key = resolve_llm_credentials(db, current_user)
     fitness_score = _latest_resume_score_dict(db, resume.id, posting.id)
 
     try:
@@ -1186,7 +1188,7 @@ def generate_main_tailored_resume(
             posting.description or "",
             provider=key.provider,
             model=key.model,
-            api_key=key.get_plaintext_key(),
+            api_key=key.api_key,
             base_url=key.base_url,
             fitness_score=fitness_score,
         )
@@ -1248,7 +1250,7 @@ def score_tailored_resume(
 ) -> TailoredResumeScore:
     tailored = _get_owned_tailored_resume(db, current_user.id, tailored_id)
     posting = _get_job_posting(db, tailored.job_posting_id)
-    key = get_users_default_llm_key(db, current_user.id)
+    key = resolve_llm_credentials(db, current_user)
 
     try:
         result = quick_score_resume_with_llm(
@@ -1256,7 +1258,7 @@ def score_tailored_resume(
             posting.description or "",
             provider=key.provider,
             model=key.model,
-            api_key=key.get_plaintext_key(),
+            api_key=key.api_key,
             base_url=key.base_url,
         )
     except LlmError as exc:
@@ -1290,7 +1292,7 @@ def evaluate_tailored_resume(
     """
     tailored = _get_owned_tailored_resume(db, current_user.id, tailored_id)
     posting = _get_job_posting(db, tailored.job_posting_id)
-    key = get_users_default_llm_key(db, current_user.id)
+    key = resolve_llm_credentials(db, current_user)
 
     score = db.scalar(
         select(TailoredResumeScore)
@@ -1310,7 +1312,7 @@ def evaluate_tailored_resume(
             score.overall_score,
             provider=key.provider,
             model=key.model,
-            api_key=key.get_plaintext_key(),
+            api_key=key.api_key,
             base_url=key.base_url,
         )
     except LlmError as exc:
@@ -1445,7 +1447,7 @@ def generate_main_cover_letter(
 ) -> CoverLetter:
     resume = _resolve_current_version(db, current_user.id, resume_id)
     posting = _get_job_posting(db, job_posting_id)
-    key = get_users_default_llm_key(db, current_user.id)
+    key = resolve_llm_credentials(db, current_user)
 
     # Prefer the resume already tailored to this job, if one exists — it has
     # the job-matched bullets/skill additions baked in, which is exactly what
@@ -1465,7 +1467,7 @@ def generate_main_cover_letter(
             posting.description or "",
             provider=key.provider,
             model=key.model,
-            api_key=key.get_plaintext_key(),
+            api_key=key.api_key,
             base_url=key.base_url,
         )
     except LlmError as exc:
@@ -1561,7 +1563,7 @@ def generate_main_interview_prep(
 ) -> InterviewPrep:
     resume = _resolve_resume(db, current_user.id, resume_id)
     posting = _get_job_posting(db, job_posting_id)
-    key = get_users_default_llm_key(db, current_user.id)
+    key = resolve_llm_credentials(db, current_user)
 
     try:
         generated = generate_interview_prep_with_llm(
@@ -1569,7 +1571,7 @@ def generate_main_interview_prep(
             posting.description or "",
             provider=key.provider,
             model=key.model,
-            api_key=key.get_plaintext_key(),
+            api_key=key.api_key,
             base_url=key.base_url,
         )
     except LlmError as exc:

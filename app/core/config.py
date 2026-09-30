@@ -33,6 +33,19 @@ class Settings(BaseSettings):
     # also off whenever the system key isn't configured.
     free_evaluation_limit: int = 5
 
+    # Stripe billing for the paid plan (see app.services.billing): subscribers
+    # use every resume feature on the system key above instead of their own.
+    # Selling it needs all three plus a working SYSTEM_LLM_* key.
+    stripe_secret_key: str | None = None
+    stripe_webhook_secret: str | None = None
+    # The recurring Price (e.g. $5/month) that Checkout sells.
+    stripe_price_id: str | None = None
+    # Shown in the UI and error messages — keep in sync with the Stripe price.
+    subscription_price_label: str = "$5/month"
+    # Cap on system-key requests per billing period per subscriber, so one
+    # heavy user can't cost more than the plan brings in. 0 means unlimited.
+    subscription_monthly_request_limit: int = 200
+
     # Google Cloud Pub/Sub — job scanning is queued here instead of running
     # inline in POST /jobs (page fetches + LLM calls can take well over a
     # minute). GOOGLE_APPLICATION_CREDENTIALS and PUBSUB_EMULATOR_HOST are

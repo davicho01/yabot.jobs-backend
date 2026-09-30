@@ -12,6 +12,9 @@ from app.services.ai_access import (
     free_evaluations_remaining,
     free_trial_enabled,
     get_own_default_key,
+    has_active_subscription,
+    subscription_requests_used,
+    subscriptions_enabled,
 )
 
 
@@ -22,12 +25,21 @@ def get_ai_access(db: Session, user: User) -> AiAccessRead:
         free_evaluation_limit=settings.free_evaluation_limit,
         free_evaluations_used=user.free_evaluations_used,
         free_evaluations_remaining=free_evaluations_remaining(user),
+        subscription_available=subscriptions_enabled(),
+        subscription_price_label=settings.subscription_price_label,
+        subscribed=has_active_subscription(user),
+        subscription_status=user.subscription_status,
+        subscription_current_period_end=user.subscription_current_period_end,
+        subscription_cancel_at_period_end=user.subscription_cancel_at_period_end,
+        subscription_requests_used=subscription_requests_used(user),
+        subscription_request_limit=settings.subscription_monthly_request_limit,
     )
 
 
 def get_onboarding(db: Session, user: User, *, now: datetime | None = None) -> OnboardingRead:
     """The getting-started checklist: upload a resume, set up AI access (own
-    key or free trial), start an application, get a first evaluation.
+    key, subscription, or free trial), start an application, get a first
+    evaluation.
 
     Each step is derived from the user's actual data rather than stored, so
     it's right on every device and no route has to remember to tick it off.
@@ -41,7 +53,8 @@ def get_onboarding(db: Session, user: User, *, now: datetime | None = None) -> O
             key="resume", done=bool(db.scalar(select(exists().where(Resume.user_id == user.id))))
         ),
         OnboardingStepRead(
-            key="ai_access", done=ai_access.has_own_key or ai_access.free_evaluations_remaining > 0
+            key="ai_access",
+            done=ai_access.has_own_key or ai_access.subscribed or ai_access.free_evaluations_remaining > 0,
         ),
         OnboardingStepRead(
             key="application",

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Integer, String
+from sqlalchemy import Boolean, DateTime, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -49,6 +49,24 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # their only resume). See app.services.onboarding.
     onboarding_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     onboarding_dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Stripe billing (see app.services.billing, the only writer). Mirrors the
+    # user's subscription as Stripe last reported it via webhook, so access
+    # checks never have to call Stripe. subscription_status is Stripe's own
+    # value (active, trialing, past_due, canceled, …); null = never subscribed.
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(255), unique=True, index=True)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(String(255))
+    subscription_status: Mapped[str | None] = mapped_column(String(30))
+    subscription_current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    subscription_cancel_at_period_end: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
+    # System-key requests used in the billing period ending at
+    # subscription_usage_period_end; when that no longer matches the current
+    # period the count is stale and resets on the next request (see
+    # app.services.ai_access._use_subscription_request).
+    subscription_usage_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    subscription_usage_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     magic_link_tokens: Mapped[list["MagicLinkToken"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"

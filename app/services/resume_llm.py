@@ -1,14 +1,8 @@
 import json
 import re
-import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from fastapi import HTTPException, status
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
-from app.models.api_key import UserApiKey
 from app.services.llm_client import LlmError, call_llm
 from app.services.prompts import (
     COVER_LETTER_PROMPT,
@@ -28,24 +22,6 @@ _CODE_FENCE_RE = re.compile(r"^```[a-zA-Z]*\n?|```$", re.MULTILINE)
 # plain text, cheap at current per-token pricing — guards against
 # truncating real content, not cost.
 _MAX_TEXT_CHARS = 20_000
-
-
-def get_users_default_llm_key(db: Session, user_id: uuid.UUID) -> UserApiKey:
-    """Look up the user's own default LLM key for resume features (bring-
-    your-own-key) — distinct from the system-wide key used for job
-    crawling/scanning, which resume features must never fall back to.
-    """
-    key = db.scalar(
-        select(UserApiKey).where(
-            UserApiKey.user_id == user_id, UserApiKey.is_default.is_(True), UserApiKey.is_active.is_(True)
-        )
-    )
-    if key is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="Add a default LLM API key first via POST /api-keys before using resume features.",
-        )
-    return key
 
 
 def _parse_response(raw: str) -> dict[str, Any]:

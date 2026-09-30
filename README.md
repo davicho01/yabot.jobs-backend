@@ -40,6 +40,11 @@ Set these in `.env` (loaded automatically by `app/core/config.py`).
 | `SYSTEM_LLM_API_KEY` | No | unset | API key for `SYSTEM_LLM_PROVIDER`. |
 | `SYSTEM_LLM_BASE_URL` | No | unset | Only needed when `SYSTEM_LLM_PROVIDER=other` (a custom OpenAI-compatible endpoint). |
 | `FREE_EVALUATION_LIMIT` | No | `5` | Free job evaluations (a fit score plus its first breakdown) a user with no AI API key of their own gets on the `SYSTEM_LLM_*` key, so they can try the app before adding one. `0` turns the free trial off; it's also off whenever `SYSTEM_LLM_PROVIDER`/`SYSTEM_LLM_API_KEY` aren't set. See `app/services/ai_access.py`. |
+| `STRIPE_SECRET_KEY` | No | unset | Stripe secret key for the paid plan (`sk_test_…` while testing). The plan is off until this, `STRIPE_PRICE_ID` and a working `SYSTEM_LLM_*` key are all set. See [Paid plan (Stripe)](#paid-plan-stripe). |
+| `STRIPE_WEBHOOK_SECRET` | No | unset | Signing secret (`whsec_…`) of the webhook endpoint pointing at `POST /billing/webhook`. |
+| `STRIPE_PRICE_ID` | No | unset | The recurring Price (`price_…`) Checkout sells, e.g. $5/month. |
+| `SUBSCRIPTION_PRICE_LABEL` | No | `$5/month` | How the price reads in the app and in error messages. Keep it in sync with the Stripe price. |
+| `SUBSCRIPTION_MONTHLY_REQUEST_LIMIT` | No | `200` | AI requests a subscriber gets per billing period on the system key (scores, tailoring, cover letters…), so one heavy user can't cost more than the plan brings in. `0` means unlimited. Users with their own key are never counted. |
 | `GCP_PROJECT_ID` | **Yes** | — | GCP project used for Pub/Sub queueing. Any string works against the local emulator (e.g. `local-dev`); use your real project id when pointing at real GCP. |
 | `PUBSUB_TOPIC_ID` | No | `job-scan-requests` | Pub/Sub topic name for individual job scans. |
 | `PUBSUB_SUBSCRIPTION_ID` | No | `job-scan-requests-worker` | Pub/Sub pull-subscription name, consumed by `worker.py`. |
@@ -372,6 +377,42 @@ since this is a single BYOK-gated action per user rather than the bulk,
 system-key-funded crawling job scanning does. Tailored output is
 deliberately plain (standard headings, no tables/columns/graphics) since
 that's what most ATS parsers actually handle reliably, not a designed PDF.
+
+## Paid plan (Stripe)
+
+Users who'd rather not manage their own AI API key can subscribe (e.g.
+$5/month) and run every resume feature on the `SYSTEM_LLM_*` key, up to
+`SUBSCRIPTION_MONTHLY_REQUEST_LIMIT` requests per billing period. Access is
+checked in this order (see `app/services/ai_access.py`): the user's own key,
+then an active subscription, then free-trial evaluations.
+
+Stripe is the source of truth. The app sends users to Stripe Checkout to
+subscribe (`POST /billing/checkout`) and to the Stripe customer portal to
+change their card or cancel (`POST /billing/portal`), then mirrors the
+subscription onto the user from webhooks (`POST /billing/webhook`, see
+`app/services/billing.py`).
+
+One-time setup, in test mode first:
+
+1. In the Stripe Dashboard, create a Product (e.g. "Yabot Jobs AI plan") with
+   a recurring monthly Price. Put its `price_…` id in `STRIPE_PRICE_ID`.
+2. Put the secret key in `STRIPE_SECRET_KEY`.
+3. Turn on the customer portal (Settings → Billing → Customer portal) and
+   allow customers to cancel and update payment methods.
+4. Add a webhook endpoint at `https://<api host>/billing/webhook` for
+   `checkout.session.completed`, `customer.subscription.created`,
+   `customer.subscription.updated` and `customer.subscription.deleted`. Put
+   its signing secret in `STRIPE_WEBHOOK_SECRET`.
+
+Locally, forward webhooks with the Stripe CLI instead of step 4. It prints
+the `whsec_…` secret to use:
+
+```bash
+stripe listen --forward-to localhost:8000/billing/webhook \
+  --events checkout.session.completed,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted
+```
+
+Test card: `4242 4242 4242 4242`, any future expiry, any CVC.
 
 ## Database migrations
 

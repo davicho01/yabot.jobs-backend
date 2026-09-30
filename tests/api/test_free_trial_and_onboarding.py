@@ -150,7 +150,7 @@ def test_no_key_and_no_trial_asks_for_a_key(db, trial_off):
         ai_access.use_free_evaluation(db, user)
 
     assert exc_info.value.status_code == 422
-    assert exc_info.value.detail == ai_access.NO_KEY_MESSAGE
+    assert exc_info.value.detail == ai_access.no_access_message()
 
 
 def test_trial_limit_zero_disables_it(db, trial_on, monkeypatch):
@@ -257,7 +257,7 @@ def test_breakdown_of_a_score_made_with_a_removed_key_needs_a_key(db, trial_on, 
     with pytest.raises(HTTPException) as exc_info:
         evaluate_main_resume(posting.id, resume_id=None, current_user=user, db=db)
     assert exc_info.value.status_code == 422
-    assert exc_info.value.detail == ai_access.NO_KEY_MESSAGE
+    assert exc_info.value.detail == ai_access.no_access_message()
 
 
 # ------------------------------------------------------------------ onboarding

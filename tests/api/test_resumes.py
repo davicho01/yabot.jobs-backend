@@ -148,7 +148,7 @@ def _fake_key() -> Mock:
     key.provider = "openai"
     key.model = "test-model"
     key.base_url = None
-    key.get_plaintext_key.return_value = "test-key"
+    key.api_key = "test-key"
     return key
 
 
@@ -563,7 +563,7 @@ def test_tailored_resume_text_renders_entries_not_just_flat_bullets():
 def test_structure_resume_stores_structured_content(db, monkeypatch):
     user_id = uuid.uuid4()
     resume = _make_resume(db, user_id, is_main=True)
-    monkeypatch.setattr(resumes_routes, "get_users_default_llm_key", lambda db, uid: _fake_key())
+    monkeypatch.setattr(resumes_routes, "resolve_llm_credentials", lambda db, user: _fake_key())
     monkeypatch.setattr(
         resumes_routes,
         "extract_resume_structure_with_llm",
@@ -591,14 +591,14 @@ def test_structure_resume_404s_for_a_resume_owned_by_someone_else(db):
     assert exc_info.value.status_code == 404
 
 
-def test_structure_resume_propagates_422_when_no_default_llm_key(db, monkeypatch):
+def test_structure_resume_propagates_422_when_no_llm_access(db, monkeypatch):
     user_id = uuid.uuid4()
     resume = _make_resume(db, user_id, is_main=True)
 
-    def raise_no_key(db, uid):
-        raise HTTPException(status_code=422, detail="Add a default LLM API key first via POST /api-keys.")
+    def raise_no_key(db, user):
+        raise HTTPException(status_code=422, detail="Add an AI API key in AI API Keys to use this feature.")
 
-    monkeypatch.setattr(resumes_routes, "get_users_default_llm_key", raise_no_key)
+    monkeypatch.setattr(resumes_routes, "resolve_llm_credentials", raise_no_key)
 
     with pytest.raises(HTTPException) as exc_info:
         structure_resume(resume.id, current_user=m.User(id=user_id), db=db)
@@ -609,7 +609,7 @@ def test_structure_resume_propagates_422_when_no_default_llm_key(db, monkeypatch
 def test_structure_resume_502s_on_llm_error(db, monkeypatch):
     user_id = uuid.uuid4()
     resume = _make_resume(db, user_id, is_main=True)
-    monkeypatch.setattr(resumes_routes, "get_users_default_llm_key", lambda db, uid: _fake_key())
+    monkeypatch.setattr(resumes_routes, "resolve_llm_credentials", lambda db, user: _fake_key())
 
     def raise_llm_error(*a, **k):
         raise LlmError("model returned garbage")
@@ -792,7 +792,7 @@ def test_get_resume_roles_uses_structured_content_instead_of_a_second_llm_call(d
 def test_get_resume_roles_falls_back_to_the_llm_when_not_yet_structured(db, monkeypatch):
     user_id = uuid.uuid4()
     resume = _make_resume(db, user_id, is_main=True)
-    monkeypatch.setattr(resumes_routes, "get_users_default_llm_key", lambda db, uid: _fake_key())
+    monkeypatch.setattr(resumes_routes, "resolve_llm_credentials", lambda db, user: _fake_key())
     from app.services.resume_llm import ResumeRolesResult
 
     monkeypatch.setattr(
@@ -811,7 +811,7 @@ def test_apply_skill_additions_stores_structured_content_on_the_new_resume(db, m
     user_id = uuid.uuid4()
     resume = _make_resume(db, user_id, is_main=True)
     _upsert(db, resume.id, user_id, keyword="Kubernetes", target_role="General / Skills")
-    monkeypatch.setattr(resumes_routes, "get_users_default_llm_key", lambda db, uid: _fake_key())
+    monkeypatch.setattr(resumes_routes, "resolve_llm_credentials", lambda db, user: _fake_key())
     monkeypatch.setattr(
         resumes_routes,
         "apply_skill_additions_with_llm",
@@ -835,7 +835,7 @@ def test_apply_skill_additions_stores_structured_content_on_the_new_resume(db, m
 
 
 def _mock_skill_additions_apply(monkeypatch):
-    monkeypatch.setattr(resumes_routes, "get_users_default_llm_key", lambda db, uid: _fake_key())
+    monkeypatch.setattr(resumes_routes, "resolve_llm_credentials", lambda db, user: _fake_key())
     monkeypatch.setattr(
         resumes_routes,
         "apply_skill_additions_with_llm",
@@ -914,7 +914,7 @@ def test_apply_skill_additions_always_optimizes_the_latest_version_even_when_cal
             raw_response={},
         )
 
-    monkeypatch.setattr(resumes_routes, "get_users_default_llm_key", lambda db, uid: _fake_key())
+    monkeypatch.setattr(resumes_routes, "resolve_llm_credentials", lambda db, user: _fake_key())
     monkeypatch.setattr(resumes_routes, "apply_skill_additions_with_llm", fake_apply)
     monkeypatch.setattr(resumes_routes, "upload_file", lambda *a, **k: None)
 
