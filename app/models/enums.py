@@ -239,6 +239,10 @@ class AtsType(StrEnum):
     # schema.org JobPosting JSON-LD once rendered past the challenge (see
     # adapters/happydance.py).
     HAPPYDANCE = "happydance"
+    # Jobvite — a multi-tenant ATS at jobs.jobvite.com/{tenant}, jobs
+    # server-rendered as plain anchors on the /jobs listing page, no
+    # pagination or public API found (see adapters/jobvite.py).
+    JOBVITE = "jobvite"
 
 
 class CrawlSourceStatus(StrEnum):
