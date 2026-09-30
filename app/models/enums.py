@@ -249,6 +249,12 @@ class AtsType(StrEnum):
     # the generic JSON-LD scanner's browser-render fallback (see
     # adapters/intuitive.py).
     INTUITIVE = "intuitive"
+    # Tesla's in-house career site (tesla.com/careers) — every path,
+    # including its own JSON endpoints, sits behind Akamai Bot Manager,
+    # which blocks a plain httpx request outright with no challenge to
+    # solve; both discovery and scanning go through the browser-render
+    # fallback unconditionally (see adapters/tesla.py).
+    TESLA = "tesla"
 
 
 class CrawlSourceStatus(StrEnum):
