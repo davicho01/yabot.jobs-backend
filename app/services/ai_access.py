@@ -2,12 +2,19 @@
 
 In order of preference:
 
-1. A paid subscription (see app.services.billing): every resume feature
-   runs on the system-wide key (SYSTEM_LLM_*), with an optional
-   `settings.subscription_monthly_request_limit` per billing period. It
-   wins over a saved key on purpose: someone paying for the plan must never
-   also be billed by their own provider without realizing it. Saved keys
-   stay put and take over again once the plan ends.
+1. A paid subscription (see app.services.billing): resume-wide features
+   (structuring, reviewing) run on the system-wide key (SYSTEM_LLM_*), with
+   an optional `settings.subscription_monthly_request_limit` per billing
+   period. Job-scoped features (score, breakdown, tailored resume, cover
+   letter, interview prep) instead meter by distinct job: each subscriber
+   has a per-user `User.subscription_evaluation_limit` (100 by default,
+   room for a future higher-priced tier to grant more) of jobs they can
+   unlock per billing period, the same "first touch unlocks the job, the
+   rest is free" shape as the free trial below (see job_llm_credentials and
+   _unlock_subscription_job). The subscription wins over a saved key on
+   purpose: someone paying for the plan must never also be billed by their
+   own provider without realizing it. Saved keys stay put and take over
+   again once the plan ends.
 2. The user's own default API key (bring-your-own-key) — unlimited, and
    billed by their provider, not us.
 3. The free trial: `settings.free_evaluation_limit` jobs on the system
@@ -17,12 +24,14 @@ In order of preference:
    for that job is then free — score, breakdown, tailored resume, cover
    letter, interview prep (see job_llm_credentials). Features that aren't
    about one job (e.g. structuring or reviewing a resume) aren't covered.
+   Unlike the subscription's job cap, this one is a lifetime total, not a
+   per-period one.
 
-Metered use (a subscription request or a free evaluation) is taken up front
-with a conditional UPDATE, so concurrent requests can't overspend it. The
-route's transaction rolls back if the LLM call then fails (see
-app.db.session.get_db), which gives it back — a failed call never costs the
-user anything.
+Metered use (a subscription request, a subscription job unlock, or a free
+evaluation) is taken up front with a conditional UPDATE, so concurrent
+requests can't overspend it. The route's transaction rolls back if the LLM
+call then fails (see app.db.session.get_db), which gives it back — a failed
+call never costs the user anything.
 """
 
 import uuid
@@ -38,6 +47,7 @@ from app.core.config import settings
 from app.models.api_key import UserApiKey
 from app.models.enums import LlmProvider
 from app.models.free_trial_job import FreeTrialJob
+from app.models.subscription_evaluation_job import SubscriptionEvaluationJob
 from app.models.user import User
 
 # Stripe subscription statuses that grant access. past_due is deliberately
@@ -117,6 +127,15 @@ def get_own_default_key(db: Session, user_id: uuid.UUID) -> UserApiKey | None:
             UserApiKey.user_id == user_id, UserApiKey.is_default.is_(True), UserApiKey.is_active.is_(True)
         )
     )
+
+
+def subscription_evaluations_used(user: User) -> int:
+    """This billing period's distinct-job-unlock count — a counter left over
+    from a previous period reads as 0 (it's reset lazily on the next unlock),
+    same shape as subscription_requests_used."""
+    if user.subscription_evaluations_period_end != user.subscription_current_period_end:
+        return 0
+    return user.subscription_evaluations_used
 
 
 def _own_credentials(key: UserApiKey) -> LlmCredentials:
@@ -256,13 +275,70 @@ def _unlock_job(db: Session, user: User, job_posting_id: uuid.UUID) -> None:
     db.refresh(user, attribute_names=["free_evaluations_used"])
 
 
+def _is_subscription_job_unlocked(db: Session, user: User, job_posting_id: uuid.UUID) -> bool:
+    return (
+        db.scalar(
+            select(SubscriptionEvaluationJob.id).where(
+                SubscriptionEvaluationJob.user_id == user.id,
+                SubscriptionEvaluationJob.job_posting_id == job_posting_id,
+                SubscriptionEvaluationJob.period_end.is_(user.subscription_current_period_end)
+                if user.subscription_current_period_end is None
+                else SubscriptionEvaluationJob.period_end == user.subscription_current_period_end,
+            )
+        )
+        is not None
+    )
+
+
+def _unlock_subscription_job(db: Session, user: User, job_posting_id: uuid.UUID) -> None:
+    """Spend one of this period's evaluations on this job. The row goes in
+    first, inside a savepoint: if a concurrent request is unlocking the same
+    job in the same period, the unique constraint makes this one wait and
+    then find it already unlocked, rather than spending a second evaluation
+    on it (mirrors _unlock_job)."""
+    period_end = user.subscription_current_period_end
+    try:
+        with db.begin_nested():
+            db.add(SubscriptionEvaluationJob(user_id=user.id, job_posting_id=job_posting_id, period_end=period_end))
+    except IntegrityError:
+        return
+    limit = user.subscription_evaluation_limit
+    new_period = User.subscription_evaluations_period_end.is_distinct_from(period_end)
+    stmt = (
+        update(User)
+        .where(User.id == user.id)
+        .values(
+            subscription_evaluations_used=case((new_period, 1), else_=User.subscription_evaluations_used + 1),
+            subscription_evaluations_period_end=period_end,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if limit > 0:
+        stmt = stmt.where(or_(new_period, User.subscription_evaluations_used < limit))
+    if db.execute(stmt).rowcount == 0:
+        # The route's rollback takes the SubscriptionEvaluationJob row back out too.
+        renews = f" on {period_end:%B} {period_end.day}" if period_end else " when your plan renews"
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                f"You've used this month's {limit} AI evaluations. They reset{renews}. "
+                "You can also add your own AI API key in AI access for unlimited use."
+            ),
+        )
+    db.refresh(user, attribute_names=["subscription_evaluations_used", "subscription_evaluations_period_end"])
+
+
 def job_llm_credentials(db: Session, user: User, job_posting_id: uuid.UUID) -> LlmCredentials:
     """Credentials for an AI feature about one job — its score or breakdown,
     tailored resume (and that version's score), cover letter, interview prep.
-    Subscription, else own key, else the free trial: free if this job is
-    already unlocked, otherwise unlocking it spends one free evaluation."""
+    Subscription (capped per period by distinct job, see
+    _unlock_subscription_job), else own key, else the free trial: free if
+    this job is already unlocked, otherwise unlocking it spends one free
+    evaluation."""
     if has_active_subscription(user):
-        return _use_subscription_request(db, user)
+        if not _is_subscription_job_unlocked(db, user, job_posting_id):
+            _unlock_subscription_job(db, user, job_posting_id)
+        return _system_credentials("subscription")
     key = get_own_default_key(db, user.id)
     if key is not None:
         return _own_credentials(key)

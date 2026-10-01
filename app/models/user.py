@@ -75,6 +75,19 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # app.services.ai_access._use_subscription_request).
     subscription_usage_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     subscription_usage_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Jobs this subscriber can unlock on the system key per billing period
+    # (resets on subscription_current_period_end, like subscription_usage_count
+    # above — see app.services.ai_access._unlock_subscription_job). Per-user
+    # rather than a global setting so a future higher-priced tier can grant a
+    # different limit without a schema change — just update this column.
+    # 0 = unlimited. Defaults to 100 for everyone today.
+    subscription_evaluation_limit: Mapped[int] = mapped_column(
+        Integer, default=100, server_default="100", nullable=False
+    )
+    subscription_evaluations_used: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    subscription_evaluations_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     magic_link_tokens: Mapped[list["MagicLinkToken"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"

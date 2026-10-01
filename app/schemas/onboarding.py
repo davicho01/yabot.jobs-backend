@@ -37,6 +37,12 @@ class AiAccessRead(BaseModel):
     subscription_requests_used: int
     # 0 means unlimited.
     subscription_request_limit: int
+    # Distinct jobs unlocked this billing period (job-scoped AI features
+    # only — score, breakdown, tailored resume, cover letter, interview
+    # prep). Per-user, not a global setting: a future higher-priced tier can
+    # grant a different limit. 0 means unlimited.
+    subscription_evaluations_used: int
+    subscription_evaluation_limit: int
 
 
 OnboardingStepKey = Literal["resume", "ai_access", "application", "evaluation"]

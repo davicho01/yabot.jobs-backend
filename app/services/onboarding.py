@@ -16,6 +16,7 @@ from app.services.ai_access import (
     free_trial_enabled,
     free_trial_job_ids,
     has_active_subscription,
+    subscription_evaluations_used,
     subscription_requests_used,
     subscriptions_enabled,
 )
@@ -43,6 +44,8 @@ def get_ai_access(db: Session, user: User) -> AiAccessRead:
         subscription_cancel_at_period_end=user.subscription_cancel_at_period_end,
         subscription_requests_used=subscription_requests_used(user),
         subscription_request_limit=settings.subscription_monthly_request_limit,
+        subscription_evaluations_used=subscription_evaluations_used(user),
+        subscription_evaluation_limit=user.subscription_evaluation_limit,
     )
 
 

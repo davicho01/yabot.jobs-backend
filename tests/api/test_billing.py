@@ -42,7 +42,15 @@ def engine():
     engine = create_engine(
         "sqlite:///:memory:", poolclass=StaticPool, connect_args={"check_same_thread": False}
     )
-    Base.metadata.create_all(engine, tables=[m.User.__table__, m.UserApiKey.__table__, m.FreeTrialJob.__table__])
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            m.User.__table__,
+            m.UserApiKey.__table__,
+            m.FreeTrialJob.__table__,
+            m.SubscriptionEvaluationJob.__table__,
+        ],
+    )
     with engine.begin() as conn:
         conn.execute(text("DROP INDEX IF EXISTS uq_user_api_keys_one_default_per_user"))
     return engine
@@ -387,12 +395,12 @@ def test_subscription_beats_a_saved_key(db):
     user = _subscribed_user(db)
     _add_own_key(db, user)
 
-    for resolve in (
-        ai_access.resolve_llm_credentials,
-        lambda db, user: ai_access.job_llm_credentials(db, user, uuid.uuid4()),
-    ):
-        assert resolve(db, user).source == "subscription"
-    assert user.subscription_usage_count == 2
+    assert ai_access.resolve_llm_credentials(db, user).source == "subscription"
+    assert ai_access.job_llm_credentials(db, user, uuid.uuid4()).source == "subscription"
+    # Resume-wide features meter by request; job features meter by distinct
+    # job unlocked — separate counters.
+    assert user.subscription_usage_count == 1
+    assert user.subscription_evaluations_used == 1
 
 
 def test_saved_key_takes_over_when_the_plan_ends(db):
@@ -447,6 +455,7 @@ def test_past_due_or_canceled_has_no_access(db):
 def test_ai_access_reports_the_subscription(db):
     user = _subscribed_user(db, subscription_cancel_at_period_end=True)
     ai_access.resolve_llm_credentials(db, user)
+    ai_access.job_llm_credentials(db, user, uuid.uuid4())
 
     summary = read_ai_access(current_user=user, db=db)
 
@@ -456,3 +465,56 @@ def test_ai_access_reports_the_subscription(db):
     assert summary.subscription_cancel_at_period_end is True
     assert summary.subscription_requests_used == 1
     assert summary.subscription_request_limit == 3
+    assert summary.subscription_evaluations_used == 1
+    assert summary.subscription_evaluation_limit == 100
+
+
+# ------------------------------------------------------------------ subscription job cap
+
+
+def test_new_subscriber_defaults_to_100_evaluations(db):
+    user = _subscribed_user(db)
+    assert user.subscription_evaluation_limit == 100
+
+
+def test_subscriber_job_cap_and_an_unlocked_job_stays_free(db):
+    user = _subscribed_user(db, subscription_evaluation_limit=2)
+    job_a, job_b, job_c = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+
+    ai_access.job_llm_credentials(db, user, job_a)
+    ai_access.job_llm_credentials(db, user, job_b)
+    assert user.subscription_evaluations_used == 2
+
+    with pytest.raises(HTTPException) as exc_info:
+        ai_access.job_llm_credentials(db, user, job_c)
+    assert exc_info.value.status_code == 429
+    assert "used this month's 2 AI evaluations" in exc_info.value.detail
+
+    # Out of new unlocks, but everything on an already-unlocked job is free.
+    for _ in range(3):
+        assert ai_access.job_llm_credentials(db, user, job_a).source == "subscription"
+    assert user.subscription_evaluations_used == 2
+
+
+def test_subscriber_job_cap_resets_on_period_rollover(db):
+    user = _subscribed_user(db, subscription_evaluation_limit=1)
+    job_a, job_b = uuid.uuid4(), uuid.uuid4()
+    ai_access.job_llm_credentials(db, user, job_a)
+
+    with pytest.raises(HTTPException):
+        ai_access.job_llm_credentials(db, user, job_b)
+
+    # Stripe renews the plan: a new period, so the count — and job_a's
+    # unlock — start over.
+    user.subscription_current_period_end += timedelta(days=30)
+    db.commit()
+    assert ai_access.subscription_evaluations_used(user) == 0
+    ai_access.job_llm_credentials(db, user, job_a)
+    assert user.subscription_evaluations_used == 1
+
+
+def test_subscriber_job_cap_zero_means_unlimited(db):
+    user = _subscribed_user(db, subscription_evaluation_limit=0)
+    for _ in range(10):
+        ai_access.job_llm_credentials(db, user, uuid.uuid4())
+    assert user.subscription_evaluations_used == 10
