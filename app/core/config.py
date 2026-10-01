@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     # Free job evaluations a user without their own key gets on the system
     # key above (see app.services.ai_access). 0 turns the trial off; it's
     # also off whenever the system key isn't configured.
-    free_evaluation_limit: int = 5
+    free_evaluation_limit: int = 10
     # Free resume structurings (the AI turning an uploaded resume into
     # editable sections) for a user without their own key or the plan,
     # counted separately from free_evaluation_limit. Each upload uses one
