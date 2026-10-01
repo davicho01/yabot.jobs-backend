@@ -581,15 +581,17 @@ gcloud scheduler jobs create http retry-failed-scans-hourly \
 #     every respect except what it talks to: it writes straight into the
 #     *frontend's* S3 bucket/CloudFront distribution
 #     (SEO_PAGES_BUCKET/SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID above), not
-#     Postgres/Pub/Sub. 3x/day, an hour after each crawl-dispatch run
-#     (9am/3pm/9pm America/New_York) — was every 30 minutes on its own
-#     independent cadence (see generate_static_job_pages.py's own docstring
-#     for the original freshness/cost reasoning), but that predates
-#     crawl-dispatch itself dropping to 3x/day: postings now only actually
-#     land in bursts right after a dispatch, so a 30-minute sweep was mostly
-#     re-rendering unchanged pages. Verified live 2026-09-28: a 9am
-#     dispatch's new rows stop appearing by ~9:25am, so the 1-hour buffer
-#     before the 10am run has ~35 minutes to spare.
+#     Postgres/Pub/Sub. 2x/day, same time as saved-search-alerts-hourly
+#     (2pm/10pm America/New_York, one hour after the 1pm/9pm crawl-dispatch
+#     above) — was every 30 minutes on its own independent cadence (see
+#     generate_static_job_pages.py's own docstring for the original
+#     freshness/cost reasoning), but that predates crawl-dispatch itself
+#     dropping to 2x/day: postings now only actually land in bursts right
+#     after a dispatch, so a 30-minute sweep was mostly re-rendering
+#     unchanged pages. No point regenerating the static pages more often
+#     than alerts re-scan for new rows. Verified live 2026-09-28 (back when
+#     dispatch ran at 9am): new rows stopped appearing ~25 minutes after
+#     dispatch, so the 1-hour buffer before this run has margin to spare.
 #
 #     IMPORTANT: the yabot-jobs-backend IAM user (whose key/secret are
 #     already in the resume-storage-access-key/resume-storage-secret-key
@@ -627,7 +629,7 @@ gcloud functions add-invoker-policy-binding generate-static-job-pages \
 
 gcloud scheduler jobs create http generate-static-job-pages-30min \
   --location="$REGION" \
-  --schedule="0 10-22/6 * * *" \
+  --schedule="0 14,22 * * *" \
   --time-zone="America/New_York" \
   --uri="$GENERATE_STATIC_JOB_PAGES_FUNCTION_URL" \
   --http-method=POST \
