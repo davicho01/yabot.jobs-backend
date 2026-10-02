@@ -359,19 +359,17 @@ gcloud run jobs add-iam-policy-binding crawl-dispatcher \
   --member="serviceAccount:${PROJECT_ID}@appspot.gserviceaccount.com" \
   --role="roles/run.invoker"
 
-# Hourly. Each run dispatches only the sources due for a crawl (last crawled
-# settings.crawl_interval_hours = 12h ago), at most active ÷ 12 of them, so
-# every source is still crawled twice a day but the crawls — and the scans
-# they start — are spread evenly around the clock (see crawl_dispatcher.py).
-# Was 2x/day (1pm/9pm ET) for every source at once, which ran Cloud SQL out
-# of connection slots on every burst (1,838 refused connections on
-# 2026-10-01's 1pm run). Keep this hourly: the per-run budget assumes it.
+# 2x/day, 1pm and 9pm America/New_York: postings trickle in through business
+# hours (~9am-6pm local, so ~9am-9pm ET once PT is folded in), so a morning
+# run would mostly just re-serve the prior night's crawl. 1pm catches the
+# ET/CT morning wave; 9pm catches the rest of the day including PT (whose
+# posting activity has already tailed off by 9pm ET = 6pm PT).
 # --oauth-service-account-email (not --oidc-...) because the target is the
 # Run Admin REST API, not the job's own service URL.
 
 gcloud scheduler jobs create http crawl-dispatch-hourly \
   --location="$REGION" \
-  --schedule="0 * * * *" \
+  --schedule="0 13,21 * * *" \
   --time-zone="America/New_York" \
   --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/crawl-dispatcher:run" \
   --http-method=POST \
@@ -384,7 +382,7 @@ gcloud scheduler jobs create http crawl-dispatch-hourly \
 #     always-on min-instances guess — see browser_scaler.py's own docstring.
 #
 #     crawl_dispatcher.py resumes browser-scaler-tick at the top of its own
-#     main() (whether that run came from the hourly schedule above or a
+#     main() (whether that run came from the 3x/day schedule above or a
 #     manual `gcloud run jobs execute crawl-dispatcher`); browser_scaler.py
 #     pauses it again itself once it observes crawl-worker and worker have
 #     both been idle for a full lookback window — crawl_dispatcher.py
@@ -463,11 +461,14 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
 #    respect (HTTP-triggered, no-allow-unauthenticated, OIDC-invoked by
 #    Scheduler, Cloud SQL attached to the underlying Cloud Run service
 #    afterward since `gcloud functions deploy` has no --set-cloudsql-instances
-#    flag). 2x/day (2pm/10pm America/New_York). Each run looks for postings
-#    found since that search's last check, so it doesn't depend on when
-#    crawls happen — they're spread around the clock now (see
-#    crawl-dispatch above), and twice a day is just how often alert emails
-#    go out.
+#    flag). 2x/day, an hour after each crawl-dispatch run (2pm/10pm
+#    America/New_York, one hour after the 1pm/9pm dispatch above) rather
+#    than hourly: new postings only actually show up in bursts right after a
+#    dispatch now that crawl-dispatch itself only runs 2x/day (see that
+#    section above), so an hourly sweep was mostly finding nothing new.
+#    Verified live 2026-09-28 (back when dispatch ran at 9am): new rows
+#    stopped appearing ~25 minutes after dispatch, so the 1-hour buffer
+#    before this alerts run has margin to spare.
 # ---------------------------------------------------------------------------
 
 gcloud functions deploy saved-search-alerts \
@@ -604,13 +605,17 @@ gcloud scheduler jobs create http retry-failed-scans-hourly \
 #     every respect except what it talks to: it writes straight into the
 #     *frontend's* S3 bucket/CloudFront distribution
 #     (SEO_PAGES_BUCKET/SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID above), not
-#     Postgres/Pub/Sub. Every 6 hours at :45 past 2/8/14/20 America/New_York.
-#     Crawls run around the clock (see crawl-dispatch above), so a day's
-#     page keeps filling all day; 2:45am ET is 11:45pm PT, the last run of
-#     the Pacific day each page is keyed on, so a job found late in the day
-#     still makes its own day's page before it freezes at midnight PT. Each
-#     run also renders up to 8,000 new/changed per-job pages (see
-#     app.services.static_job_pages). The job's -30min name is historical.
+#     Postgres/Pub/Sub. 2x/day, same time as saved-search-alerts-hourly
+#     (2pm/10pm America/New_York, one hour after the 1pm/9pm crawl-dispatch
+#     above) — was every 30 minutes on its own independent cadence (see
+#     generate_static_job_pages.py's own docstring for the original
+#     freshness/cost reasoning), but that predates crawl-dispatch itself
+#     dropping to 2x/day: postings now only actually land in bursts right
+#     after a dispatch, so a 30-minute sweep was mostly re-rendering
+#     unchanged pages. No point regenerating the static pages more often
+#     than alerts re-scan for new rows. Verified live 2026-09-28 (back when
+#     dispatch ran at 9am): new rows stopped appearing ~25 minutes after
+#     dispatch, so the 1-hour buffer before this run has margin to spare.
 #
 #     IMPORTANT: the yabot-jobs-backend IAM user (whose key/secret are
 #     already in the resume-storage-access-key/resume-storage-secret-key
@@ -648,7 +653,7 @@ gcloud functions add-invoker-policy-binding generate-static-job-pages \
 
 gcloud scheduler jobs create http generate-static-job-pages-30min \
   --location="$REGION" \
-  --schedule="45 2,8,14,20 * * *" \
+  --schedule="0 14,22 * * *" \
   --time-zone="America/New_York" \
   --uri="$GENERATE_STATIC_JOB_PAGES_FUNCTION_URL" \
   --http-method=POST \

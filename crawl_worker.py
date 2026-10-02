@@ -1,4 +1,4 @@
-"""Pull-worker process for the discovery crawl.
+"""Pull-worker process for the daily discovery crawl.
 
 Consumes crawl-source-requests messages published by crawl_dispatcher.py:
 for each, lists every current job URL for that company's board (via the

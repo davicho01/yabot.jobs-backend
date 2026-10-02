@@ -1,5 +1,5 @@
-{# Static notice of the crawl cadence, shown on every generated SEO page.
-   Mirrors settings.crawl_interval_hours and crawl_dispatcher.py's hourly,
-   spread-out dispatch (deploy/gcloud-deploy.sh's crawl-dispatch-hourly) —
-   keep in sync if either changes. #}
-<p class="meta-line">Employers' job boards are checked for new postings about every 12 hours, around the clock.</p>
+{# Static notice of the scan schedule, shown on every generated SEO page.
+   Mirrors deploy/gcloud-deploy.sh's crawl-dispatch-hourly Cloud Scheduler
+   job (--schedule="0 13,21 * * *" --time-zone="America/New_York") — keep in
+   sync if that schedule ever changes. #}
+<p class="meta-line">New postings are scanned daily at 1:00 PM and 9:00 PM ET.</p>
