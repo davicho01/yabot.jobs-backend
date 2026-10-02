@@ -25,6 +25,10 @@ from app.services.jobs import (
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
+# How many matches past the current page's start GET /jobs counts (50 pages
+# of 20) — see list_job_urls.
+COUNT_AHEAD = 1000
+
 
 @router.post(
     "",
@@ -85,7 +89,15 @@ def list_job_urls(
         salary_max=salary_max,
     )
 
-    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    # Counting every match of a broad search ("United States" is most of the
+    # table) was the bulk of the request; count only up to COUNT_AHEAD rows
+    # past this page's start instead, so the count can stop early. `total`
+    # then grows as someone pages deeper, and total_is_capped says there are
+    # more than it shows.
+    count_limit = (page - 1) * page_size + COUNT_AHEAD
+    counted = db.scalar(select(func.count()).select_from(stmt.limit(count_limit + 1).subquery())) or 0
+    total_is_capped = counted > count_limit
+    total = min(counted, count_limit)
 
     # Batches both loads into one extra query each for the whole page, instead
     # of to_job_detail's url_row.postings access and also_posted_count's
@@ -100,6 +112,7 @@ def list_job_urls(
     return JobListRead(
         items=[to_job_detail(row, include_url=current_user is not None) for row in url_rows],
         total=total,
+        total_is_capped=total_is_capped,
         page=page,
         page_size=page_size,
         search_area=search_area,

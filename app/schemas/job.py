@@ -92,6 +92,9 @@ class SearchAreaRead(BaseModel):
 class JobListRead(BaseModel):
     items: list[JobDetailRead]
     total: int
+    # True when there are more matches than `total` — GET /jobs only counts
+    # so far past the current page (see list_job_urls).
+    total_is_capped: bool = False
     page: int
     page_size: int
     search_area: SearchAreaRead | None = None  # set when the location search was a city, searched by distance
