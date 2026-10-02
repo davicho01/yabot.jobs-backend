@@ -317,6 +317,45 @@ class TestGenerate:
 
 
 
+    def test_a_run_that_dies_partway_keeps_its_checkpointed_progress(self, db, make_job, store, monkeypatch):
+        for _ in range(5):
+            make_job()
+        monkeypatch.setattr(sjp, "RENDER_BATCH_SIZE", 1)
+        monkeypatch.setattr(sjp, "CHECKPOINT_EVERY_BATCHES", 2)
+        real_load, calls = sjp.load_job_pages, []
+
+        def dies_on_the_fourth_batch(db, ids):
+            calls.append(ids)
+            if len(calls) == 4:
+                raise RuntimeError("connection lost")
+            return real_load(db, ids)
+
+        monkeypatch.setattr(sjp, "load_job_pages", dies_on_the_fourth_batch)
+        with pytest.raises(RuntimeError):
+            sjp.generate_job_pages(db, now=NOW, full=True)
+
+        # Batches 1-3 uploaded; the checkpoint after batch 2 saved two of them.
+        assert len(json.loads(store.get(sjp.MANIFEST_KEY))["pages"]) == 2
+        monkeypatch.setattr(sjp, "load_job_pages", real_load)
+        resumed = sjp.generate_job_pages(db, now=NOW)
+        assert (resumed.published, resumed.unchanged) == (3, 2)
+
+    def test_a_dropped_connection_is_retried_once(self, db, make_job, monkeypatch):
+        from sqlalchemy.exc import OperationalError
+
+        row_id = str(make_job().id)  # read before patching: refreshing an expired row goes through execute too
+        real_execute, attempts = db.execute, []
+
+        def flaky(stmt, *a, **k):
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise OperationalError("SELECT", {}, Exception("server closed the connection unexpectedly"))
+            return real_execute(stmt, *a, **k)
+
+        monkeypatch.setattr(db, "execute", flaky)
+        assert row_id in sjp.load_job_pages(db, [row_id])
+        assert len(attempts) == 2
+
 class TestGeneratorScript:
     def test_a_job_page_failure_still_invalidates_the_day_pages_then_fails_the_run(self, monkeypatch):
         import generate_static_job_pages as script

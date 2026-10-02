@@ -33,6 +33,7 @@ from typing import Iterable
 
 from markdown_it import MarkdownIt
 from sqlalchemy import and_, or_, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -66,6 +67,9 @@ MAX_AGE_DAYS = 60
 # generate_static_job_pages.py), and keeps browsers from holding stale copies.
 CACHE_CONTROL = "public, max-age=3600"
 RENDER_BATCH_SIZE = 500
+# Save the manifest every this many batches, so a run that dies partway
+# (the backfill, mostly) keeps what it already published.
+CHECKPOINT_EVERY_BATCHES = 10
 # Renders per scheduled run, so a big backlog (the first run, a source
 # rescan, a PAGE_VERSION bump) catches up over a few runs instead of
 # blowing the function's 540s timeout. Whatever's left over stays out of
@@ -208,34 +212,55 @@ def load_job_pages(db: Session, url_ids: Iterable[str]) -> dict[str, JobPage]:
     ids = list(url_ids)
     if not ids:
         return {}
+    # Just the columns a page uses: whole rows would drag raw_source (the
+    # scanned page's HTML) and extracted_fields along for every job, a lot
+    # of bytes off a small database for nothing.
     stmt = (
-        select(JobPostingUrl, JobPosting)
+        select(
+            JobPostingUrl.id, JobPostingUrl.domain, JobPostingUrl.created_at,
+            JobPosting.title, JobPosting.company_name, JobPosting.location, JobPosting.locations,
+            JobPosting.workplace_type, JobPosting.employment_type, JobPosting.sector, JobPosting.description,
+            JobPosting.posted_at, JobPosting.salary_min, JobPosting.salary_max, JobPosting.salary_currency,
+        )
         .join(JobPosting, JobPosting.url_id == JobPostingUrl.id)
         .where(JobPostingUrl.id.in_([uuid.UUID(i) for i in ids]))
         .order_by(JobPosting.scanned_at.asc())  # newest last, so it wins below
     )
     pages: dict[str, JobPage] = {}
-    for url_row, posting in db.execute(stmt):
-        if posting.title is None:
+    for row in _execute_with_retry(db, stmt):
+        if row.title is None:
             continue
-        pages[str(url_row.id)] = JobPage(
-            url_id=str(url_row.id),
-            title=posting.title,
-            company_name=posting.company_name,
-            domain=url_row.domain,
-            location=posting.location,
-            locations=list(posting.locations or []) or split_locations(posting.location),
-            workplace_type=posting.workplace_type,
-            employment_type=posting.employment_type,
-            sector=posting.sector,
-            description=posting.description,
-            posted_at=posting.posted_at,
-            found_at=url_row.created_at,
-            salary_min=posting.salary_min,
-            salary_max=posting.salary_max,
-            salary_currency=posting.salary_currency,
+        pages[str(row.id)] = JobPage(
+            url_id=str(row.id),
+            title=row.title,
+            company_name=row.company_name,
+            domain=row.domain,
+            location=row.location,
+            locations=list(row.locations or []) or split_locations(row.location),
+            workplace_type=row.workplace_type,
+            employment_type=row.employment_type,
+            sector=row.sector,
+            description=row.description,
+            posted_at=row.posted_at,
+            found_at=row.created_at,
+            salary_min=row.salary_min,
+            salary_max=row.salary_max,
+            salary_currency=row.salary_currency,
         )
     return pages
+
+
+def _execute_with_retry(db: Session, stmt):
+    """One retry on a dropped connection. Cloud SQL closes connections when
+    a crawl burst runs it out of slots, and a long backfill shouldn't die
+    of one transient drop (the session hands out a fresh connection after
+    the rollback)."""
+    try:
+        return db.execute(stmt).all()
+    except OperationalError:
+        logger.warning("Database connection dropped while loading job pages; retrying once.")
+        db.rollback()
+        return db.execute(stmt).all()
 
 
 # ---------------------------------------------------------------------------
@@ -436,27 +461,40 @@ def generate_job_pages(
     if dry_run:
         return result
 
+    # What's live in the bucket, kept current as batches land and saved
+    # every CHECKPOINT_EVERY_BATCHES. It starts as the old manifest, gains
+    # each rendered page's new entry, and drops each page replaced by the
+    # "no longer available" one. What's left untouched is the unchanged
+    # pages plus deferred changed ones (old entry, so retried next run);
+    # deferred new jobs are never added, so they stay out of the sitemap.
+    pages = dict(previous)
+    batches_done = 0
+
+    def checkpoint(force: bool = False) -> None:
+        if force or batches_done % CHECKPOINT_EVERY_BATCHES == 0:
+            write_json(MANIFEST_KEY, {"pages": pages})
+
     with ThreadPoolExecutor(max_workers=UPLOAD_WORKERS) as pool:
-        to_render = new_ids + changed_ids
+        to_render = changed_ids + new_ids
         for start in range(0, len(to_render), RENDER_BATCH_SIZE):
             batch = to_render[start : start + RENDER_BATCH_SIZE]
-            pages = load_job_pages(db, batch)
-            uploads = [(f"job/{i}", render_job_page(pages[i])) for i in batch if i in pages]
+            loaded = load_job_pages(db, batch)
+            uploads = [(f"job/{i}", render_job_page(loaded[i])) for i in batch if i in loaded]
             list(pool.map(lambda kv: upload_html(kv[0], kv[1], CACHE_CONTROL), uploads))
+            pages.update((i, current[i]) for i in batch if i in loaded)
+            batches_done += 1
+            checkpoint()
         for start in range(0, len(removed_ids), RENDER_BATCH_SIZE):
             batch = removed_ids[start : start + RENDER_BATCH_SIZE]
-            pages = load_job_pages(db, batch)
-            uploads = [(f"job/{i}", render_job_gone(pages.get(i))) for i in batch]
+            loaded = load_job_pages(db, batch)
+            uploads = [(f"job/{i}", render_job_gone(loaded.get(i))) for i in batch]
             list(pool.map(lambda kv: upload_html(kv[0], kv[1], CACHE_CONTROL), uploads))
+            for i in batch:
+                pages.pop(i, None)
+            batches_done += 1
+            checkpoint()
 
-    # Written only once every page is up: a run that dies halfway leaves the
-    # old manifest, and the next run simply redoes the same work. The new
-    # manifest holds exactly what's live: rendered this run, or unchanged.
-    # A deferred new job stays out (and out of the sitemap) until it's
-    # rendered; a deferred changed one keeps its old entry so it's retried.
-    rendered = set(new_ids) | set(changed_ids)
-    pages = {i: (entry if i in rendered else previous[i]) for i, entry in current.items() if i in rendered or i in previous}
-    write_json(MANIFEST_KEY, {"pages": pages})
+    checkpoint(force=True)
     for key, xml in build_job_sitemaps(pages).items():
         upload_xml(key, xml)
         result.touched_paths.append(f"/{key}")
