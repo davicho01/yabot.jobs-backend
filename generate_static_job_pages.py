@@ -50,7 +50,7 @@ from datetime import date, datetime
 
 from app.core.log_config import configure_logging
 from app.db.session import SessionLocal
-from app.services.static_job_pages import generate_job_pages
+from app.services.static_job_pages import JobPagesResult, generate_job_pages
 from app.services.static_pages import DAY_BOUNDARY_TZ, collapse_invalidation_paths, generate_for_date, invalidate_paths
 
 configure_logging()
@@ -70,9 +70,17 @@ def main() -> None:
     target_date = date.fromisoformat(args.date) if args.date else datetime.now(DAY_BOUNDARY_TZ).date()
 
     db = SessionLocal()
+    job_error: Exception | None = None
     try:
         result = generate_for_date(db, target_date, dry_run=args.dry_run, invalidate=False)
-        job_result = generate_job_pages(db, dry_run=args.dry_run, full=args.full)
+        # Isolated so a failure here can't cost the day pages (already
+        # written above) their CloudFront invalidation below.
+        try:
+            job_result = generate_job_pages(db, dry_run=args.dry_run, full=args.full)
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Per-job pages failed; the day pages are still published and invalidated.")
+            job_result, job_error = JobPagesResult(), exc
     finally:
         db.close()
 
@@ -83,14 +91,17 @@ def main() -> None:
         logger.info("%s jobs/%s/%s: %d job(s).", verb, key, target_date.isoformat(), count)
     if result.job_counts:
         logger.info("%s %d country/sector page(s) for %s.", verb, len(result.job_counts), target_date.isoformat())
-    logger.info(
-        "%s job pages: %d new, %d re-rendered, %d marked no longer available, %d unchanged.",
-        verb, job_result.published, job_result.updated, job_result.removed, job_result.unchanged,
-    )
+    if job_error is None:
+        logger.info(
+            "%s job pages: %d new, %d re-rendered, %d marked no longer available, %d unchanged, %d deferred.",
+            verb, job_result.published, job_result.updated, job_result.removed, job_result.unchanged,
+            job_result.deferred,
+        )
 
-    paths = collapse_invalidation_paths(result.touched_paths + job_result.touched_paths)
     if not args.dry_run:
-        invalidate_paths(paths)
+        invalidate_paths(collapse_invalidation_paths(result.touched_paths + job_result.touched_paths))
+    if job_error is not None:
+        raise job_error  # still report the run as failed, after the day pages are fully out
 
 
 def dispatch(_request=None) -> tuple[str, int]:

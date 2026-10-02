@@ -102,12 +102,22 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
     # didn't list: a non-empty listing, fully registered, and not below the
     # coverage monitor's baseline (a broken adapter or truncated listing).
     healthy = bool(urls) and registered and not failed and source.coverage_low_streak == 0
-    closed = record_board_presence(db, source_id, urls, healthy=healthy)
     db.commit()  # stats persisted before waking lanes (has_unclaimed_pending ends its transaction)
-    logger.info(
-        "Crawled %s: %d job URL(s) discovered (%d failed), %d closed%s.",
-        source_name, len(urls), failed, closed, "" if healthy else " (unhealthy crawl: closing skipped)",
-    )
+    logger.info("Crawled %s: %d job URL(s) discovered (%d failed).", source_name, len(urls), failed)
+
+    # Its own transaction, after the stats are safely committed: closure
+    # tracking is bookkeeping, and a failure here must never roll back the
+    # crawl or nack its message into a full re-crawl of the board.
+    try:
+        closed = record_board_presence(db, source_id, urls, healthy=healthy)
+        db.commit()
+        if closed or not healthy:
+            logger.info(
+                "%s: %d listing(s) closed%s.", source_name, closed, "" if healthy else " (unhealthy crawl: closing skipped)"
+            )
+    except Exception:
+        db.rollback()
+        logger.exception("Recording board presence for %s failed; crawl itself is unaffected.", source_name)
 
     _wake_source_lanes(db, source_id, source_name, lanes)
 

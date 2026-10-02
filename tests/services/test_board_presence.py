@@ -168,3 +168,68 @@ def test_closed_listings_drop_out_of_search(scan_db, make_url, now):
     ids = {row.id for row in scan_db.scalars(stmt)}
 
     assert ids == {open_row.id}
+
+
+def _register_many(scan_db, source, n, now):
+    urls = [f"https://example.com/many/{i}" for i in range(n)]
+    _register(scan_db, source, urls, now)
+    return urls
+
+
+def test_mass_closure_is_held_back(scan_db, make_source, now):
+    source = make_source()
+    urls = _register_many(scan_db, source, 50, now)
+
+    # A "healthy" crawl that only lists 10 of 50: 40 closures is 80% of the board.
+    closed = record_board_presence(scan_db, source.id, urls[:10], healthy=True, now=now + timedelta(hours=40))
+    scan_db.commit()
+
+    assert closed == 0
+    assert all(r.closed_at is None for r in _rows(scan_db, source).values())
+
+
+def test_normal_churn_under_the_guard_still_closes(scan_db, make_source, now):
+    source = make_source()
+    urls = _register_many(scan_db, source, 100, now)
+
+    closed = record_board_presence(scan_db, source.id, urls[:85], healthy=True, now=now + timedelta(hours=40))
+
+    assert closed == 15
+
+
+def test_a_small_board_can_close_a_few_even_above_the_fraction(scan_db, make_source, now):
+    source = make_source()
+    _register(scan_db, source, URLS, now)  # 3 open; closing 1 is 33% but under MASS_CLOSE_MIN
+
+    assert record_board_presence(scan_db, source.id, URLS[:2], healthy=True, now=now + timedelta(hours=40)) == 1
+
+
+def test_recently_seen_rows_are_not_rewritten(scan_db, make_source, now):
+    source = make_source()
+    _register(scan_db, source, URLS, now)
+
+    record_board_presence(scan_db, source.id, URLS, healthy=True, now=now + timedelta(hours=1))
+    scan_db.commit()
+
+    assert {r.last_seen_at.replace(tzinfo=None) for r in _rows(scan_db, source).values()} == {now.replace(tzinfo=None)}
+
+
+def test_a_presence_failure_does_not_fail_the_crawl(monkeypatch, scan_db, make_source, now):
+    source = make_source()
+    wakeups = []
+    monkeypatch.setattr(crawl_worker, "list_job_urls", lambda ats_type, board_url: URLS)
+    monkeypatch.setattr(crawl_worker, "enqueue_source_scan", lambda source_id, lanes=1: wakeups.append(source_id))
+
+    def broken(*a, **k):
+        raise RuntimeError("db hiccup")
+
+    monkeypatch.setattr(crawl_worker, "record_board_presence", broken)
+
+    crawl_worker._crawl_source(scan_db, source.id)  # must not raise
+
+    scan_db.expire_all()
+    stored = scan_db.get(CrawlSource, source.id)
+    assert stored.last_crawled_at is not None and stored.crawl_claimed_at is None
+    assert len(_rows(scan_db, source)) == 3  # URLs registered
+    assert wakeups == [source.id]  # lanes still woken
+

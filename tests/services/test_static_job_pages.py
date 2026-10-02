@@ -202,6 +202,10 @@ class TestSitemaps:
         assert "<loc>https://yabot.jobs/sitemap-job-pages-2.xml</loc>" in out["sitemap-job-pages.xml"]
         assert "<loc>https://yabot.jobs/job/a</loc><lastmod>2026-10-01</lastmod>" in out["sitemap-job-pages-1.xml"]
 
+    def test_lastmod_comes_from_a_versioned_manifest_entry(self):
+        out = sjp.build_job_sitemaps({"a": "3|2026-10-01T12:00:00+00:00"})
+        assert "<lastmod>2026-10-01</lastmod>" in out["sitemap-job-pages-1.xml"]
+
     def test_empty_still_writes_a_valid_index(self):
         out = sjp.build_job_sitemaps({})
         assert "sitemap-job-pages-1.xml" in out["sitemap-job-pages.xml"]
@@ -223,7 +227,7 @@ class TestGenerate:
         assert result.published == 1
         assert b"Software Engineer" in store.get(f"job/{row.id}")
         manifest = json.loads(store.get(sjp.MANIFEST_KEY))
-        assert manifest["version"] == sjp.PAGE_VERSION and str(row.id) in manifest["pages"]
+        assert manifest["pages"][str(row.id)].startswith(f"{sjp.PAGE_VERSION}|")
         assert f"/job/{row.id}".encode() in store.get("sitemap-job-pages-1.xml")
         # A brand-new key was never cached, so only the sitemaps need invalidating.
         assert sorted(result.touched_paths) == ["/sitemap-job-pages-1.xml", "/sitemap-job-pages.xml"]
@@ -281,3 +285,55 @@ class TestGenerate:
         monkeypatch.setattr(sjp, "PAGE_VERSION", sjp.PAGE_VERSION + 1)
         assert sjp.generate_job_pages(db, now=NOW).updated == 1
         assert sjp.generate_job_pages(db, now=NOW).updated == 0
+
+    def test_render_cap_defers_the_rest_to_later_runs(self, db, make_job, store):
+        rows = [make_job() for _ in range(5)]
+
+        first = sjp.generate_job_pages(db, now=NOW, max_renders=2)
+        manifest = json.loads(store.get(sjp.MANIFEST_KEY))["pages"]
+        assert (first.published, first.deferred) == (2, 3)
+        assert len(manifest) == 2  # deferred jobs aren't live yet, so not in the manifest or sitemap
+        assert store.get("sitemap-job-pages-1.xml").count(b"<url>") == 2
+
+        sjp.generate_job_pages(db, now=NOW, max_renders=2)
+        third = sjp.generate_job_pages(db, now=NOW, max_renders=2)
+        assert (third.published, third.deferred, third.unchanged) == (1, 0, 4)
+        assert all(store.get(f"job/{r.id}") for r in rows)
+
+    def test_full_ignores_the_cap(self, db, make_job, store):
+        for _ in range(3):
+            make_job()
+        assert sjp.generate_job_pages(db, now=NOW, full=True, max_renders=1).published == 3
+
+    def test_a_version_bump_under_the_cap_makes_progress_every_run(self, db, make_job, store, monkeypatch):
+        for _ in range(3):
+            make_job()
+        sjp.generate_job_pages(db, now=NOW)
+        monkeypatch.setattr(sjp, "PAGE_VERSION", sjp.PAGE_VERSION + 1)
+
+        runs = [sjp.generate_job_pages(db, now=NOW, max_renders=2).updated for _ in range(3)]
+
+        assert runs == [2, 1, 0]
+
+
+
+class TestGeneratorScript:
+    def test_a_job_page_failure_still_invalidates_the_day_pages_then_fails_the_run(self, monkeypatch):
+        import generate_static_job_pages as script
+        from app.services.static_pages import GenerationResult
+
+        day = GenerationResult(
+            generated_at=NOW, target_date=NOW.date(), job_counts={"us/sales": 1}, manifest={},
+            touched_paths=["/jobs/us/sales/2026-10-02", "/sitemap-jobs.xml"],
+        )
+        invalidated: list[list[str]] = []
+        monkeypatch.setattr(script, "SessionLocal", lambda: type("S", (), {"rollback": lambda s: None, "close": lambda s: None})())
+        monkeypatch.setattr(script, "generate_for_date", lambda db, d, dry_run, invalidate: day)
+        monkeypatch.setattr(script, "generate_job_pages", lambda db, dry_run, full: (_ for _ in ()).throw(RuntimeError("boom")))
+        monkeypatch.setattr(script, "invalidate_paths", lambda paths: invalidated.append(paths))
+        monkeypatch.setattr("sys.argv", ["generate_static_job_pages.py"])
+
+        with pytest.raises(RuntimeError, match="boom"):
+            script.main()
+
+        assert invalidated == [["/jobs/*", "/sitemap-jobs.xml"]]

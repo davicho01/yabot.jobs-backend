@@ -321,6 +321,15 @@ def get_or_create_job_posting(
     return posting, url_row
 
 
+# record_board_presence: how stale last_seen_at must be before a crawl
+# re-stamps it (crawls run 2x/day, so a regular crawl always does), and the
+# mass-closure guard — closing more than this share of a source's open URLs
+# in one crawl (beyond a small absolute floor) is held back as suspicious.
+LAST_SEEN_REFRESH_HOURS = 6
+MASS_CLOSE_FRACTION = 0.2
+MASS_CLOSE_MIN = 10
+
+
 def _parse_discovered_urls(raw_urls: list[str]) -> tuple[dict[str, tuple[str, str]], int]:
     """url_hash -> (raw_url, normalized_url), de-duplicated within this batch
     (a board's own listing can repeat a URL) before ever touching the DB,
@@ -349,30 +358,65 @@ def record_board_presence(
     `healthy` is the caller's judgement that this crawl saw the whole board
     (see crawl_worker._crawl_source): a broken adapter or a truncated
     listing must never close a board's jobs in bulk, so an unhealthy crawl
-    only ever marks URLs as seen. Call after bulk_register_discovered_urls,
-    so newly-registered rows get stamped too.
+    only ever marks URLs as seen. Even a healthy crawl closes nothing when
+    it would close more than MASS_CLOSE_FRACTION of the board at once (see
+    below). Call after bulk_register_discovered_urls, so newly-registered
+    rows get stamped too.
     """
     now = now or datetime.now(timezone.utc)
     parsed, _ = _parse_discovered_urls(raw_urls)
     if parsed:
+        listed = (JobPostingUrl.crawl_source_id == crawl_source_id, JobPostingUrl.url_hash.in_(parsed.keys()))
+        # Only rows not stamped recently: a re-delivered or back-to-back
+        # crawl then rewrites almost nothing, instead of every row on the
+        # board each time (dead tuples and vacuum work on a small instance).
         db.execute(
             update(JobPostingUrl)
-            .where(JobPostingUrl.crawl_source_id == crawl_source_id, JobPostingUrl.url_hash.in_(parsed.keys()))
-            .values(last_seen_at=now, closed_at=None)
+            .where(
+                *listed,
+                or_(
+                    JobPostingUrl.last_seen_at.is_(None),
+                    JobPostingUrl.last_seen_at < now - timedelta(hours=LAST_SEEN_REFRESH_HOURS),
+                ),
+            )
+            .values(last_seen_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        db.execute(
+            update(JobPostingUrl)
+            .where(*listed, JobPostingUrl.closed_at.is_not(None))
+            .values(closed_at=None, last_seen_at=now)
             .execution_options(synchronize_session=False)
         )
     if not healthy:
         return 0
     cutoff = now - timedelta(hours=settings.job_closed_after_unseen_hours)
-    result = db.execute(
-        update(JobPostingUrl)
-        .where(
-            JobPostingUrl.crawl_source_id == crawl_source_id,
-            JobPostingUrl.closed_at.is_(None),
-            JobPostingUrl.last_seen_at < cutoff,
+    unseen = (
+        JobPostingUrl.crawl_source_id == crawl_source_id,
+        JobPostingUrl.closed_at.is_(None),
+        JobPostingUrl.last_seen_at < cutoff,
+    )
+    to_close = db.scalar(select(func.count()).select_from(JobPostingUrl).where(*unseen)) or 0
+    if not to_close:
+        return 0
+    open_count = db.scalar(
+        select(func.count())
+        .select_from(JobPostingUrl)
+        .where(JobPostingUrl.crawl_source_id == crawl_source_id, JobPostingUrl.closed_at.is_(None))
+    ) or 0
+    if to_close > MASS_CLOSE_MIN and to_close > open_count * MASS_CLOSE_FRACTION:
+        # More than a normal day's churn at once: far more likely an adapter
+        # that only lists part of the board (a capped "newest N" feed, say)
+        # than that many real closures. Leave them open and say so; the
+        # coverage monitor can't see this case because the count is steady.
+        logger.warning(
+            "Not closing %d of %d open URL(s) for crawl source %s: over %.0f%% of the board at once. "
+            "Check the adapter lists the whole board.",
+            to_close, open_count, crawl_source_id, MASS_CLOSE_FRACTION * 100,
         )
-        .values(closed_at=now)
-        .execution_options(synchronize_session=False)
+        return 0
+    result = db.execute(
+        update(JobPostingUrl).where(*unseen).values(closed_at=now).execution_options(synchronize_session=False)
     )
     return result.rowcount or 0
 

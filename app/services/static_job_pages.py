@@ -15,7 +15,8 @@ and the posting's scanned_at when it was rendered, so each run only
     to CloudFront's SPA fallback: a soft 404 that redirects.
 
 and rewrites the sitemap. Bump PAGE_VERSION when the template or rendering
-changes so the next run re-renders every page (same as --full).
+changes: the next runs re-render every page, MAX_RENDERS_PER_RUN at a time
+(--full does it all at once).
 """
 
 from __future__ import annotations
@@ -65,6 +66,12 @@ MAX_AGE_DAYS = 60
 # generate_static_job_pages.py), and keeps browsers from holding stale copies.
 CACHE_CONTROL = "public, max-age=3600"
 RENDER_BATCH_SIZE = 500
+# Renders per scheduled run, so a big backlog (the first run, a source
+# rescan, a PAGE_VERSION bump) catches up over a few runs instead of
+# blowing the function's 540s timeout. Whatever's left over stays out of
+# the manifest and is simply picked up next run. --full (the backfill job,
+# with an hour to work) is uncapped.
+MAX_RENDERS_PER_RUN = 8_000
 UPLOAD_WORKERS = 16
 COUNTRY_SLUG = "us"
 
@@ -336,7 +343,8 @@ def render_job_gone(job: JobPage | None) -> str:
 def build_job_sitemaps(pages: dict[str, str]) -> dict[str, str]:
     """{key: xml} — numbered shards of SITEMAP_SHARD_SIZE URLs plus the
     sitemap index (SITEMAP_INDEX_KEY) that robots.txt points at. `pages` is
-    the manifest's {url_id: version}; a page's lastmod is its version's date."""
+    the manifest's {url_id: "<PAGE_VERSION>|<scanned_at>"}; a page's lastmod
+    is its scan date."""
     base = settings.seo_pages_base_url
     ordered = sorted(pages.items())
     shards = [ordered[i : i + SITEMAP_SHARD_SIZE] for i in range(0, len(ordered), SITEMAP_SHARD_SIZE)] or [[]]
@@ -345,7 +353,8 @@ def build_job_sitemaps(pages: dict[str, str]) -> dict[str, str]:
     for n, shard in enumerate(shards, start=1):
         key = f"sitemap-job-pages-{n}.xml"
         body = "\n".join(
-            f"  <url><loc>{base}/job/{url_id}</loc><lastmod>{version[:10]}</lastmod></url>" for url_id, version in shard
+            f"  <url><loc>{base}/job/{url_id}</loc><lastmod>{entry.rsplit('|', 1)[-1][:10]}</lastmod></url>"
+            for url_id, entry in shard
         )
         out[key] = (
             '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -371,7 +380,7 @@ def build_job_sitemaps(pages: dict[str, str]) -> dict[str, str]:
 def read_job_manifest() -> dict:
     manifest = read_json(MANIFEST_KEY)
     if not manifest or not isinstance(manifest.get("pages"), dict):
-        return {"version": None, "pages": {}}
+        return {"pages": {}}
     return manifest
 
 
@@ -381,31 +390,48 @@ class JobPagesResult:
     updated: int = 0  # re-rendered: rescanned, or a full/version re-render
     removed: int = 0  # replaced with the "no longer available" page
     unchanged: int = 0
+    deferred: int = 0  # over this run's render cap; picked up next run
     # CloudFront paths whose cached copy is now stale (new keys need none).
     touched_paths: list[str] = field(default_factory=list)
 
 
 def generate_job_pages(
-    db: Session, *, dry_run: bool = False, full: bool = False, now: datetime | None = None
+    db: Session,
+    *,
+    dry_run: bool = False,
+    full: bool = False,
+    now: datetime | None = None,
+    max_renders: int | None = MAX_RENDERS_PER_RUN,
 ) -> JobPagesResult:
     now = now or datetime.now(timezone.utc)
-    manifest = {"version": None, "pages": {}} if dry_run else read_job_manifest()
-    previous: dict[str, str] = manifest["pages"]
-    eligible = eligible_job_ids(db, now)
-    rerender_all = full or manifest["version"] != PAGE_VERSION
+    previous: dict[str, str] = {} if dry_run else read_job_manifest()["pages"]
+    # Each manifest entry is "<PAGE_VERSION>|<scanned_at>", so a rescan or a
+    # PAGE_VERSION bump both show up as a changed entry, and progress
+    # through a capped backlog is recorded page by page.
+    current = {i: f"{PAGE_VERSION}|{scanned}" for i, scanned in eligible_job_ids(db, now).items()}
+    if full:
+        max_renders = None
 
-    new_ids = [i for i in eligible if i not in previous]
-    changed_ids = [i for i in eligible if i in previous and (rerender_all or previous[i] != eligible[i])]
-    removed_ids = [i for i in previous if i not in eligible]
+    # Already-published pages first (rescanned or stale-versioned: a crawler
+    # may be reading the outdated copy right now), then brand-new ones.
+    changed_ids = [i for i in current if i in previous and (full or previous[i] != current[i])]
+    new_ids = [i for i in current if i not in previous]
+    removed_ids = [i for i in previous if i not in current]
+    deferred = 0
+    if max_renders is not None and len(changed_ids) + len(new_ids) > max_renders:
+        deferred = len(changed_ids) + len(new_ids) - max_renders
+        changed_ids = changed_ids[:max_renders]
+        new_ids = new_ids[: max_renders - len(changed_ids)]
     result = JobPagesResult(
         published=len(new_ids),
         updated=len(changed_ids),
         removed=len(removed_ids),
-        unchanged=len(eligible) - len(new_ids) - len(changed_ids),
+        unchanged=len(current) - len(new_ids) - len(changed_ids) - deferred,
+        deferred=deferred,
     )
     logger.info(
-        "Job pages: %d new, %d to re-render, %d to remove, %d unchanged%s.",
-        result.published, result.updated, result.removed, result.unchanged, " (dry run)" if dry_run else "",
+        "Job pages: %d new, %d to re-render, %d to remove, %d unchanged, %d deferred to the next run%s.",
+        result.published, result.updated, result.removed, result.unchanged, deferred, " (dry run)" if dry_run else "",
     )
     if dry_run:
         return result
@@ -424,9 +450,14 @@ def generate_job_pages(
             list(pool.map(lambda kv: upload_html(kv[0], kv[1], CACHE_CONTROL), uploads))
 
     # Written only once every page is up: a run that dies halfway leaves the
-    # old manifest, and the next run simply redoes the same work.
-    write_json(MANIFEST_KEY, {"version": PAGE_VERSION, "pages": eligible})
-    for key, xml in build_job_sitemaps(eligible).items():
+    # old manifest, and the next run simply redoes the same work. The new
+    # manifest holds exactly what's live: rendered this run, or unchanged.
+    # A deferred new job stays out (and out of the sitemap) until it's
+    # rendered; a deferred changed one keeps its old entry so it's retried.
+    rendered = set(new_ids) | set(changed_ids)
+    pages = {i: (entry if i in rendered else previous[i]) for i, entry in current.items() if i in rendered or i in previous}
+    write_json(MANIFEST_KEY, {"pages": pages})
+    for key, xml in build_job_sitemaps(pages).items():
         upload_xml(key, xml)
         result.touched_paths.append(f"/{key}")
     result.touched_paths.extend(f"/job/{i}" for i in changed_ids + removed_ids)
