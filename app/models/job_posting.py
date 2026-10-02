@@ -35,6 +35,10 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
         # CAST(locations AS TEXT) serving location_matches — created only in
         # migration c7d3e8a1f5b2, since an expression index with Postgres-only
         # operator classes can't be built by the SQLite test schema.
+        # Serves GET /jobs' title search (`title ILIKE '%engineer%'`), which
+        # otherwise scans every posting when a term matches few of them.
+        # (SQLite ignores the postgresql_* options and builds a plain index.)
+        Index("ix_job_postings_title_trgm", "title", postgresql_using="gin", postgresql_ops={"title": "gin_trgm_ops"}),
     )
 
     url_id: Mapped[uuid.UUID] = mapped_column(
