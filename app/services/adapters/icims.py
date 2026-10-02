@@ -22,8 +22,9 @@ _ICIMS_URL_RE = re.compile(r"([a-zA-Z0-9-]+\.icims\.com)", re.IGNORECASE)
 #   server-rendered listing (job links -> /jobs/{id}/{slug}/job?in_iframe=1,
 #   which — unlike the same path without in_iframe=1, verified live — embeds
 #   a real schema.org JobPosting JSON-LD block the generic scanner already
-#   picks up). Paginates via &pr={page}, page size 50 (verified Schwab/Joby
-#   Aviation).
+#   picks up). Paginates via &pr={page}; page size is tenant-configured (50
+#   at Schwab/Joby Aviation, 20 at careers-usu, 10 at careers-uuhc), so a
+#   short page is judged against page 0's size, not a fixed constant.
 # - "Jibe/Attract" (Jibe was acquired by iCIMS, now its modern career-site
 #   CMS): the .icims.com tenant subdomain is just a stub whose entire body
 #   is `window.top.location.href = '{vanity}'` — no content of its own. The
@@ -39,7 +40,6 @@ _ICIMS_URL_RE = re.compile(r"([a-zA-Z0-9-]+\.icims\.com)", re.IGNORECASE)
 #   stored, not apply_url.
 _CLASSIC_SEARCH_URL = "https://{host}/jobs/search"
 _CLASSIC_JOB_LINK_RE = re.compile(r'href="(https://[a-zA-Z0-9.-]+/jobs/\d+/[^"]*)"')
-_CLASSIC_PAGE_SIZE = 50
 
 _JIBE_REDIRECT_RE = re.compile(r"window\.top\.location\.href\s*=\s*'([^']+)'")
 _JIBE_API_URL = "https://{host}/api/jobs"
@@ -63,7 +63,8 @@ def _classic_or_redirect_host(host: str) -> tuple[list[str] | None, str | None]:
 
 
 def _fetch_classic_jobs(host: str) -> list[str]:
-    urls: list[str] = []
+    urls: dict[str, None] = {}
+    page_size = None
     page = 0
     while len(urls) < _ICIMS_MAX_JOBS:
         response = get_with_retry(
@@ -71,13 +72,15 @@ def _fetch_classic_jobs(host: str) -> list[str]:
         )
         response.raise_for_status()
         links = dict.fromkeys(_CLASSIC_JOB_LINK_RE.findall(response.text))
-        if not links:
+        new_links = [link for link in links if link not in urls]
+        if not new_links:
             break
-        urls.extend(links)
-        if len(links) < _CLASSIC_PAGE_SIZE:
+        urls.update(dict.fromkeys(new_links))
+        page_size = page_size or len(links)
+        if len(links) < page_size:
             break
         page += 1
-    return urls[:_ICIMS_MAX_JOBS]
+    return list(urls)[:_ICIMS_MAX_JOBS]
 
 
 def _fetch_jibe_jobs(host: str) -> list[str] | None:

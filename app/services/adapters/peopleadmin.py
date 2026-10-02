@@ -6,7 +6,6 @@ from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsA
 _PEOPLEADMIN_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _PEOPLEADMIN_URL_RE = re.compile(r"([a-zA-Z0-9-]+\.peopleadmin\.com)", re.IGNORECASE)
 _JOB_HREF_RE = re.compile(r'href="/postings/(\d+)"')
-_PAGE_SIZE = 60  # observed tenant-configured default (verified: San Jose Evergreen CCD)
 
 
 def _match(url: str) -> str | None:
@@ -15,19 +14,26 @@ def _match(url: str) -> str | None:
 
 
 def _fetch_jobs(host: str) -> list[str]:
-    urls: list[str] = []
+    # Page size is tenant-configured (60 at San Jose Evergreen CCD, 30 at
+    # utah/weberstate-sb), so a short page is judged against page 1's size,
+    # not a fixed constant — a fixed 60 silently stopped 30-per-page tenants
+    # after page 1.
+    seen: dict[str, None] = {}
+    page_size = None
     page = 1
-    while len(urls) < _PEOPLEADMIN_MAX_JOBS:
+    while len(seen) < _PEOPLEADMIN_MAX_JOBS:
         response = get_with_retry(f"https://{host}/postings/search", params={"page": page}, timeout=TIMEOUT)
         response.raise_for_status()
         ids = dict.fromkeys(_JOB_HREF_RE.findall(response.text))
-        if not ids:
+        new_ids = [job_id for job_id in ids if job_id not in seen]
+        if not new_ids:
             break
-        urls.extend(f"https://{host}/postings/{job_id}" for job_id in ids)
-        if len(ids) < _PAGE_SIZE:
+        seen.update(dict.fromkeys(new_ids))
+        page_size = page_size or len(ids)
+        if len(ids) < page_size:
             break
         page += 1
-    return urls[:_PEOPLEADMIN_MAX_JOBS]
+    return [f"https://{host}/postings/{job_id}" for job_id in seen][:_PEOPLEADMIN_MAX_JOBS]
 
 
 def _board_key(url: str) -> str | None:
