@@ -514,12 +514,15 @@ def extract_json_ld_postings(html: str) -> list[dict[str, Any]]:
             # "&quot;" inside an HTML description) that must NOT be
             # unescaped before parsing, since doing so can turn an entity
             # into a literal quote and corrupt the JSON structure.
-            data = json.loads(block)
+            # strict=False: raw newlines/tabs inside string values are
+            # invalid JSON but common in hand-templated blocks (verified
+            # live: every rcwilley.com job page's description).
+            data = json.loads(block, strict=False)
         except json.JSONDecodeError:
             try:
                 # Fallback for the (rarer) case where the JSON itself was
                 # HTML-escaped when templated into the page.
-                data = json.loads(unescape(block))
+                data = json.loads(unescape(block), strict=False)
             except json.JSONDecodeError:
                 continue
         postings.extend(_iter_job_postings(data))

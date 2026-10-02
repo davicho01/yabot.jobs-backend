@@ -224,6 +224,11 @@ class AtsType(StrEnum):
     # module on their own SAP Hybris storefront, not any shared ATS
     # platform (see adapters/sportsmans_warehouse.py).
     SPORTSMANS_WAREHOUSE = "sportsmans_warehouse"
+    # RC Willey's in-house career module on its own storefront
+    # (rcwilley.com/Jobs) — one server-rendered listing page, each job page
+    # a JobPosting JSON-LD block whose "title" is the department, not the
+    # role (see adapters/rcwilley.py).
+    RCWILLEY = "rcwilley"
     # ApplicantPro (rebranded "isolved Talent Acquisition") — a multi-tenant
     # ATS at {tenant}.applicantpro.com, jobs server-rendered as plain
     # anchors on a listing endpoint, each detail page a full schema.org

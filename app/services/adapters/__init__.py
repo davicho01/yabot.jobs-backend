@@ -48,6 +48,7 @@ from app.services.adapters import (
     phenom,
     pinpoint,
     recruitee,
+    rcwilley,
     rippling,
     selectminds,
     sportsmans_warehouse,
@@ -133,6 +134,7 @@ ADAPTERS: list[AtsAdapter] = [
     rippling.ADAPTER,
     talentreef.ADAPTER,
     sportsmans_warehouse.ADAPTER,
+    rcwilley.ADAPTER,
     ultipro.ADAPTER,
     selectminds.ADAPTER,
 ]
