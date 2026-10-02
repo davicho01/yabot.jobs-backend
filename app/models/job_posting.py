@@ -4,9 +4,9 @@ import uuid
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, String, Text, func, select
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
 
 from app.db.base import Base
 from app.models.enums import EmploymentType, JobSector, ScanStatus, WorkplaceType
@@ -146,13 +146,24 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
         columns."""
         return self.url.url
 
-    @property
-    def also_posted_count(self) -> int:
-        """How many other JobPostingUrls this same job was found at — see
-        company_key/title_key/primary_posting_id above. Always 0 on a
-        non-canonical row (it doesn't track its own siblings, only its
-        canonical points at it)."""
-        return len(self.duplicates)
-
     def __repr__(self) -> str:
         return f"<JobPosting title={self.title!r} company={self.company_name!r}>"
+
+
+# How many other JobPostingUrls this same job was found at — see
+# company_key/title_key/primary_posting_id above. Always 0 on a non-canonical
+# row (it doesn't track its own siblings, only its canonical points at it).
+# Counted in SQL (indexed on primary_posting_id) rather than as
+# len(self.duplicates), which loaded every duplicate's full row — description
+# and all — just to count them. Deferred so bulk loads (workers, backfills)
+# don't pay for it; GET /jobs undefers it to get it in the page's own query.
+# A Core table alias, not orm.aliased(): that would configure every mapper
+# at import time, before the rest of app.models is defined.
+_duplicate = JobPosting.__table__.alias("duplicate")
+JobPosting.also_posted_count = column_property(
+    select(func.count())
+    .where(_duplicate.c.primary_posting_id == JobPosting.id)
+    .correlate_except(_duplicate)
+    .scalar_subquery(),
+    deferred=True,
+)

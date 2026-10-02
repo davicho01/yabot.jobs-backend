@@ -99,16 +99,20 @@ def list_job_urls(
     total_is_capped = counted > count_limit
     total = min(counted, count_limit)
 
-    # Batches both loads into one extra query each for the whole page, instead
-    # of to_job_detail's url_row.postings access and also_posted_count's
-    # posting.duplicates access lazy-loading per row (an N+1 each otherwise).
-    stmt = (
-        stmt.order_by(*order)
-        .limit(page_size)
-        .offset((page - 1) * page_size)
-        .options(selectinload(JobPostingUrl.postings).selectinload(JobPosting.duplicates))
-    )
-    url_rows = db.scalars(stmt).all()
+    # Nothing matched at all — skip the page query and its postings load.
+    url_rows = []
+    if total:
+        # Batches the postings into one extra query for the whole page, instead
+        # of to_job_detail's url_row.postings access lazy-loading per row (an
+        # N+1 otherwise); also_posted_count is undeferred so it comes back in
+        # that same query rather than as another per-row one.
+        stmt = (
+            stmt.order_by(*order)
+            .limit(page_size)
+            .offset((page - 1) * page_size)
+            .options(selectinload(JobPostingUrl.postings).undefer(JobPosting.also_posted_count))
+        )
+        url_rows = db.scalars(stmt).all()
     return JobListRead(
         items=[to_job_detail(row, include_url=current_user is not None) for row in url_rows],
         total=total,
