@@ -229,6 +229,19 @@ class AtsType(StrEnum):
     # a JobPosting JSON-LD block whose "title" is the department, not the
     # role (see adapters/rcwilley.py).
     RCWILLEY = "rcwilley"
+    # UKG Workforce Ready (formerly Kronos) — a multi-tenant HR suite at
+    # secure{N}.saashr.com/ta/{companyId}.careers, a JS shell over a public
+    # REST API that serves both listing and postings (see
+    # adapters/workforce_ready.py).
+    WORKFORCE_READY = "workforce_ready"
+    # Southern Utah University's in-house student-employment board
+    # (my.suu.edu/jobs) — one server-rendered listing, plain-HTML detail
+    # pages (see adapters/suu.py).
+    SUU = "suu"
+    # Canyons School District's in-house ColdFusion job board
+    # (jobs.canyonsdistrict.org/hr) — a server-side DataTables JSON feed
+    # for the listing, plain-HTML detail pages (see adapters/canyons.py).
+    CANYONS = "canyons"
     # ApplicantPro (rebranded "isolved Talent Acquisition") — a multi-tenant
     # ATS at {tenant}.applicantpro.com, jobs server-rendered as plain
     # anchors on a listing endpoint, each detail page a full schema.org

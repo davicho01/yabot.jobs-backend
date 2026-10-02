@@ -14,6 +14,7 @@ from app.services.adapters import (
     avature,
     bamboohr,
     bestbuy,
+    canyons,
     breezyhr,
     clearcompany,
     clinch,
@@ -54,6 +55,7 @@ from app.services.adapters import (
     sportsmans_warehouse,
     stripe,
     successfactors,
+    suu,
     taleo,
     talemetry,
     talentbrew,
@@ -64,6 +66,7 @@ from app.services.adapters import (
     walmart,
     workable,
     workday,
+    workforce_ready,
     zenats,
 )
 from app.services.adapters.base import AtsAdapter
@@ -135,6 +138,9 @@ ADAPTERS: list[AtsAdapter] = [
     talentreef.ADAPTER,
     sportsmans_warehouse.ADAPTER,
     rcwilley.ADAPTER,
+    suu.ADAPTER,
+    canyons.ADAPTER,
     ultipro.ADAPTER,
+    workforce_ready.ADAPTER,
     selectminds.ADAPTER,
 ]
