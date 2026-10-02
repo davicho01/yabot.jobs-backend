@@ -242,7 +242,6 @@ def test_location_matches_compiles_to_a_correlated_exists_over_the_locations_arr
     assert "EXISTS (SELECT entry FROM jsonb_array_elements_text(job_postings.locations) AS entry" in sql
     assert "entry ILIKE" in sql
     assert sql.count("FROM job_postings") == 1
-    # ...and the cheap display-column ILIKE comes first, so the array unnest only
-    # runs on rows that could match (or whose display string was truncated).
-    assert sql.index("job_postings.location ILIKE") < sql.index("EXISTS (SELECT entry")
-    assert "char_length(job_postings.location) >=" in sql  # the width is a bound parameter
+    # ...and the indexed whole-array ILIKE comes first, so the array unnest only
+    # runs on rows that could match.
+    assert sql.index("CAST(job_postings.locations AS TEXT) ILIKE") < sql.index("EXISTS (SELECT entry")

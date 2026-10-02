@@ -14,7 +14,7 @@ import re
 import time
 from collections.abc import Sequence
 
-from sqlalchemy import ColumnElement, Float, FromClause, and_, case, cast, func, literal_column, or_, select
+from sqlalchemy import ColumnElement, Float, FromClause, Text, and_, case, cast, func, literal_column, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.job_posting import JobPosting
@@ -67,27 +67,23 @@ def split_locations(raw: str | None) -> list[str]:
     return locations
 
 
-_LOCATION_COLUMN_LENGTH = JobPosting.location.type.length
-
-
 def location_matches(pattern: str) -> ColumnElement[bool]:
     """WHERE-clause expression: true when any of the posting's individual
     locations matches the (already %-wrapped) ILIKE `pattern`. Correlates to
     JobPosting in the enclosing query.
 
-    The cheap ILIKE on the display column comes first because it discards
-    nearly every row before the per-row array unnest runs (on ~155k postings
-    the unnest alone roughly doubled a zero-hit search). It never drops a real
-    match: each entry is a substring of `location`, except when that string
-    was cut off at the column width — hence the second branch.
+    The ILIKE on the whole array as text comes first: it's what the trigram
+    index ix_job_postings_locations_trgm serves, so a rarely-matching search
+    (a state, a typo, a facility name) is an index lookup — OR'd with the
+    metros index by Postgres as a BitmapOr — instead of a scan of every
+    posting. It never drops a real match (every entry is a substring of the
+    array's text, barring JSON-escaped quotes/backslashes), and the per-entry
+    EXISTS then drops the false positives it lets through — a pattern that
+    only matches across two entries.
     """
     entry = func.jsonb_array_elements_text(JobPosting.locations).column_valued("entry")
     entry_matches = select(entry).where(entry.ilike(pattern)).correlate(JobPosting).exists()
-    display_may_match = or_(
-        JobPosting.location.ilike(pattern),
-        func.char_length(JobPosting.location) >= _LOCATION_COLUMN_LENGTH,
-    )
-    return and_(display_may_match, entry_matches)
+    return and_(cast(JobPosting.locations, Text).ilike(pattern), entry_matches)
 
 
 # A city search lists the searched place's own postings first, then those within

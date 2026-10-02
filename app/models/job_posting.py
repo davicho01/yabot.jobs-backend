@@ -31,6 +31,10 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
         # Serves the metro-area filter (`metros @> '["41620"]'`) — see
         # app.api.routes.jobs.list_job_urls.
         Index("ix_job_postings_metros", "metros", postgresql_using="gin", postgresql_ops={"metros": "jsonb_path_ops"}),
+        # Also: ix_job_postings_locations_trgm, a pg_trgm GIN index on
+        # CAST(locations AS TEXT) serving location_matches — created only in
+        # migration c7d3e8a1f5b2, since an expression index with Postgres-only
+        # operator classes can't be built by the SQLite test schema.
     )
 
     url_id: Mapped[uuid.UUID] = mapped_column(
