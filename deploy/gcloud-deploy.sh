@@ -213,6 +213,30 @@ gcloud run jobs deploy backfill-country \
   --labels=function=backfill-country
 
 # ---------------------------------------------------------------------------
+# 3c. generate-job-pages-backfill — Cloud Run Job, one-off: renders every
+#     per-job SEO page (/job/{url_id}, app.services.static_job_pages) at
+#     once. The twice-daily generate-static-job-pages function (§10) keeps
+#     them up to date incrementally afterwards, but a first full render of
+#     every live job won't fit in its 540s timeout. Also the way to force a
+#     re-render after a template change, though bumping
+#     static_job_pages.PAGE_VERSION does that on the next scheduled run
+#     anyway. Deploy once, then execute by hand — --dry-run first for the
+#     counts:
+#       gcloud run jobs execute generate-job-pages-backfill --region="$REGION" --args=generate_static_job_pages.py,--full,--dry-run --wait
+#       gcloud run jobs execute generate-job-pages-backfill --region="$REGION" --wait
+# ---------------------------------------------------------------------------
+
+gcloud run jobs deploy generate-job-pages-backfill \
+  --image="$IMAGE_TAG" \
+  --region="$REGION" \
+  --command=python --args=generate_static_job_pages.py,--full \
+  --set-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION" \
+  --set-env-vars="$COMMON_ENV" \
+  --set-secrets="$COMMON_SECRETS" \
+  --task-timeout=3600 \
+  --labels=function=generate-job-pages-backfill
+
+# ---------------------------------------------------------------------------
 # 4. api — Cloud Run service
 # ---------------------------------------------------------------------------
 

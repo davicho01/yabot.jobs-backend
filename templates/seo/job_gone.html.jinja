@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  {#- What a /job/{url_id} page becomes once its job stops qualifying (closed,
+      flagged, a duplicate, too old, deleted) — see static_job_pages. noindex
+      takes it out of search; Google for Jobs requires expired postings to
+      be removed. -#}
+  <title>{% if job %}{{ job.title }} at {{ job.company_display }} – {% endif %}No Longer Available | Yabot Jobs</title>
+  <meta name="robots" content="noindex, follow" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
+  {% include "_base_style.html.jinja" %}
+  {% include "_analytics.html.jinja" %}
+</head>
+<body>
+  {% include "_header.html.jinja" %}
+  <main id="main">
+  <div class="wrap">
+    <h1>This job is no longer available</h1>
+    {% if job %}
+    <p class="meta-line">{{ job.title }} at {{ job.company_display }}{% if job.location %} &middot; {{ job.location }}{% endif %}</p>
+    {% endif %}
+    <p>The posting has closed or been removed from the employer's site.</p>
+    {% if sector_link %}
+    <p class="sector-link-back"><a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_link[0] }}">Browse current {{ sector_link[1] }} jobs in {{ country_name }} &rarr;</a></p>
+    {% endif %}
+    <p class="sector-link-back"><a href="{{ base_url }}/jobs">Search all jobs &rarr;</a></p>
+  </div>
+  </main>
+</body>
+</html>

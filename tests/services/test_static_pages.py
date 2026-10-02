@@ -51,6 +51,7 @@ def make_posting(db):
         title: str | None = "Software Engineer",
         primary_posting_id: uuid.UUID | None = None,
         flagged_at: datetime | None = None,
+        closed_at: datetime | None = None,
         company_name: str = "Acme Corp",
         location: str = "Remote",
         posted_at: date | None = None,
@@ -66,6 +67,7 @@ def make_posting(db):
             domain="example.com",
             created_at=created_at,
             flagged_at=flagged_at,
+            closed_at=closed_at,
         )
         db.add(url_row)
         db.flush()
@@ -138,6 +140,10 @@ class TestJobsForSectorDay:
         make_posting(created_at=PT_NOON, flagged_at=PT_NOON)
         assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
 
+    def test_excludes_closed_listings(self, db, make_posting):
+        make_posting(created_at=PT_NOON, closed_at=PT_NOON)
+        assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
+
     def test_evening_pacific_post_does_not_spill_into_next_utc_day(self, db, make_posting):
         # 11pm Pacific (PDT, UTC-7) on Sept 26 is 06:00 UTC on Sept 27 — a
         # naive UTC-day bucket would wrongly file this under Sept 27.
@@ -203,16 +209,11 @@ class TestManifestShape:
         assert sp._is_current_manifest_shape({"engineering-tech": {"2026-09-26": 5}}) is False
 
     def test_read_manifest_discards_an_old_shape_manifest(self, monkeypatch):
-        class _FakeS3:
-            class exceptions:
-                class NoSuchKey(Exception):
-                    pass
+        monkeypatch.setattr(sp, "read_json", lambda key: {"engineering-tech": {"2026-09-26": 5}})
+        assert sp.read_manifest() == {}
 
-            def get_object(self, *, Bucket, Key):
-                body = json.dumps({"engineering-tech": {"2026-09-26": 5}}).encode("utf-8")
-                return {"Body": type("B", (), {"read": lambda self: body})()}
-
-        monkeypatch.setattr(sp, "_get_s3_client", lambda: _FakeS3())
+    def test_read_manifest_is_empty_when_none_exists_yet(self, monkeypatch):
+        monkeypatch.setattr(sp, "read_json", lambda key: None)
         assert sp.read_manifest() == {}
 
 
@@ -277,7 +278,8 @@ class TestRendering:
             generated_at=datetime.now(timezone.utc),
             manifest=manifest,
         )
-        assert "/jobs/11111111-1111-1111-1111-111111111111" in html
+        # Job links go to the static per-job page, not the SPA's /jobs/{id}.
+        assert 'href="https://yabot.jobs/job/11111111-1111-1111-1111-111111111111"' in html
         assert "/jobs/us/engineering-tech/2026-09-26" in html
         assert "Senior Backend Engineer" in html
         assert "United States" in html
@@ -288,6 +290,7 @@ class TestRendering:
         match = re.search(r'<script type="application/ld\+json">(.*?)</script>', html, re.S)
         payload = json.loads(match.group(1))
         assert payload["itemListElement"][0]["item"]["title"] == "Senior Backend Engineer"
+        assert payload["itemListElement"][0]["item"]["url"] == "https://yabot.jobs/job/11111111-1111-1111-1111-111111111111"
 
     def test_day_page_shows_salary_range_when_present(self):
         jobs = [
@@ -425,7 +428,7 @@ class TestGenerateForDate:
         monkeypatch.setattr(sp, "upload_html", lambda key, html: uploaded.__setitem__(key, html))
         monkeypatch.setattr(sp, "write_manifest", lambda manifest: uploaded.__setitem__("_manifest", manifest))
         monkeypatch.setattr(sp, "invalidate_paths", lambda paths: uploaded.__setitem__("_invalidated", paths))
-        monkeypatch.setattr(sp, "_get_s3_client", lambda: _FakeS3(uploaded))
+        monkeypatch.setattr(sp, "upload_xml", lambda key, xml: uploaded.__setitem__(key, xml))
 
         result = sp.generate_for_date(db, date(2026, 9, 26), dry_run=False)
 
@@ -436,15 +439,55 @@ class TestGenerateForDate:
         assert "jobs/us/engineering-tech" in uploaded
         assert uploaded["_manifest"] == {"us": {"engineering-tech": {"2026-09-26": 1}}}
         assert "/sitemap-jobs.xml" in uploaded["_invalidated"]
+        assert "sitemap-jobs.xml" in uploaded
+        assert "/sitemap-jobs.xml" in result.touched_paths
+
+    def test_invalidate_false_leaves_cloudfront_to_the_caller(self, db, make_posting, monkeypatch):
+        make_posting(created_at=PT_NOON)
+        monkeypatch.setattr(sp, "read_manifest", lambda: {})
+        monkeypatch.setattr(sp, "upload_html", lambda key, html: None)
+        monkeypatch.setattr(sp, "upload_xml", lambda key, xml: None)
+        monkeypatch.setattr(sp, "write_manifest", lambda manifest: None)
+
+        def _boom(paths):
+            raise AssertionError("invalidate=False must not invalidate")
+
+        monkeypatch.setattr(sp, "invalidate_paths", _boom)
+        result = sp.generate_for_date(db, date(2026, 9, 26), invalidate=False)
+        assert "/jobs/us/engineering-tech/2026-09-26" in result.touched_paths
 
 
-class _FakeS3:
-    """Stands in for the lazy boto3 client generate_for_date reaches for
-    directly (to PUT the sitemap object) — everything else goes through the
-    monkeypatched module functions above."""
+class TestCollapseInvalidationPaths:
+    def test_one_wildcard_per_page_family_and_sitemaps_kept(self):
+        paths = ["/jobs/us/sales/2026-09-26", "/jobs/us/sales", "/jobs/us", "/job/a", "/job/b", "/sitemap-jobs.xml"]
+        assert sp.collapse_invalidation_paths(paths) == ["/jobs/*", "/job/*", "/sitemap-jobs.xml"]
 
-    def __init__(self, sink: dict):
-        self._sink = sink
 
-    def put_object(self, *, Bucket, Key, Body, ContentType):
-        self._sink[Key] = Body
+class TestPageStore:
+    def test_local_store_nests_extensionless_keys_as_index_html(self, tmp_path):
+        from app.services.page_store import LocalDirPageStore
+
+        store = LocalDirPageStore(tmp_path)
+        store.put("jobs/us", "<country>", "text/html")
+        store.put("jobs/us/sales", "<sector>", "text/html")
+        store.put("_meta/x.json", "{}", "application/json")
+
+        assert (tmp_path / "jobs/us/index.html").read_text() == "<country>"
+        assert store.get("jobs/us/sales") == b"<sector>"
+        assert store.get("_meta/x.json") == b"{}"
+        assert store.get("jobs/missing") is None
+
+    def test_local_store_refuses_keys_outside_its_root(self, tmp_path):
+        from app.services.page_store import LocalDirPageStore
+
+        with pytest.raises(ValueError):
+            LocalDirPageStore(tmp_path).put("../escape.html", "x", "text/html")
+
+    def test_unconfigured_store_refuses_to_publish(self, monkeypatch):
+        from app.services import page_store
+
+        monkeypatch.setattr(page_store, "_store", None)
+        monkeypatch.setattr(page_store.settings, "seo_pages_output_dir", None)
+        monkeypatch.setattr(page_store.settings, "seo_pages_bucket", None)
+        with pytest.raises(page_store.PageStoreNotConfigured):
+            page_store.get_page_store()

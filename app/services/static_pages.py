@@ -13,13 +13,12 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import boto3
-from botocore.client import Config
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
@@ -28,6 +27,7 @@ from app.core.config import settings
 from app.models.enums import JobSector, ScanStatus
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
+from app.services.page_store import get_page_store
 
 logger = logging.getLogger("app.static_pages")
 
@@ -155,6 +155,7 @@ def jobs_for_sector_day(db: Session, country_iso2: str, sector: JobSector, local
             JobPosting.sector == sector,
             JobPosting.country == country_iso2,
             JobPostingUrl.flagged_at.is_(None),
+            JobPostingUrl.closed_at.is_(None),
             or_(
                 JobPosting.posted_at == local_day,
                 and_(
@@ -238,7 +239,7 @@ def _build_job_ld_json(jobs: list[JobRow], day_str: str) -> str:
             "hiringOrganization": {"@type": "Organization", "name": job.company_name or ""},
             "jobLocation": {"@type": "Place", "address": job.location or ""},
             "datePosted": job.posted_at.isoformat() if job.posted_at else day_str,
-            "url": f"{settings.seo_pages_base_url}/jobs/{job.url_id}",
+            "url": f"{settings.seo_pages_base_url}/job/{job.url_id}",
         }
         if job.salary_min is not None or job.salary_max is not None:
             value: dict = {"@type": "QuantitativeValue"}
@@ -360,36 +361,31 @@ def build_sitemap_xml(manifest: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# S3 / CloudFront — lazy client, same reasoning as app.services.resume_storage
+# Publishing — through app.services.page_store (S3 in prod, a local
+# directory in dev)
 # ---------------------------------------------------------------------------
 
-_s3_client = None
+
+def upload_html(key: str, html_content: str, cache_control: str | None = None) -> None:
+    get_page_store().put(key, html_content, "text/html; charset=utf-8", cache_control)
 
 
-def _get_s3_client():
-    global _s3_client
-    if _s3_client is None:
-        _s3_client = boto3.client(
-            "s3",
-            region_name=settings.seo_pages_region,
-            aws_access_key_id=settings.resume_storage_access_key_id,
-            aws_secret_access_key=settings.resume_storage_secret_access_key,
-            config=Config(s3={"addressing_style": "virtual"}),
-        )
-    return _s3_client
+def upload_xml(key: str, xml_content: str) -> None:
+    get_page_store().put(key, xml_content, "application/xml")
 
 
-def upload_html(key: str, html_content: str) -> None:
-    _get_s3_client().put_object(
-        Bucket=settings.seo_pages_bucket, Key=key, Body=html_content.encode("utf-8"), ContentType="text/html; charset=utf-8"
-    )
+def read_json(key: str) -> dict | None:
+    body = get_page_store().get(key)
+    return None if body is None else json.loads(body)
+
+
+def write_json(key: str, data: dict) -> None:
+    get_page_store().put(key, json.dumps(data, sort_keys=True), "application/json")
 
 
 def read_manifest() -> dict:
-    try:
-        response = _get_s3_client().get_object(Bucket=settings.seo_pages_bucket, Key=MANIFEST_KEY)
-        manifest = json.loads(response["Body"].read())
-    except _get_s3_client().exceptions.NoSuchKey:
+    manifest = read_json(MANIFEST_KEY)
+    if manifest is None:
         return {}
     if not _is_current_manifest_shape(manifest):
         # Pre-country-segment manifests are flat {sector_slug: {date: count}} —
@@ -418,12 +414,7 @@ def _is_current_manifest_shape(manifest: dict) -> bool:
 
 
 def write_manifest(manifest: dict) -> None:
-    _get_s3_client().put_object(
-        Bucket=settings.seo_pages_bucket,
-        Key=MANIFEST_KEY,
-        Body=json.dumps(manifest, sort_keys=True).encode("utf-8"),
-        ContentType="application/json",
-    )
+    write_json(MANIFEST_KEY, manifest)
 
 
 @dataclass
@@ -433,9 +424,13 @@ class GenerationResult:
     # "us/engineering-tech" -> job count, only country/sector combos with >=1 job today
     job_counts: dict[str, int]
     manifest: dict
+    # CloudFront paths this run wrote (empty for a dry run).
+    touched_paths: list[str] = field(default_factory=list)
 
 
-def generate_for_date(db: Session, target_date: date, *, dry_run: bool = False) -> GenerationResult:
+def generate_for_date(
+    db: Session, target_date: date, *, dry_run: bool = False, invalidate: bool = True
+) -> GenerationResult:
     """The whole run: for every country x sector with at least one job on
     `target_date` (DAY_BOUNDARY_TZ), write/overwrite that day's page, refresh
     the sector's index page, update the manifest, refresh each country's
@@ -448,7 +443,9 @@ def generate_for_date(db: Session, target_date: date, *, dry_run: bool = False) 
     is exactly how same-day pages get "updated as of HH:MM" freshness: call
     it again a couple hours later and it just re-renders with whatever's now
     in the DB. dry_run skips every S3/CloudFront call and returns what would
-    have been written.
+    have been written. invalidate=False leaves the CloudFront call to the
+    caller (generate_static_job_pages.py folds this run's paths in with the
+    per-job pages' into one invalidation) — see result.touched_paths.
     """
     generated_at = datetime.now(timezone.utc)
     manifest = {} if dry_run else read_manifest()
@@ -488,16 +485,15 @@ def generate_for_date(db: Session, target_date: date, *, dry_run: bool = False) 
             country_key = f"jobs/{country_slug}"
             upload_html(country_key, country_html)
             touched_paths.append(f"/{country_key}")
-        _get_s3_client().put_object(
-            Bucket=settings.seo_pages_bucket,
-            Key=SITEMAP_KEY,
-            Body=build_sitemap_xml(manifest).encode("utf-8"),
-            ContentType="application/xml",
-        )
+        upload_xml(SITEMAP_KEY, build_sitemap_xml(manifest))
         touched_paths.append(f"/{SITEMAP_KEY}")
-        invalidate_paths(touched_paths)
+        if invalidate:
+            invalidate_paths(touched_paths)
 
-    return GenerationResult(generated_at=generated_at, target_date=target_date, job_counts=job_counts, manifest=manifest)
+    return GenerationResult(
+        generated_at=generated_at, target_date=target_date, job_counts=job_counts, manifest=manifest,
+        touched_paths=touched_paths if not dry_run else [],
+    )
 
 
 def invalidate_paths(paths: list[str]) -> None:
@@ -507,15 +503,39 @@ def invalidate_paths(paths: list[str]) -> None:
     distribution is configured (e.g. local dev)."""
     if not paths or not settings.seo_pages_cloudfront_distribution_id:
         return
-    client = boto3.client(
-        "cloudfront",
-        aws_access_key_id=settings.resume_storage_access_key_id,
-        aws_secret_access_key=settings.resume_storage_secret_access_key,
-    )
-    client.create_invalidation(
-        DistributionId=settings.seo_pages_cloudfront_distribution_id,
-        InvalidationBatch={
-            "Paths": {"Quantity": len(paths), "Items": paths},
-            "CallerReference": f"generate-static-job-pages-{datetime.now(timezone.utc).isoformat()}",
-        },
-    )
+    logger.info("Invalidating %s.", ", ".join(paths))
+    try:
+        client = boto3.client(
+            "cloudfront",
+            aws_access_key_id=settings.resume_storage_access_key_id,
+            aws_secret_access_key=settings.resume_storage_secret_access_key,
+        )
+        client.create_invalidation(
+            DistributionId=settings.seo_pages_cloudfront_distribution_id,
+            InvalidationBatch={
+                "Paths": {"Quantity": len(paths), "Items": paths},
+                "CallerReference": f"generate-static-job-pages-{datetime.now(timezone.utc).isoformat()}",
+            },
+        )
+    except Exception:
+        # The pages and manifest are already written — a failed invalidation
+        # only delays them by the edge TTL (see static_job_pages.CACHE_CONTROL),
+        # so it mustn't fail the run.
+        logger.exception("CloudFront invalidation of %d path(s) failed.", len(paths))
+
+
+def collapse_invalidation_paths(paths: list[str]) -> list[str]:
+    """One CloudFront wildcard per page family instead of a path per page —
+    a wildcard counts as a single path against the 1,000-free-a-month
+    allowance however many objects it clears, and one admin source rescan
+    can change thousands of /job/ pages. Anything outside those families
+    (the sitemaps) is kept as-is."""
+    collapsed: list[str] = []
+    for path in paths:
+        for prefix in ("/jobs/", "/job/"):
+            if path.startswith(prefix):
+                path = f"{prefix}*"
+                break
+        if path not in collapsed:
+            collapsed.append(path)
+    return collapsed

@@ -176,7 +176,9 @@ def scan_job_url(url: str) -> ScanResult | None:
 
     fields = extract(cid, cc_id or None, job_id)
     if fields is None:
-        return ScanResult(success=False, error="Requisition not found (removed, filled, or an invalid job id).")
+        return ScanResult(
+            success=False, error="Requisition not found (removed, filled, or an invalid job id).", expired=True
+        )
 
     salary_min, salary_max, salary_currency = base.salary_from_text(fields.description)
     return ScanResult(

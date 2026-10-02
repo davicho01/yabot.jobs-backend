@@ -36,6 +36,22 @@ def _jsonb_as_json_on_sqlite(_type, _compiler, **_kw):
 NOW = datetime(2026, 9, 19, 12, 0, 0, tzinfo=timezone.utc)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_seo_settings(monkeypatch):
+    """The static-page tests assert on prod URLs and must never publish
+    anywhere real — so pin the SEO settings rather than inherit a dev's .env
+    (which points SEO_PAGES_BASE_URL at localhost and SEO_PAGES_OUTPUT_DIR at
+    the frontend checkout)."""
+    from app.core.config import settings
+    from app.services import page_store
+
+    monkeypatch.setattr(settings, "seo_pages_base_url", "https://yabot.jobs")
+    monkeypatch.setattr(settings, "seo_pages_output_dir", None)
+    monkeypatch.setattr(settings, "seo_pages_bucket", None)
+    monkeypatch.setattr(settings, "seo_pages_cloudfront_distribution_id", None)
+    monkeypatch.setattr(page_store, "_store", None)
+
+
 @pytest.fixture
 def now() -> datetime:
     return NOW

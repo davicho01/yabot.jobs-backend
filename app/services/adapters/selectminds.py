@@ -88,7 +88,7 @@ def scan_job_url(url: str) -> ScanResult | None:
         # reproduce the exact stale-title/no-location bug this adapter
         # exists to fix) keeps that stale data from being reported as a
         # successful scan.
-        return ScanResult(success=False, error="Position has been closed on the source site.")
+        return ScanResult(success=False, error="Position has been closed on the source site.", expired=True)
 
     fields = extract(html)
     if fields.title is None:

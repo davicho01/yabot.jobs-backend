@@ -193,6 +193,10 @@ class ScanResult:
     # the LLM ever sees it. Not stored anywhere; transient, scan-local only.
     full_html: str | None = None
     error: str | None = None
+    # A failed scan that positively identified the posting as gone (expired,
+    # filled, removed from its board) rather than a transient fetch problem —
+    # app.services.jobs._apply_scan_result closes the URL on this.
+    expired: bool = False
 
 
 @dataclass(frozen=True)

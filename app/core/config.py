@@ -100,6 +100,12 @@ class Settings(BaseSettings):
     scan_retry_max_seconds: float = 86400.0
     scan_retry_max_attempts: int = 5
 
+    # How long a crawl-sourced URL can go unlisted on its board before it
+    # counts as closed (see app.services.jobs.record_board_presence). Only a
+    # healthy crawl ever closes anything, and crawl-dispatch runs 2x/day, so
+    # 36h means a job has to be missing from about three crawls in a row.
+    job_closed_after_unseen_hours: float = 36.0
+
     # S3-compatible object storage for uploaded resumes / generated tailored
     # resume files. Point resume_storage_endpoint_url at a local MinIO (see
     # docker-compose.yml) for dev, or leave it unset to use real AWS S3.
@@ -114,8 +120,13 @@ class Settings(BaseSettings):
     # bucket/CloudFront distribution (yabot.jobs itself), not the resume
     # bucket above. Reuses resume_storage's AWS access key/secret (same IAM
     # user, though its policy may need widening to cover this bucket too) —
-    # no separate credentials modeled here.
-    seo_pages_bucket: str = "yabot.jobs-frontend"
+    # no separate credentials modeled here. No default: prod sets it
+    # explicitly (COMMON_ENV in deploy/gcloud-deploy.sh), and local dev sets
+    # seo_pages_output_dir instead, so a local run can't write into prod.
+    seo_pages_bucket: str | None = None
+    # Local dev: write the pages into this directory instead of S3 (see
+    # app.services.page_store) — the frontend's `npm run dev` serves them.
+    seo_pages_output_dir: str | None = None
     seo_pages_region: str = "us-east-1"
     seo_pages_base_url: str = "https://yabot.jobs"
     # CloudFront distribution ID fronting seo_pages_bucket, for invalidating

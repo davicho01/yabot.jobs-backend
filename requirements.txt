@@ -16,6 +16,7 @@ google-cloud-pubsub>=2.21
 google-auth>=2.34  # ID tokens for calling the private yabot-jobs-browser Cloud Run service
 boto3>=1.35
 jinja2>=3.1  # renders generate_static_job_pages.py's SEO pages
+markdown-it-py>=3.0  # renders job descriptions on the static per-job pages (raw HTML disabled)
 pypdf>=5.0
 python-docx>=1.1
 reportlab>=4.2

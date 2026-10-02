@@ -5,7 +5,7 @@ import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import false, func, or_, select, true
+from sqlalchemy import false, func, or_, select, true, update
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import Select
@@ -107,6 +107,10 @@ def build_job_search_statement(
             JobPosting.extraction_status == ScanStatus.SUCCESS,
             JobPosting.title.is_not(None),
             JobPosting.primary_posting_id.is_(None),
+            # Gone from its board (record_board_presence) or found expired on
+            # a rescan (_apply_scan_result) — still reachable by id, just not
+            # listed.
+            JobPostingUrl.closed_at.is_(None),
         )
     )
     order = [JobPostingUrl.created_at.desc()]
@@ -317,6 +321,62 @@ def get_or_create_job_posting(
     return posting, url_row
 
 
+def _parse_discovered_urls(raw_urls: list[str]) -> tuple[dict[str, tuple[str, str]], int]:
+    """url_hash -> (raw_url, normalized_url), de-duplicated within this batch
+    (a board's own listing can repeat a URL) before ever touching the DB,
+    plus how many URLs failed to normalize/hash."""
+    parsed: dict[str, tuple[str, str]] = {}
+    failed = 0
+    for raw_url in raw_urls:
+        try:
+            normalized = normalize_url(raw_url)
+            hashed = url_hash(normalized)
+        except Exception:
+            failed += 1
+            continue
+        parsed.setdefault(hashed, (raw_url, normalized))
+    return parsed, failed
+
+
+def record_board_presence(
+    db: Session, crawl_source_id: uuid.UUID, raw_urls: list[str], *, healthy: bool, now: datetime | None = None
+) -> int:
+    """After a crawl of `crawl_source_id`, stamp last_seen_at on every URL its
+    board listed (reopening any that had been closed), and — only when
+    `healthy` — close the source's open URLs the board hasn't listed for
+    job_closed_after_unseen_hours. Returns how many were closed.
+
+    `healthy` is the caller's judgement that this crawl saw the whole board
+    (see crawl_worker._crawl_source): a broken adapter or a truncated
+    listing must never close a board's jobs in bulk, so an unhealthy crawl
+    only ever marks URLs as seen. Call after bulk_register_discovered_urls,
+    so newly-registered rows get stamped too.
+    """
+    now = now or datetime.now(timezone.utc)
+    parsed, _ = _parse_discovered_urls(raw_urls)
+    if parsed:
+        db.execute(
+            update(JobPostingUrl)
+            .where(JobPostingUrl.crawl_source_id == crawl_source_id, JobPostingUrl.url_hash.in_(parsed.keys()))
+            .values(last_seen_at=now, closed_at=None)
+            .execution_options(synchronize_session=False)
+        )
+    if not healthy:
+        return 0
+    cutoff = now - timedelta(hours=settings.job_closed_after_unseen_hours)
+    result = db.execute(
+        update(JobPostingUrl)
+        .where(
+            JobPostingUrl.crawl_source_id == crawl_source_id,
+            JobPostingUrl.closed_at.is_(None),
+            JobPostingUrl.last_seen_at < cutoff,
+        )
+        .values(closed_at=now)
+        .execution_options(synchronize_session=False)
+    )
+    return result.rowcount or 0
+
+
 def bulk_register_discovered_urls(db: Session, raw_urls: list[str], crawl_source_id: uuid.UUID) -> int:
     """Crawl-worker version of get_or_create_job_posting for a whole board at
     once: registers every URL a crawl discovered with a small, fixed number
@@ -352,19 +412,7 @@ def bulk_register_discovered_urls(db: Session, raw_urls: list[str], crawl_source
     Returns how many URLs failed to normalize/hash, for the caller's
     last_error reporting.
     """
-    # url_hash -> (raw_url, normalized_url), de-duplicated within this batch
-    # (a board's own listing can repeat a URL) before ever touching the DB.
-    parsed: dict[str, tuple[str, str]] = {}
-    failed = 0
-    for raw_url in raw_urls:
-        try:
-            normalized = normalize_url(raw_url)
-            hashed = url_hash(normalized)
-        except Exception:
-            failed += 1
-            continue
-        parsed.setdefault(hashed, (raw_url, normalized))
-
+    parsed, failed = _parse_discovered_urls(raw_urls)
     if not parsed:
         return failed
 
@@ -538,8 +586,19 @@ def _apply_scan_result(db: Session, url_row: JobPostingUrl, result: ScanResult) 
         url_row.scan_status = ScanStatus.SUCCESS
         url_row.scan_attempts = 0
         url_row.next_retry_at = None
+        if url_row.crawl_source_id is None:
+            # A user-submitted URL's only closure signal is a scan finding it
+            # expired, so a later successful scan reopens it. A crawl-sourced
+            # one stays under record_board_presence's control: some ATSes
+            # keep serving a page after delisting it.
+            url_row.closed_at = None
         _upsert_posting(db, url_row, result, now)
     else:
+        if result.expired and url_row.closed_at is None:
+            # The page itself says the posting is gone — close it now rather
+            # than waiting for crawls to stop listing it (and for a
+            # user-submitted URL, no crawl ever would).
+            url_row.closed_at = now
         url_row.scan_attempts += 1
         if url_row.scan_attempts >= settings.scan_retry_max_attempts:
             # Given up: a human has to rescan it (which resets scan_attempts)

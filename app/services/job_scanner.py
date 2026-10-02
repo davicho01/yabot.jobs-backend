@@ -92,7 +92,9 @@ def _default_scan_job_url(url: str) -> ScanResult:
         # an empty description would look like our own extraction broke,
         # not like the posting itself is gone — same treatment Greenhouse's
         # is_error_redirect gives a removed/filled posting.
-        return ScanResult(success=False, error=f"Job posting has expired (validThrough {job_ld['validThrough']}).")
+        return ScanResult(
+            success=False, error=f"Job posting has expired (validThrough {job_ld['validThrough']}).", expired=True
+        )
 
     fallback_title = base.fallback_title(html)
     fallback_description = base.fallback_description(html)

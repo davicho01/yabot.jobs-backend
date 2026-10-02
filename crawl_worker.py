@@ -43,7 +43,7 @@ from app.services.ats_adapters import list_job_urls
 from app.services.coverage_monitor import update_coverage
 from app.services.crawl_queue import ensure_topic_and_subscription, subscriber_client, subscription_path
 from app.services.job_queue import enqueue_source_scan
-from app.services.jobs import bulk_register_discovered_urls
+from app.services.jobs import bulk_register_discovered_urls, record_board_presence
 from app.services.scan_claims import has_unclaimed_pending
 
 configure_logging()
@@ -79,6 +79,7 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
     # per URL — see bulk_register_discovered_urls. A large board can list
     # thousands of URLs; that used to mean thousands of sequential
     # round-trips to Cloud SQL in a single invocation.
+    registered = True
     try:
         failed = bulk_register_discovered_urls(db, urls, source_id)
     except Exception as exc:
@@ -86,6 +87,7 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
         # crawl's stats update below be skipped just because registration
         # failed, and don't leave the session poisoned for it.
         db.rollback()
+        registered = False
         failed = len(urls)
         logger.warning("Failed to register discovered URLs for %s: %s", source_name, exc)
 
@@ -96,8 +98,16 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
     source.last_error = f"{failed} of {len(urls)} discovered URL(s) failed to process." if failed else None
     source.crawl_claimed_at = None  # done; dispatchable again next cycle
     update_coverage(source, len(urls))
+    # Only a crawl that plausibly saw the whole board may close the jobs it
+    # didn't list: a non-empty listing, fully registered, and not below the
+    # coverage monitor's baseline (a broken adapter or truncated listing).
+    healthy = bool(urls) and registered and not failed and source.coverage_low_streak == 0
+    closed = record_board_presence(db, source_id, urls, healthy=healthy)
     db.commit()  # stats persisted before waking lanes (has_unclaimed_pending ends its transaction)
-    logger.info("Crawled %s: %d job URL(s) discovered (%d failed).", source_name, len(urls), failed)
+    logger.info(
+        "Crawled %s: %d job URL(s) discovered (%d failed), %d closed%s.",
+        source_name, len(urls), failed, closed, "" if healthy else " (unhealthy crawl: closing skipped)",
+    )
 
     _wake_source_lanes(db, source_id, source_name, lanes)
 

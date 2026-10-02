@@ -37,7 +37,7 @@
     <ul class="job-list">
     {% for job in jobs %}
       <li>
-        <div class="job-title"><a href="{{ base_url }}/jobs/{{ job.url_id }}">{{ job.title }}</a></div>
+        <div class="job-title"><a href="{{ base_url }}/job/{{ job.url_id }}">{{ job.title }}</a></div>
         <div class="job-meta">
           {{ job.company_name or "Unknown company" }}
           {% if job.location %} &middot; {{ job.location }}{% endif %}

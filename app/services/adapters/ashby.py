@@ -144,7 +144,9 @@ def scan_job_url(url: str) -> ScanResult | None:
     except httpx.HTTPError as exc:
         return ScanResult(success=False, error=str(exc))
     if job is None:
-        return ScanResult(success=False, error="Ashby board no longer lists this job — likely removed or filled.")
+        return ScanResult(
+            success=False, error="Ashby board no longer lists this job — likely removed or filled.", expired=True
+        )
 
     description = html_to_formatted_text(job.get("descriptionHtml")) or clean_text(job.get("descriptionPlain"))
     workplace_type = _ASHBY_WORKPLACE_TYPE_MAP.get(str(job.get("workplaceType") or "").strip().lower(), WorkplaceType.UNKNOWN)

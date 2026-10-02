@@ -293,6 +293,7 @@ def scan_job_url(url: str) -> ScanResult | None:
         return ScanResult(
             success=False,
             error="Greenhouse redirected to the board's error page — this posting has likely been removed or filled.",
+            expired=True,
         )
 
     fields = extract(final_url, html)

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ page_title }} | Yabot Jobs</title>
+  <meta name="description" content="{{ meta_description }}" />
+  <link rel="canonical" href="{{ base_url }}/job/{{ job.url_id }}" />
+  <meta name="robots" content="index, follow" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Yabot Jobs" />
+  <meta property="og:title" content="{{ page_title }}" />
+  <meta property="og:description" content="{{ meta_description }}" />
+  <meta property="og:url" content="{{ base_url }}/job/{{ job.url_id }}" />
+  <meta property="og:image" content="{{ base_url }}/og-image.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
+  {% include "_base_style.html.jinja" %}
+  {% include "_job_style.html.jinja" %}
+  {% include "_analytics.html.jinja" %}
+  <script type="application/ld+json">{{ job_ld_json|safe }}</script>
+</head>
+<body>
+  {% include "_header.html.jinja" %}
+  <main id="main">
+  <div class="wrap">
+    <nav class="breadcrumb">
+      <a href="{{ base_url }}/">Home</a> &rsaquo;
+      <a href="{{ base_url }}/jobs">Jobs</a> &rsaquo;
+      <a href="{{ base_url }}/jobs/{{ country_slug }}">{{ country_name }}</a>
+      {% if sector_link %} &rsaquo; <a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_link[0] }}">{{ sector_link[1] }}</a>{% endif %}
+    </nav>
+    <h1>{{ job.title }}</h1>
+    <p class="meta-line">{{ meta_line }} &middot; Posted {{ posted_display }}</p>
+    {% if tags %}
+    <ul class="job-tags">
+      {% for tag in tags %}<li>{{ tag }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    <div class="job-cta">
+      <a class="btn btn--accent" href="{{ base_url }}/jobs/{{ job.url_id }}">Apply on Yabot Jobs</a>
+      <span>Sign in free to get the application link, save the job, or tailor your resume to it.</span>
+    </div>
+
+    <article class="job-desc">
+      {% if description_html %}{{ description_html|safe }}{% else %}<p>No description is available for this posting yet.</p>{% endif %}
+    </article>
+
+    {% if sector_link %}
+    <p class="sector-link-back"><a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_link[0] }}">More {{ sector_link[1] }} jobs in {{ country_name }} &rarr;</a></p>
+    {% endif %}
+  </div>
+  </main>
+</body>
+</html>

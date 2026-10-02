@@ -54,6 +54,13 @@ class JobPostingUrl(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         # Serves GET /jobs' newest-first ordering, so a page can walk this
         # index and stop at LIMIT instead of sorting every match.
         Index("ix_job_posting_urls_created_at", "created_at"),
+        # Serves app.services.jobs.record_board_presence's "close this
+        # source's open rows it didn't see" sweep after each healthy crawl.
+        Index(
+            "ix_job_posting_urls_source_open",
+            "crawl_source_id",
+            postgresql_where=text("closed_at IS NULL"),
+        ),
     )
 
     # Original URL as submitted, kept for display/debugging.
@@ -108,6 +115,15 @@ class JobPostingUrl(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     flagged_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
     )
+
+    # Last time a crawl of crawl_source_id's board listed this URL (null for
+    # user-submitted URLs, which no crawl ever re-lists). closed_at is set
+    # once a healthy crawl hasn't listed it for job_closed_after_unseen_hours,
+    # or a scan finds the posting expired — and cleared again if a later crawl
+    # lists it. See app.services.jobs.record_board_presence. Closed listings
+    # drop out of GET /jobs search and the static SEO pages.
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Two FKs to users.id now exist (submitted_by_user_id, flagged_by_user_id)
     # — foreign_keys disambiguates which one this relationship follows.

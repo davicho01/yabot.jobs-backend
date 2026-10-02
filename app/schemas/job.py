@@ -67,6 +67,10 @@ class JobPostingUrlRead(BaseModel):
     crawl_source_id: uuid.UUID | None
     last_scanned_at: datetime | None
     created_at: datetime
+    # Set once the listing is gone from its board or found expired (see
+    # app.services.jobs.record_board_presence) — such a job is out of search
+    # but still reachable by id, e.g. from a user's Applications.
+    closed_at: datetime | None = None
     # Populated from the row regardless of caller, then nulled out by
     # to_job_detail unless include_flag=True (admin-only) — another user's
     # report shouldn't be visible to a regular viewer of the listing.
