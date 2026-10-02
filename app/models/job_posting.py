@@ -39,6 +39,13 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
         # otherwise scans every posting when a term matches few of them.
         # (SQLite ignores the postgresql_* options and builds a plain index.)
         Index("ix_job_postings_title_trgm", "title", postgresql_using="gin", postgresql_ops={"title": "gin_trgm_ops"}),
+        # Same for GET /jobs' company filter (`company_name ILIKE '%acme%'`).
+        Index(
+            "ix_job_postings_company_name_trgm",
+            "company_name",
+            postgresql_using="gin",
+            postgresql_ops={"company_name": "gin_trgm_ops"},
+        ),
     )
 
     url_id: Mapped[uuid.UUID] = mapped_column(
