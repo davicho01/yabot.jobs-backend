@@ -878,9 +878,15 @@ def search_areas(text: str) -> list[str] | None:
         return None
     if resolution.geo == "state" and resolution.state is not None:
         return [resolution.state.code]
-    if resolution.geo == "country" and _is_united_states(text):
+    if is_country_search(text):
         return list(_geo().states)
     return None
+
+
+def is_country_search(text: str) -> bool:
+    """True for a search of the whole country ("United States", "USA") — the
+    case search_areas expands to every state."""
+    return resolve_entry(text).geo == "country" and _is_united_states(text)
 
 
 # ----------------------------------------------------------- place suggestions

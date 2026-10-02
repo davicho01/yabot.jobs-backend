@@ -125,7 +125,10 @@ def build_job_search_statement(
         or salary_min is not None
         or salary_max is not None
     ):
-        stmt = stmt.distinct()
+        # No DISTINCT: job_postings.url_id is unique and radius_search's
+        # lateral join yields one row per posting, so nothing here can repeat
+        # a row — and DISTINCT over every job_posting_urls column forced a
+        # sort of all matches (twice, with the count) before LIMIT applied.
         if q:
             include, exclude_terms = parse_search_query(q)
             if include:
@@ -145,9 +148,22 @@ def build_job_search_statement(
                 stmt = stmt.join(nearest, true()).where(near).add_columns(band.label("distance_band"))
                 order = [band, JobPostingUrl.created_at.desc()]
                 search_area = SearchAreaRead(label=geo.place_label(place), radius_miles=radius)
+            elif geo.is_country_search(location):
+                # "United States" matches most postings, so per-row checks are
+                # what cost: any posting resolved to the US (country) or filed
+                # under any area (metros only holds US codes, and always the
+                # state's) replaces a ~50-way per-state containment OR; the
+                # text match stays last for anything neither resolved.
+                stmt = stmt.where(
+                    or_(
+                        JobPosting.country == "US",
+                        func.jsonb_array_length(JobPosting.metros) > 0,
+                        location_matches(f"%{location}%"),
+                    )
+                )
             else:
-                # A state or "United States" also finds postings filed under it
-                # however they spelled the place; anything else is a plain text match.
+                # A state also finds postings filed under it however they
+                # spelled the place; anything else is a plain text match.
                 conditions = [location_matches(f"%{location}%")]
                 conditions += [JobPosting.metros.contains([code]) for code in geo.search_areas(location) or []]
                 stmt = stmt.where(or_(*conditions))

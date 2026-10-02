@@ -51,6 +51,9 @@ class JobPostingUrl(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "flagged_at",
             postgresql_where=text("flagged_at IS NOT NULL"),
         ),
+        # Serves GET /jobs' newest-first ordering, so a page can walk this
+        # index and stop at LIMIT instead of sorting every match.
+        Index("ix_job_posting_urls_created_at", "created_at"),
     )
 
     # Original URL as submitted, kept for display/debugging.
