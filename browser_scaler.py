@@ -4,7 +4,7 @@ demand, instead of a flat always-on guess.
 Only ~14% of active CrawlSources (ashby/ultipro/taleo/bestbuy/avature/
 talemetry) unconditionally need a browser render; the rest hit it
 reactively via app.services.adapters.base.fetch_html's fallback. Demand is
-bursty around crawl_dispatcher.py's 3x/day runs, not constant, so rather
+bursty around crawl_dispatcher.py's hourly runs, not constant, so rather
 than pay for warm Chromium instances 24/7 this ticks every 2 minutes (see
 deploy/gcloud-deploy.sh's browser-scaler-tick Cloud Scheduler job) *only*
 while crawl_dispatcher.py has turned that ticking on (it resumes the

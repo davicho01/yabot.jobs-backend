@@ -149,7 +149,7 @@ _BROWSER_WARMUP_MIN_INSTANCES = 3
 def warm_up_browser_scaler() -> None:
     """Warm up yabot-jobs-browser immediately and turn browser_scaler.py's
     tick back on, for any caller whose own work might need a browser render
-    (see app.services.browser_fetch) — crawl_dispatcher.py's 3x/day and
+    (see app.services.browser_fetch) — crawl_dispatcher.py's hourly and
     manually-triggered runs, and retry_failed_scans.py's hourly sweep, both
     call this at the top of their own main(). Without it, a scan that falls
     between crawl_dispatcher.py runs hits a cold (min-instances=0) browser

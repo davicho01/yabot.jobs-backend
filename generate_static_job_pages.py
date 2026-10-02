@@ -10,9 +10,8 @@ app.services.geo.resolve_country_for_locations), so adding a country here is
 just adding a row to that list, no other change needed.
 
 Regenerates **today's** pages by default, overwriting whatever was written
-earlier today — runs twice a day (2pm/10pm ET, an hour after each
-crawl-dispatch; see deploy/gcloud-deploy.sh §10 for why not more often) so
-a day's page fills in as jobs are found, then simply stops being touched
+earlier today — runs every 6 hours, the last at 11:45pm PT (see
+deploy/gcloud-deploy.sh §10) — so a day's page fills in as jobs are found, then simply stops being touched
 once the day rolls over, freezing at its last update as the permanent
 historical record. No separate backfill/finalize step exists for day
 pages — --date lets you (re)generate an older day by

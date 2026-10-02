@@ -88,6 +88,12 @@ class Settings(BaseSettings):
     # is never mistaken for one whose message/worker was lost.
     crawl_claim_ttl_seconds: float = 600.0
 
+    # How often each CrawlSource is crawled. crawl_dispatcher.py runs hourly
+    # and dispatches at most active ÷ this many sources per run, so crawls
+    # (and the scans they start) spread evenly over the day instead of all
+    # landing at once. Changing the dispatcher's cadence changes that math.
+    crawl_interval_hours: float = 12.0
+
     # Retry backoff for a FAILED scan (see app.services.jobs.wake_retryable_failed_scans
     # and retry_failed_scans.py, its hourly-cron entrypoint). Each consecutive failure
     # multiplies the previous wait, capped at scan_retry_max_seconds: base * multiplier

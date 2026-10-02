@@ -35,13 +35,18 @@ def session_factory(monkeypatch):
     monkeypatch.setattr(crawl_dispatcher, "wake_sources_with_pending_scans", lambda db: 0)
     monkeypatch.setattr(crawl_dispatcher, "warm_up_browser_scaler", lambda: None)
     monkeypatch.setattr(sys, "argv", ["crawl_dispatcher.py"])
+    # A 1h interval makes the per-run budget every active source, so the
+    # claim tests below don't trip over it; the spreading tests set 12h.
+    monkeypatch.setattr(crawl_dispatcher.settings, "crawl_interval_hours", 1.0)
     return factory
 
 
 _counter = itertools.count()
 
 
-def _make_source(session_factory, *, status=CrawlSourceStatus.ACTIVE, crawl_claimed_at=None) -> str:
+def _make_source(
+    session_factory, *, status=CrawlSourceStatus.ACTIVE, crawl_claimed_at=None, crawled_hours_ago=None
+) -> str:
     n = next(_counter)
     db = session_factory()
     source = m.CrawlSource(
@@ -50,6 +55,9 @@ def _make_source(session_factory, *, status=CrawlSourceStatus.ACTIVE, crawl_clai
         board_url=f"https://boards.greenhouse.io/source-{n}",
         status=status,
         crawl_claimed_at=crawl_claimed_at,
+        last_crawled_at=(
+            datetime.now(timezone.utc) - timedelta(hours=crawled_hours_ago) if crawled_hours_ago is not None else None
+        ),
     )
     db.add(source)
     db.commit()
@@ -144,3 +152,70 @@ def test_warms_the_browser_and_resumes_the_scaler_tick(session_factory, monkeypa
     crawl_dispatcher.main()
 
     assert calls == ["called"]
+
+
+# --- Spreading crawls across the day: due-ness and the per-run budget -----
+
+
+def _dispatch(session_factory, monkeypatch, interval_hours=12.0) -> list:
+    monkeypatch.setattr(crawl_dispatcher.settings, "crawl_interval_hours", interval_hours)
+    enqueued = []
+    monkeypatch.setattr(crawl_dispatcher, "enqueue_crawl", lambda sid: enqueued.append(sid))
+    crawl_dispatcher.main()
+    return enqueued
+
+
+def test_a_recently_crawled_source_is_not_due(session_factory, monkeypatch):
+    _make_source(session_factory, crawled_hours_ago=2)
+    assert _dispatch(session_factory, monkeypatch) == []
+
+
+def test_a_source_crawled_an_interval_ago_is_due(session_factory, monkeypatch):
+    source_id = _make_source(session_factory, crawled_hours_ago=12)
+    assert _dispatch(session_factory, monkeypatch) == [source_id]
+
+
+def test_due_slack_keeps_a_source_in_its_own_hour(session_factory, monkeypatch):
+    # Crawled a few minutes into the hour 12h ago: due at the top of this hour, not the next.
+    source_id = _make_source(session_factory, crawled_hours_ago=11.75)
+    assert _dispatch(session_factory, monkeypatch) == [source_id]
+
+
+def test_budget_is_one_hourly_share_of_active_sources(session_factory, monkeypatch):
+    for _ in range(24):
+        _make_source(session_factory, crawled_hours_ago=13)
+    assert len(_dispatch(session_factory, monkeypatch)) == 2  # ceil(24 / 12)
+
+
+def test_budget_counts_all_active_sources_not_just_due_ones(session_factory, monkeypatch):
+    for _ in range(23):
+        _make_source(session_factory, crawled_hours_ago=1)  # active, not due
+    due = _make_source(session_factory, crawled_hours_ago=13)
+    assert _dispatch(session_factory, monkeypatch) == [due]  # budget ceil(24/12)=2, only one due
+
+
+def test_never_crawled_then_longest_waiting_go_first(session_factory, monkeypatch):
+    for _ in range(20):
+        _make_source(session_factory, crawled_hours_ago=1)  # pad active count: budget = ceil(24/12) = 2
+    _make_source(session_factory, crawled_hours_ago=13)
+    oldest = _make_source(session_factory, crawled_hours_ago=30)
+    new = _make_source(session_factory)
+    assert _dispatch(session_factory, monkeypatch) == [new, oldest]
+
+
+def test_a_crowd_that_comes_due_together_is_dealt_out_over_successive_runs(session_factory, monkeypatch):
+    ids = [_make_source(session_factory, crawled_hours_ago=13) for _ in range(36)]
+    first = _dispatch(session_factory, monkeypatch)
+    # The crawl worker clears the claim and stamps last_crawled_at once a crawl finishes.
+    db = session_factory()
+    for sid in first:
+        source = db.get(m.CrawlSource, sid)
+        source.crawl_claimed_at, source.last_crawled_at = None, datetime.now(timezone.utc)
+    db.commit()
+    db.close()
+    second = _dispatch(session_factory, monkeypatch)
+
+    assert len(first) == len(second) == 3  # ceil(36 / 12)
+    assert not set(first) & set(second)
+    assert set(first) | set(second) <= set(ids)
+
