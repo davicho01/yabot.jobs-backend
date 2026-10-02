@@ -288,21 +288,27 @@ gcloud functions deploy worker \
   --set-secrets="$COMMON_SECRETS" \
   --memory=512Mi \
   --timeout=540s \
-  --max-instances=60 \
+  --max-instances=30 \
   --update-labels=function=worker
 
 gcloud run services update worker \
   --region="$REGION" \
+  --max=30 \
   --add-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION"
 
-# max-instances=20 (was 8 until 2026-09-27): the earlier cap was set back
-# when Cloud SQL was db-f1-micro and 20 broke the API on connection
-# exhaustion. The instance has since been upgraded (db-custom-1-3840,
-# max_connections=100, ~12 in use at the time of this change) — plenty of
-# headroom, and still well below `worker`'s own max-instances=60 above.
-# crawl_dispatcher.py's claim-before-publish (see CrawlSource.crawl_claimed_at)
-# is the actual fix for the backlog this was masking; this bump just lets
-# crawl-worker drain the existing backlog faster.
+# Instance caps: worker 30, crawl-worker 10 (since 2026-10-02; were 55/35 by
+# hand, 60/20 here). Every instance holds a Cloud SQL connection and the
+# instance (db-custom-1-3840) has max_connections=100. At 55/35, every
+# twice-daily crawl burst (crawl-dispatch, 1pm/9pm ET) ran it out of
+# connections (1,838 refused on 2026-10-01's 1pm burst); 30 + 10 is ~50 at
+# full burst, leaving the API, MCP and scheduled functions room.
+# --max-instances caps each *revision*: a deploy runs two for a few minutes
+# (the old one draining in-flight requests while the new one scales up),
+# which is how 55-instance caps hit 101-111 active instances. Avoid
+# deploying during a burst, where that overlap is ~100 connections again.
+# The service-level --max (shared by every revision receiving traffic) is
+# set too. The same values are pinned in .github/workflows/deploy.yml.
+# Check DB num_backends before raising either.
 gcloud functions deploy crawl-worker \
   --gen2 \
   --region="$REGION" \
@@ -315,11 +321,12 @@ gcloud functions deploy crawl-worker \
   --set-secrets="$COMMON_SECRETS" \
   --memory=512Mi \
   --timeout=540s \
-  --max-instances=20 \
+  --max-instances=10 \
   --update-labels=function=crawl-worker
 
 gcloud run services update crawl-worker \
   --region="$REGION" \
+  --max=10 \
   --add-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION"
 
 # ---------------------------------------------------------------------------

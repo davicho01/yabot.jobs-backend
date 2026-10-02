@@ -155,6 +155,19 @@ jobs:
 
       # GOOGLE_FUNCTION_SOURCE is required because this repo's own main.py
       # is the FastAPI app, not the worker entry points.
+      #
+      # Instance caps (worker 30, crawl-worker 10): every instance holds a
+      # Cloud SQL connection and the database (db-custom-1-3840) has ~100.
+      # At the old hand-set 55/35, every twice-daily crawl burst (1pm/9pm
+      # ET, crawl_dispatcher.py) hit the ceiling; 30 + 10 is ~50 connections
+      # at full burst. --max-instances caps each *revision*, and a deploy
+      # briefly runs two (the old one draining in-flight requests, up to the
+      # 540s timeout, while the new one scales up) — that overlap is how 55
+      # reached 101-111 active instances. So avoid deploying during a burst
+      # (~1-2:30pm and ~9-10:30pm ET): overlapping there is ~100 connections
+      # again. The service-level --max (shared by every revision receiving
+      # traffic) is re-applied after each deploy in case the functions
+      # deploy drops it. See deploy/gcloud-deploy.sh §3 before raising either.
       - name: Deploy worker
         run: |
           gcloud functions deploy worker \
@@ -165,7 +178,11 @@ jobs:
             --source=. \
             --entry-point=handle_scan_request \
             --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=worker.py \
+            --max-instances=30 \
             --update-labels=function=worker
+
+      - name: Cap worker across revisions
+        run: gcloud run services update worker --region="$REGION" --project="$PROJECT_ID" --max=30
 
   deploy-crawl-worker:
     needs: build
@@ -193,7 +210,11 @@ jobs:
             --source=. \
             --entry-point=handle_crawl_request \
             --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=crawl_worker.py \
+            --max-instances=10 \
             --update-labels=function=crawl-worker
+
+      - name: Cap crawl-worker across revisions
+        run: gcloud run services update crawl-worker --region="$REGION" --project="$PROJECT_ID" --max=10
 
   deploy-crawl-dispatcher:
     needs: build
