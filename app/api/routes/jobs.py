@@ -2,7 +2,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, defer, selectinload, undefer
 
 from app.api.deps import get_current_user, get_current_user_optional, get_db
 from app.core.rate_limit import RateLimitExceeded
@@ -105,12 +105,18 @@ def list_job_urls(
         # Batches the postings into one extra query for the whole page, instead
         # of to_job_detail's url_row.postings access lazy-loading per row (an
         # N+1 otherwise); also_posted_count is undeferred so it comes back in
-        # that same query rather than as another per-row one.
+        # that same query rather than as another per-row one. raw_source
+        # (~20KB of scraped JSON per posting) is deferred: no response field
+        # reads it, and loading it moved ~220KB per page from the database.
         stmt = (
             stmt.order_by(*order)
             .limit(page_size)
             .offset((page - 1) * page_size)
-            .options(selectinload(JobPostingUrl.postings).undefer(JobPosting.also_posted_count))
+            .options(
+                selectinload(JobPostingUrl.postings).options(
+                    undefer(JobPosting.also_posted_count), defer(JobPosting.raw_source)
+                )
+            )
         )
         url_rows = db.scalars(stmt).all()
     return JobListRead(
