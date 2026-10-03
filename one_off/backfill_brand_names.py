@@ -20,7 +20,7 @@ On prod, run it from the deployed image as a one-off Cloud Run job execution
 import argparse
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.db.session import SessionLocal
 from app.models.crawl_source import CrawlSource
@@ -33,34 +33,47 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("app.backfill_brand_names")
 
 
+BATCH_SIZE = 1000
+
+
 def backfill(db, *, dry_run: bool = False) -> dict[str, int]:
+    # Just the columns needed — whole JobPosting rows carry each job's full
+    # description and scanned HTML, which ran the prod job out of memory.
     rows = db.execute(
-        select(JobPosting, CrawlSource.name, JobPostingUrl.url, CrawlSource.board_url)
+        select(JobPosting.id, JobPosting.company_name, CrawlSource.name, JobPostingUrl.url, CrawlSource.board_url)
         .join(JobPostingUrl, JobPostingUrl.id == JobPosting.url_id)
         .join(CrawlSource, CrawlSource.id == JobPostingUrl.crawl_source_id)
         .where(JobPosting.company_name.op("~")(r"^([0-9]{2}-[0-9]{7}|[0-9]{3,})\s"))
     ).all()
-    renamed: dict[str, int] = {}
-    for posting, source_name, url, board_url in rows:
-        if not has_entity_code(posting.company_name) or "/" in source_name:
+    # (old name, brand) -> posting ids, plus one URL pair per brand for
+    # resolving its Company row.
+    groups: dict[tuple[str, str], list] = {}
+    brand_urls: dict[str, tuple[str, str]] = {}
+    for posting_id, company_name, source_name, url, board_url in rows:
+        if not has_entity_code(company_name) or "/" in source_name:
             continue
-        label = f"{posting.company_name} -> {source_name}"
-        renamed[label] = renamed.get(label, 0) + 1
-        posting.company_name = source_name
-        posting.company_key = normalize_company_name(source_name)
+        groups.setdefault((company_name, source_name), []).append(posting_id)
+        brand_urls.setdefault(source_name, (url, board_url))
+
+    renamed = {f"{old} -> {brand}": len(ids) for (old, brand), ids in groups.items()}
+    if dry_run:
+        return renamed
+    for (old, brand), ids in groups.items():
+        key = normalize_company_name(brand)
+        for start in range(0, len(ids), BATCH_SIZE):
+            db.execute(
+                update(JobPosting)
+                .where(JobPosting.id.in_(ids[start : start + BATCH_SIZE]))
+                .values(company_name=brand, company_key=key)
+            )
+        db.commit()
+    for brand, (url, board_url) in brand_urls.items():
         # Make sure the brand has its Company row (domain resolved from the
         # same signals a scan uses); its logo comes with the next sync.
         resolve_company(
-            db,
-            company_key=posting.company_key,
-            company_name=source_name,
-            company_url=None,
-            site_urls=[url, board_url],
+            db, company_key=normalize_company_name(brand), company_name=brand, company_url=None, site_urls=[url, board_url]
         )
-    if dry_run:
-        db.rollback()
-    else:
-        db.commit()
+    db.commit()
     return renamed
 
 
