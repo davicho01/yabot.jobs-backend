@@ -39,23 +39,37 @@ _WHITESPACE_RE = re.compile(r"\s+")
 # Careers-page wording that employers put in their og:site_name or JSON-LD
 # hiringOrganization instead of their name: "Careers at Marriott", "SBH
 # Careers", "WTW External Careers Site", "Corporate Careers | Trueblue".
-_CAREERS_WORDS = r"(?:careers?|jobs|job\s+openings)"
+_CAREERS_WORDS = r"(?:careers?|jobs|job\s+openings|job\s+board)"
 _CAREERS_TAIL = r"(?:\s+(?:site|section|marketplace|portal|page|center|centre|hub))?"
 _CAREERS_PREFIX_RE = re.compile(rf"^{_CAREERS_WORDS}\s+(?:at|with)\s+", re.IGNORECASE)
+# Only after a space or a separator — "www.rei.jobs" ends in a domain, not a word.
 _CAREERS_SUFFIX_RE = re.compile(
-    rf"\s*[-–—:]?\s*(?:external\s+|all\s+)?{_CAREERS_WORDS}{_CAREERS_TAIL}\s*$", re.IGNORECASE
+    rf"(?:\s+|\s*[-–—:]\s*)(?:external\s+|all\s+)?{_CAREERS_WORDS}{_CAREERS_TAIL}[\s\-–—:]*$", re.IGNORECASE
 )
 _CAREERS_ONLY_RE = re.compile(rf"^(?:corporate\s+|external\s+)?{_CAREERS_WORDS}{_CAREERS_TAIL}$", re.IGNORECASE)
+_HAS_CAREERS_RE = re.compile(rf"(?:^|\s){_CAREERS_WORDS}(?:\s|$)", re.IGNORECASE)
 # A hostname standing in for a name (see app.services.crawl_sources._company_name):
-# on an ATS's shared domain, or a careers./jobs. subdomain — "starbucks.eightfold.ai",
-# "careers.qualcomm.com". A brand that merely contains a dot ("Super.com", "Harness.io")
-# is neither, and stays.
+# on an ATS's shared domain, a careers./jobs. subdomain, or a .jobs/.careers domain —
+# "starbucks.eightfold.ai", "careers.qualcomm.com", "www.rei.jobs". A brand that
+# merely contains a dot ("Super.com", "Harness.io") is none of these, and stays.
 _ATS_HOST_RE = re.compile(
     r"^(?:[\w-]+\.)+(?:eightfold\.ai|myworkdayjobs\.com|myworkdaysite\.com|oraclecloud\.com|taleo\.net|"
-    r"icims\.com|clinchtalent\.com|ultipro\.com|successfactors\.(?:com|eu)|avature\.net)$",
+    r"icims\.com|clinchtalent\.com|ultipro\.com|successfactors\.(?:com|eu)|avature\.net|"
+    r"dayforcehcm\.com|jobs|careers)$",
     re.IGNORECASE,
 )
 _CAREERS_HOST_RE = re.compile(r"^(?:careers?|jobs|apply)\.[\w-]+(?:\.[\w-]+)+$", re.IGNORECASE)
+
+
+def _is_careers_label(segment: str) -> bool:
+    """A short "|"-part that is careers wording ("Careers", "Careers at
+    Principal", "Datadog Careers") — not a tagline that happens to mention
+    careers."""
+    return len(segment.split()) <= 6 and bool(_HAS_CAREERS_RE.search(segment))
+
+
+def _strip_careers_wording(segment: str) -> str:
+    return _CAREERS_SUFFIX_RE.sub("", _CAREERS_PREFIX_RE.sub("", segment)).strip(" -–—:|")
 
 
 def clean_company_name(name: str | None) -> str | None:
@@ -65,7 +79,13 @@ def clean_company_name(name: str | None) -> str | None:
     standing in for a name ("starbucks.eightfold.ai"), so the caller falls
     back to its next source. Conservative on purpose — real names that look
     odd ("BambooHR", "Super.com", "Scale AI") pass through unchanged, and a
-    name that would clean down to nothing is kept as it was."""
+    name that would clean down to nothing is kept as it was.
+
+    With "|"-separated parts: when one of them is careers wording, the
+    company is the last part ("Studio Associate | Careers | Lucid Motors",
+    "Join our team | Careers at Principal"); otherwise it's the first, the
+    rest being a tagline or a division code ("EQ Bank | Canada's Challenger
+    Bank", "CCB iHeartMedia + Entertainment, Inc. | MPG")."""
     if name is None:
         return None
     original = " ".join(name.split())
@@ -74,10 +94,12 @@ def clean_company_name(name: str | None) -> str | None:
     if _ATS_HOST_RE.match(original) or _CAREERS_HOST_RE.match(original):
         return None
     segments = [seg.strip() for seg in original.split("|") if seg.strip()]
+    if len(segments) > 1 and any(_is_careers_label(seg) for seg in segments):
+        segments = segments[::-1]
     for segment in segments:
         if _CAREERS_ONLY_RE.match(segment):
             continue
-        cleaned = _CAREERS_SUFFIX_RE.sub("", _CAREERS_PREFIX_RE.sub("", segment)).strip(" -–—:")
+        cleaned = _strip_careers_wording(segment)
         if cleaned:
             return cleaned
     return original

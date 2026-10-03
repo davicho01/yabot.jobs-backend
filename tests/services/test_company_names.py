@@ -32,6 +32,15 @@ NOW = datetime(2026, 10, 3, tzinfo=timezone.utc)
         ("Texas Children's Careers", "Texas Children's"),
         ("  Hub   Group Careers ", "Hub Group"),
         ("WellPower - All Jobs", "WellPower"),
+        ("Studio Associate | Careers | Lucid Motors", "Lucid Motors"),
+        ("Join our team | Careers at Principal", "Principal"),
+        ("Datadog Careers | Datadog", "Datadog"),
+        ("EQ Bank | Canada's Challenger Bank", "EQ Bank"),
+        ("CCB iHeartMedia + Entertainment, Inc. | MPG", "CCB iHeartMedia + Entertainment, Inc."),
+        ("Achievement First | Achievement First Public Charter Schools prepare every student for college and career",
+         "Achievement First"),
+        ("Bank of England Job Board -", "Bank of England"),
+        ("Realtor.com Careers", "Realtor.com"),
         ("Northwell Career Site", "Northwell"),
         ("Roku Jobs", "Roku"),
     ],
@@ -42,7 +51,8 @@ def test_careers_wording_is_stripped(raw, expected):
 
 @pytest.mark.parametrize(
     "host", ["starbucks.eightfold.ai", "lockheedmartin.eightfold.ai", "careers.qualcomm.com", "careers.elcompanies.com",
-             "acme.wd5.myworkdayjobs.com", "jobs.example.org"],
+             "acme.wd5.myworkdayjobs.com", "jobs.example.org", "www.rei.jobs", "aecom.jobs", "instacart.careers",
+             "jobs.dayforcehcm.com"],
 )
 def test_hostnames_are_dropped_so_the_next_fallback_is_used(host):
     assert clean_company_name(host) is None
@@ -138,7 +148,7 @@ class TestBackfill:
         assert by_name == {"Careers at Marriott": "Marriott"}
         # The untitled Starbucks posting takes the name found for its source's other postings.
         assert sorted(name for _, name in by_posting["starbucks.eightfold.ai"]) == ["Starbucks Coffee Company"] * 2
-        assert unresolved == ["hp.eightfold.ai (1 of 1 posting(s))"]
+        assert len(unresolved) == 1 and unresolved[0].startswith("hp.eightfold.ai (1 posting(s)")
 
         monkeypatch.setattr(backfill, "SessionLocal", lambda: scan_db)
         monkeypatch.setattr(scan_db, "close", lambda: None)
@@ -156,3 +166,22 @@ class TestBackfill:
         # Idempotent: a second run finds nothing to do.
         by_name, by_posting, _ = backfill.plan_renames(scan_db)
         assert by_name == {} and "starbucks.eightfold.ai" not in by_posting
+
+    def test_hostname_recovery_takes_the_majority_and_reduces_or_rejects_odd_titles(self, scan_db, make_source, make_url):
+        from one_off import backfill_clean_company_names as backfill
+
+        source = make_source()
+        for _ in range(4):
+            self._posting(scan_db, make_url, source, "jobs.sap.com", "<title>Developer | SAP</title>")
+        self._posting(scan_db, make_url, source, "jobs.sap.com", "<title>Partner Manager | Saudi Arabia</title>")
+        for _ in range(2):
+            self._posting(scan_db, make_url, source, "careers.unitedhealthgroup.com",
+                          "<title>Nurse | Optum Washington at UnitedHealth Group</title>")
+        self._posting(scan_db, make_url, source, "careers-x.icims.com", "<title>Jobs | Welcome</title>")
+
+        _, by_posting, unresolved = backfill.plan_renames(scan_db)
+
+        assert {name for _, name in by_posting["jobs.sap.com"]} == {"SAP"}  # the odd one out follows the majority
+        assert {name for _, name in by_posting["careers.unitedhealthgroup.com"]} == {"UnitedHealth Group"}
+        assert "careers-x.icims.com" not in by_posting and unresolved[0].startswith("careers-x.icims.com")
+

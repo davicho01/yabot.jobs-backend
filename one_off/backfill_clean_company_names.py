@@ -31,14 +31,13 @@ On prod, run it from the deployed image as a one-off Cloud Run job execution
 
 import argparse
 import logging
-from collections import Counter, defaultdict
+from collections import Counter
 
 from sqlalchemy import bindparam, func, select, update
 
 from app.db.session import SessionLocal
 from app.models.enums import ScanStatus
 from app.models.job_posting import JobPosting
-from app.models.job_url import JobPostingUrl
 from app.services.adapters.eightfold import _title_company
 from app.services.job_dedup import clean_company_name, normalize_company_name
 
@@ -51,6 +50,27 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Report every old -> new mapping without writing.")
     parser.add_argument("--batch-size", type=int, default=1000, help="Per-posting updates per round trip.")
     return parser.parse_args()
+
+
+# Page-title parts that aren't a company ("Welcome" on some iCIMS portals).
+_GENERIC_TITLE_PARTS = {"welcome", "home", "careers", "career", "jobs", "search jobs", "job search", "job details", "search"}
+# Share of a hostname's postings whose titles must agree on its name.
+MIN_MAJORITY = 0.6
+
+
+def recovered_name(excerpt: str | None) -> str | None:
+    """The company named in a stored page's title — the same "<job> |
+    <Company>" rule the Eightfold adapter uses — with "<team> at <Company>"
+    reduced to the company ("Optum Washington at UnitedHealth Group" ->
+    "UnitedHealth Group") and generic words rejected."""
+    name = _title_company(excerpt or "")
+    if not name:
+        return None
+    if " at " in name:
+        name = name.rsplit(" at ", 1)[1].strip()
+    if not name or name.lower() in _GENERIC_TITLE_PARTS:
+        return None
+    return name
 
 
 def plan_renames(db) -> tuple[dict[str, str], dict[str, list[tuple]], list[str]]:
@@ -74,24 +94,18 @@ def plan_renames(db) -> tuple[dict[str, str], dict[str, list[tuple]], list[str]]
     unresolved: list[str] = []
     for host in hostnames:
         rows = db.execute(
-            select(JobPosting.id, JobPostingUrl.crawl_source_id, JobPosting.raw_source["html_excerpt"].as_string())
-            .join(JobPostingUrl, JobPostingUrl.id == JobPosting.url_id)
+            select(JobPosting.id, JobPosting.raw_source["html_excerpt"].as_string())
             .where(JobPosting.company_name == host, JobPosting.extraction_status == ScanStatus.SUCCESS)
         ).all()
-        found = [(posting_id, source_id, _title_company(excerpt or "")) for posting_id, source_id, excerpt in rows]
-        majority: dict = {}
-        per_source: dict = defaultdict(Counter)
-        for _, source_id, name in found:
-            if name:
-                per_source[source_id][name] += 1
-        for source_id, counts in per_source.items():
-            majority[source_id] = counts.most_common(1)[0][0]
-        renames = [(pid, name or majority.get(sid)) for pid, sid, name in found]
-        resolved = [(pid, name) for pid, name in renames if name]
-        if resolved:
-            by_posting[host] = resolved
-        if len(resolved) < len(renames):
-            unresolved.append(f"{host} ({len(renames) - len(resolved)} of {len(renames)} posting(s))")
+        votes = Counter(name for name in (recovered_name(excerpt) for _, excerpt in rows) if name)
+        name, n = votes.most_common(1)[0] if votes else (None, 0)
+        # One name for every posting of a hostname, and only a clear winner:
+        # per-posting titles go wrong on odd pages (a few of jobs.sap.com's
+        # are "<job> | <country>"), the majority doesn't.
+        if name and n / sum(votes.values()) >= MIN_MAJORITY:
+            by_posting[host] = [(posting_id, name) for posting_id, _ in rows]
+        else:
+            unresolved.append(f"{host} ({len(rows)} posting(s); title votes: {dict(votes.most_common(3))})")
     return by_name, by_posting, unresolved
 
 
@@ -113,7 +127,7 @@ def main() -> None:
             for new, n in Counter(name for _, name in renames).most_common():
                 logger.info("%6d  %r -> %r", n, host, new)
         for item in unresolved:
-            logger.warning("Left as is (no title to recover a name from): %s", item)
+            logger.warning("Left as is (no clear company name in its titles): %s", item)
         total = sum(counts.values()) + sum(len(r) for r in by_posting.values())
         logger.info(
             "%s %d posting(s): %d careers-wording name(s), %d hostname name(s).",
