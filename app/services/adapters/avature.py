@@ -16,6 +16,7 @@ from app.services.adapters.base import (
 )
 from app.services.adapters.text import clean_text, html_to_formatted_text
 from app.services.browser_fetch import fetch_rendered_page
+from app.services.company_logos import hiring_org_url
 
 _AVATURE_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _AVATURE_URL_RE = re.compile(r"([a-zA-Z0-9-]+\.avature\.net)", re.IGNORECASE)
@@ -368,6 +369,7 @@ def scan_job_url(url: str) -> ScanResult | None:
         title=clean_text(title),
         description=description,
         company_name=company_name,
+        company_url=hiring_org_url(job_ld),
         location=fields.location,
         workplace_type=WorkplaceType.UNKNOWN,
         employment_type=base.job_ld_employment_type(job_ld) if job_ld else EmploymentType.UNKNOWN,

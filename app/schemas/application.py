@@ -44,6 +44,7 @@ class ApplicationJobPostingRead(BaseModel):
     apply_url: str
     title: str | None
     company_name: str | None
+    company_logo_url: str | None = None
     salary_min: int | None
     salary_max: int | None
     salary_currency: str | None

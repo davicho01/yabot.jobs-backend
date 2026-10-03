@@ -25,7 +25,7 @@ def db():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(
         engine,
-        tables=[m.User.__table__, m.JobPostingUrl.__table__, m.JobPosting.__table__, m.UserJobApplication.__table__],
+        tables=[m.User.__table__, m.JobPostingUrl.__table__, m.JobPosting.__table__, m.Company.__table__, m.UserJobApplication.__table__],
     )
     # expire_on_commit=False — see test_saved_search_alerts.py's identical
     # note: SQLite's text-based DateTime round-trips a tz-aware Python

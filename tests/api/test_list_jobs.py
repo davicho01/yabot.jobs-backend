@@ -18,7 +18,7 @@ def db() -> Session:
     # Local db fixture (like test_similar_jobs.py's) — list_job_urls needs
     # JobPostingUrl/JobPosting.
     engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine, tables=[m.JobPostingUrl.__table__, m.JobPosting.__table__])
+    Base.metadata.create_all(engine, tables=[m.JobPostingUrl.__table__, m.JobPosting.__table__, m.Company.__table__])
     session = sessionmaker(bind=engine, autoflush=False)()
     yield session
     session.close()

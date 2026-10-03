@@ -125,6 +125,22 @@ def _metro_level_codes(metros: list[str] | None) -> set[str]:
     return {code for code in (metros or []) if code.isdigit()}
 
 
+# Workday tenants often report the hiring legal entity with its tax ID or
+# internal company code in front ("94-1687665 Bank of America, National
+# Association", "2100 NVIDIA USA"). Deliberately narrow — a 9-digit EIN or a
+# 3+ digit code — so real brands that start with a number ("84 Lumber",
+# "3M") never match.
+_ENTITY_CODE_RE = re.compile(r"^(?:\d{2}-\d{7}|\d{3,})\s+")
+
+
+def has_entity_code(name: str | None) -> bool:
+    return bool(name and _ENTITY_CODE_RE.match(name.strip()))
+
+
+def strip_entity_code(name: str) -> str:
+    return _ENTITY_CODE_RE.sub("", name.strip()).strip()
+
+
 def normalize_company_name(name: str | None) -> str | None:
     """Case-folded, punctuation- and legal-suffix-stripped, so "Acme Inc.",
     "acme, llc" and "Acme" all normalize to "acme"."""

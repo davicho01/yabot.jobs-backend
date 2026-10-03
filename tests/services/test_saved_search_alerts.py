@@ -26,7 +26,7 @@ def db():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(
         engine,
-        tables=[m.User.__table__, m.JobPostingUrl.__table__, m.JobPosting.__table__, m.SavedSearch.__table__],
+        tables=[m.User.__table__, m.JobPostingUrl.__table__, m.JobPosting.__table__, m.Company.__table__, m.SavedSearch.__table__],
     )
     # expire_on_commit=False: SQLite has no real timezone-aware storage (it's
     # text underneath), so the default's post-commit reload comes back with

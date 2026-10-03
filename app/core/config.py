@@ -138,6 +138,12 @@ class Settings(BaseSettings):
     # Unset just means that fallback is skipped.
     browser_fetch_service_url: str | None = None
 
+    # logo.dev secret key (sk_...) for automatic company logos — server-side
+    # only, used by the logo sync to download each logo once into our own
+    # storage (see app.services.logo_dev). Never sent to browsers. Unset
+    # means no automatic logos; manual ones still work.
+    logo_dev_secret_key: str | None = None
+
     # AWS SES for magic-link login emails (see app/services/email.py).
     # from_address's domain must be a verified SES identity. Credentials are
     # separate from resume storage's (even though both currently point at

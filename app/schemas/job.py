@@ -36,6 +36,13 @@ class JobPostingRead(BaseModel):
     apply_url: str | None
     title: str | None
     company_name: str | None
+    # Null when the company's domain isn't known yet or logos aren't
+    # configured — see app.services.company_logos.
+    company_logo_url: str | None = None
+    company_domain: str | None = None
+    # Normalized company identity (see app.services.job_dedup) — what the
+    # admin company-domain fix (PATCH /admin/companies) is keyed by.
+    company_key: str | None = None
     location: str | None
     workplace_type: str
     employment_type: str

@@ -27,6 +27,7 @@ from app.core.config import settings
 from app.models.enums import JobSector, ScanStatus
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
+from app.services.company_logos import logo_url_for
 from app.services.page_store import get_page_store
 
 logger = logging.getLogger("app.static_pages")
@@ -108,6 +109,7 @@ class JobRow:
     @property
     def href_path(self) -> str:
         return self.path or f"job/{self.url_id}"
+    company_logo_url: str | None = None
 
     @property
     def salary_display(self) -> str | None:
@@ -186,6 +188,7 @@ def jobs_for_sector_day(db: Session, country_iso2: str, sector: JobSector, local
             salary_min=posting.salary_min,
             salary_max=posting.salary_max,
             salary_currency=posting.salary_currency,
+            company_logo_url=logo_url_for(posting.company_logo_key),
         )
         for url_row, posting in rows
     ]

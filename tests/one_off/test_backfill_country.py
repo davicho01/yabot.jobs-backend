@@ -24,7 +24,7 @@ def _jsonb_as_json_on_sqlite(_type, _compiler, **_kw):
 @pytest.fixture
 def session_factory(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine, tables=[m.JobPostingUrl.__table__, m.JobPosting.__table__])
+    Base.metadata.create_all(engine, tables=[m.JobPostingUrl.__table__, m.JobPosting.__table__, m.Company.__table__])
     factory = sessionmaker(bind=engine, autoflush=False)
     monkeypatch.setattr(backfill_country, "SessionLocal", factory)
     return factory

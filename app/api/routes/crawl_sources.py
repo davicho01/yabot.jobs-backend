@@ -2,19 +2,23 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin_user, get_db
+from app.models.company import Company
 from app.models.crawl_source import CrawlSource
 from app.models.enums import CrawlSourceStatus, ScanStatus
+from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
-from app.schemas.admin import CrawlSourceStatsRead, ScanDayCount, ScanHourCount, ScanMonthCount, ScanWeekCount
+from app.schemas.admin import AdminCompanyRead, CrawlSourceStatsRead, ScanDayCount, ScanHourCount, ScanMonthCount, ScanWeekCount
 from app.schemas.crawl_source import CrawlSourceCreate, CrawlSourceRead, CrawlSourceUpdate
 from app.services import admin as admin_service
 from app.services.ats_adapters import detect_ats_source, detect_embedded_ats_source
+from app.services.company_logos import logo_url_for
 from app.services.crawl_queue import enqueue_crawl, ensure_topic
+from app.services.job_dedup import normalize_company_name
 from app.services.job_queue import enqueue_source_scan
 from app.services.job_queue import ensure_topic as ensure_scan_topic
 
@@ -157,6 +161,45 @@ def delete_crawl_source(source_id: uuid.UUID, db: Session = Depends(get_db)) -> 
     if source is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Crawl source not found.")
     db.delete(source)
+
+
+@router.get("/{source_id}/companies", response_model=list[AdminCompanyRead])
+def list_crawl_source_companies(source_id: uuid.UUID, db: Session = Depends(get_db)) -> list[AdminCompanyRead]:
+    """The companies this source's postings belong to (usually one; a
+    multi-brand board like Walmart's has several), most postings first —
+    what the Edit source dialog shows a logo field for. A source with no
+    scanned postings yet still gets one entry, from its own name, so a logo
+    can be set before the first crawl."""
+    source = db.get(CrawlSource, source_id)
+    if source is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Crawl source not found.")
+    rows = db.execute(
+        select(JobPosting.company_key, func.max(JobPosting.company_name), func.count())
+        .join(JobPostingUrl, JobPostingUrl.id == JobPosting.url_id)
+        .where(JobPostingUrl.crawl_source_id == source_id, JobPosting.company_key.is_not(None))
+        .group_by(JobPosting.company_key)
+        .order_by(func.count().desc())
+        .limit(10)
+    ).all()
+    if not rows:
+        key = normalize_company_name(source.name)
+        rows = [(key, source.name, 0)] if key else []
+    companies = {
+        c.company_key: c
+        for c in db.scalars(select(Company).where(Company.company_key.in_([key for key, _, _ in rows])))
+    }
+    result = []
+    for key, name, count in rows:
+        company = companies.get(key)
+        read = (
+            AdminCompanyRead.model_validate(company)
+            if company is not None
+            else AdminCompanyRead(company_key=key, display_name=name, domain=None, domain_source=None)
+        )
+        read.logo_url = logo_url_for(company.logo_key) if company is not None else None
+        read.posting_count = count
+        result.append(read)
+    return result
 
 
 @router.get("/{source_id}/stats", response_model=CrawlSourceStatsRead)

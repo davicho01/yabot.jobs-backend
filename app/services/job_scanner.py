@@ -8,6 +8,7 @@ from app.services.adapters import ADAPTERS, base
 from app.services.adapters.base import ScanResult
 from app.services.adapters.text import clean_text as _clean_text
 from app.services.adapters.text import html_to_formatted_text as _html_to_formatted_text
+from app.services.company_logos import hiring_org_url
 
 _TRACKING_PARAM_PREFIXES = ("utm_",)
 _TRACKING_PARAMS = {"gclid", "fbclid", "ref", "igshid"}
@@ -161,6 +162,7 @@ def _default_scan_job_url(url: str) -> ScanResult:
         title=_clean_text(job_ld.get("title")) or fallback_title,
         description=description,
         company_name=_clean_text(company_name),
+        company_url=hiring_org_url(job_ld),
         location=base.job_ld_location(job_ld),
         workplace_type=base.job_ld_workplace_type(job_ld),
         employment_type=base.job_ld_employment_type(job_ld),

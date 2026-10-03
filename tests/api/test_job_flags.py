@@ -23,7 +23,7 @@ def db() -> Session:
     # SavedSearch) — these routes need JobPostingUrl/JobPosting/CrawlSource
     # (get_jobs joins/filters on CrawlSource for source_id).
     engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine, tables=[m.JobPostingUrl.__table__, m.JobPosting.__table__, m.CrawlSource.__table__])
+    Base.metadata.create_all(engine, tables=[m.JobPostingUrl.__table__, m.JobPosting.__table__, m.Company.__table__, m.CrawlSource.__table__])
     session = sessionmaker(bind=engine, autoflush=False)()
     yield session
     session.close()

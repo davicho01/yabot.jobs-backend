@@ -37,6 +37,10 @@ location hubs (app.services.static_hub_pages), then the day pages, which link
 each job at its page's path — and sends a single CloudFront invalidation
 covering everything both passes changed.
 
+Before any of that, each run crawls logos for companies that need one (see
+app.services.company_logos.sync_company_logos, capped at a couple of
+minutes), so the pages rendered right after already show them.
+
 Writes to SEO_PAGES_BUCKET in prod, or SEO_PAGES_OUTPUT_DIR in local dev
 (see app.services.page_store); with neither set, only --dry-run works.
 
@@ -53,6 +57,7 @@ from datetime import date, datetime
 
 from app.core.log_config import configure_logging
 from app.db.session import SessionLocal
+from app.services.company_logos import sync_company_logos
 from app.services.static_job_pages import JobPagesResult, generate_job_pages, read_job_paths
 from app.services.static_pages import DAY_BOUNDARY_TZ, collapse_invalidation_paths, generate_for_date, invalidate_paths
 
@@ -75,6 +80,14 @@ def main() -> None:
     db = SessionLocal()
     job_error: Exception | None = None
     try:
+        # Logos first, so the pages rendered below already carry any just
+        # fetched (see sync_company_logos). Never allowed to cost the pages.
+        if not args.dry_run:
+            try:
+                sync_company_logos(db)
+            except Exception:
+                db.rollback()
+                logger.exception("Company logo sync failed; publishing pages without the new logos.")
         # Job pages first: the day pages link each job at the path its page
         # was published under (static_job_pages), and the country page lists
         # the top company/location hubs this pass builds. Isolated so a

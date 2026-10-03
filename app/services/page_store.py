@@ -28,7 +28,7 @@ class PageStoreNotConfigured(RuntimeError):
 
 
 class PageStore(Protocol):
-    def put(self, key: str, body: str, content_type: str, cache_control: str | None = None) -> None: ...
+    def put(self, key: str, body: str | bytes, content_type: str, cache_control: str | None = None) -> None: ...
 
     def get(self, key: str) -> bytes | None:
         """The object's bytes, or None if it doesn't exist."""
@@ -49,11 +49,10 @@ class S3PageStore:
             config=Config(s3={"addressing_style": "virtual"}, max_pool_connections=32),
         )
 
-    def put(self, key: str, body: str, content_type: str, cache_control: str | None = None) -> None:
+    def put(self, key: str, body: str | bytes, content_type: str, cache_control: str | None = None) -> None:
         extra = {"CacheControl": cache_control} if cache_control else {}
-        self._client.put_object(
-            Bucket=self.bucket, Key=key, Body=body.encode("utf-8"), ContentType=content_type, **extra
-        )
+        data = body.encode("utf-8") if isinstance(body, str) else body
+        self._client.put_object(Bucket=self.bucket, Key=key, Body=data, ContentType=content_type, **extra)
 
     def get(self, key: str) -> bytes | None:
         try:
@@ -80,10 +79,13 @@ class LocalDirPageStore:
             raise ValueError(f"Key escapes the output directory: {key!r}")
         return path
 
-    def put(self, key: str, body: str, content_type: str, cache_control: str | None = None) -> None:
+    def put(self, key: str, body: str | bytes, content_type: str, cache_control: str | None = None) -> None:
         path = self._path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(body, encoding="utf-8")
+        if isinstance(body, bytes):
+            path.write_bytes(body)
+        else:
+            path.write_text(body, encoding="utf-8")
 
     def get(self, key: str) -> bytes | None:
         path = self._path(key)

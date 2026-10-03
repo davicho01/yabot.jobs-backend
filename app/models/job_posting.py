@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
 
 from app.db.base import Base
+from app.models.company import Company
 from app.models.enums import EmploymentType, JobSector, ScanStatus, WorkplaceType
 from app.models.mixins import UUIDPrimaryKeyMixin
 
@@ -161,6 +162,14 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
         columns."""
         return self.url.url
 
+    @property
+    def company_logo_url(self) -> str | None:
+        """Our self-hosted logo for this posting's company, or None (not
+        crawled yet / nothing usable found) — see company_logo_key below."""
+        from app.services.company_logos import logo_url_for
+
+        return logo_url_for(self.company_logo_key)
+
     def __repr__(self) -> str:
         return f"<JobPosting title={self.title!r} company={self.company_name!r}>"
 
@@ -181,4 +190,24 @@ JobPosting.also_posted_count = column_property(
     .correlate_except(_duplicate)
     .scalar_subquery(),
     deferred=True,
+)
+
+
+# The company's own website domain (see app.models.company.Company), looked
+# up by company_key in the posting's own query so every reader — API
+# responses, static pages, emails — gets it without a separate join or
+# eager-load. One unique-index lookup per row; null until resolved, and for
+# a "shared" (not really the company's own) domain — see
+# app.services.company_logos.SOURCE_SHARED.
+JobPosting.company_domain = column_property(
+    select(Company.domain)
+    .where(Company.company_key == JobPosting.company_key, Company.domain_source != "shared")
+    .scalar_subquery()
+)
+
+# The company's stored logo (see app.services.company_logos). Kept consistent
+# on write — an automatic logo is cleared whenever the company's domain
+# changes — so reading it is a plain lookup.
+JobPosting.company_logo_key = column_property(
+    select(Company.logo_key).where(Company.company_key == JobPosting.company_key).scalar_subquery()
 )

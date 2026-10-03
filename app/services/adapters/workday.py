@@ -15,6 +15,7 @@ from app.services.adapters.base import (
     post_with_retry,
 )
 from app.services.adapters.text import clean_text, html_to_formatted_text
+from app.services.company_logos import hiring_org_url
 
 _WORKDAY_JOBS_URL = "https://{company}.{instance}.myworkdayjobs.com/wday/cxs/{company}/{site}/jobs"
 _WORKDAY_JOB_BASE_URL = "https://{company}.{instance}.myworkdayjobs.com/{site}"
@@ -257,6 +258,7 @@ def scan_job_url(url: str) -> ScanResult | None:
         title=(clean_text(job_ld.get("title")) if job_ld else None) or base.fallback_title(html),
         description=description,
         company_name=clean_text(company_name),
+        company_url=hiring_org_url(job_ld),
         location=base.job_ld_location(job_ld) if job_ld else None,
         workplace_type=base.job_ld_workplace_type(job_ld) if job_ld else WorkplaceType.UNKNOWN,
         employment_type=base.job_ld_employment_type(job_ld) if job_ld else EmploymentType.UNKNOWN,

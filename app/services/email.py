@@ -138,16 +138,24 @@ def send_magic_link_email(to_email: str, link: str) -> None:
 # link), meta line is company + salary, whichever of those is known.
 _DIGEST_ROW_HTML = """\
         <tr>
-          <td style="padding:14px 0;border-top:1px solid #e8e8ed;">
+{logo_cell}          <td style="padding:14px 0;border-top:1px solid #e8e8ed;">
             <a href="{url}" style="display:block;font-family:-apple-system,'Segoe UI',sans-serif;font-weight:700;font-size:15px;color:#1d1d1f;text-decoration:none;">{title}</a>
             <div style="font-family:-apple-system,'Segoe UI',sans-serif;font-size:13px;color:#6e6e73;margin-top:2px;">{meta}</div>
           </td>
         </tr>
 """
 
+# The company's logo, beside its row — only for rows that have one (see
+# app.services.company_logos); a row without one is just the text cell.
+_DIGEST_LOGO_CELL_HTML = """\
+          <td width="40" valign="top" style="width:40px;padding:16px 0 14px;border-top:1px solid #e8e8ed;">
+            <img src="{src}" width="28" height="28" alt="{alt}" style="display:block;border-radius:6px;border:1px solid #e8e8ed;">
+          </td>
+"""
+
 _DIGEST_MORE_ROW_HTML = """\
         <tr>
-          <td style="padding:14px 0;border-top:1px solid #e8e8ed;font-family:-apple-system,'Segoe UI',sans-serif;font-size:13px;">
+          <td colspan="2" style="padding:14px 0;border-top:1px solid #e8e8ed;font-family:-apple-system,'Segoe UI',sans-serif;font-size:13px;">
             <a href="{board_url}" style="color:#0071e3;text-decoration:none;">+{more_count} more match{plural} &rarr;</a>
           </td>
         </tr>
@@ -211,6 +219,14 @@ def _job_meta(job: "JobDetailRead") -> str:
     return html.escape(" · ".join(parts)) if parts else "&nbsp;"
 
 
+def _logo_cell(job: "JobDetailRead") -> str:
+    posting = job.posting
+    src = posting.company_logo_url
+    if src is None:
+        return ""
+    return _DIGEST_LOGO_CELL_HTML.format(src=html.escape(src), alt=html.escape(posting.company_name or ""))
+
+
 def _format_salary(posting) -> str | None:
     if not posting.salary_min and not posting.salary_max:
         return None
@@ -241,7 +257,12 @@ def send_saved_search_digest_email(
     subject = f"{total} new job match{plural} on Yabot Jobs" if not name else f"{total} new match{plural} for \"{name}\""
 
     rows_html = "".join(
-        _DIGEST_ROW_HTML.format(url=_job_url(job), title=html.escape(job.posting.title or "Untitled role"), meta=_job_meta(job))
+        _DIGEST_ROW_HTML.format(
+            logo_cell=_logo_cell(job),
+            url=_job_url(job),
+            title=html.escape(job.posting.title or "Untitled role"),
+            meta=_job_meta(job),
+        )
         for job in matches
     )
     if more_count:

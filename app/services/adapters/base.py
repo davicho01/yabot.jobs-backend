@@ -174,6 +174,10 @@ class ScanResult:
     title: str | None = None
     description: str | None = None
     company_name: str | None = None
+    # The company's own website, when the page states it (JSON-LD
+    # hiringOrganization url/sameAs — see company_logos.hiring_org_url).
+    # Feeds the company's logo domain; not stored on the posting itself.
+    company_url: str | None = None
     location: str | None = None
     workplace_type: str = WorkplaceType.UNKNOWN
     employment_type: str = EmploymentType.UNKNOWN

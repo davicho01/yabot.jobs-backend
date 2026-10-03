@@ -26,6 +26,7 @@
   <main id="main">
   <div class="wrap">
     {% include "_breadcrumb.html.jinja" %}
+    {% if job.company_logo_url %}<img class="company-logo" src="{{ job.company_logo_url }}" alt="{{ job.company_display }} logo" width="56" height="56" />{% endif %}
     <h1>{{ job.title }}</h1>
     <p class="meta-line">{{ job.company_display }}{% if job.location %} &middot; {{ job.location }}{% endif %}</p>
     <p class="job-lead">{{ lead }}</p>
@@ -71,6 +72,7 @@
       </ul>
     </nav>
     {% endif %}
+    {% if job.company_logo_url %}<p class="logo-credit">Logos by <a href="https://logo.dev" rel="noopener">Logo.dev</a></p>{% endif %}
   </div>
   </main>
 </body>

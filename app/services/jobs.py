@@ -17,8 +17,15 @@ from app.models.enums import ApplicationStatus, EmploymentType, FlagReason, Scan
 from app.models.job_application import UserJobApplication
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
+from app.services.company_logos import resolve_company
 from app.services.crawl_sources import register_discovered_board
-from app.services.job_dedup import clean_company_name, find_duplicate_primary, normalize_company_name, normalize_title
+from app.services.job_dedup import (
+    clean_company_name,
+    find_duplicate_primary,
+    has_entity_code,
+    normalize_company_name,
+    normalize_title,
+)
 from app.services.job_llm_extractor import LlmExtraction, extract_with_llm, html_to_text
 from app.services import geo
 from app.services.geo import resolve_area_codes, resolve_country_for_locations, resolve_places
@@ -964,6 +971,13 @@ def _fit(value: str | None, max_length: int) -> str | None:
     return _strip_nul(value)[:max_length]
 
 
+def _crawl_source_brand(db: Session, crawl_source_id: uuid.UUID | None) -> str | None:
+    """_crawl_source_name, unless the source is named by a board slug
+    ("lever/aledade") rather than a brand — that's no better to show."""
+    name = _crawl_source_name(db, crawl_source_id)
+    return name if name and "/" not in name else None
+
+
 def _crawl_source_name(db: Session, crawl_source_id: uuid.UUID | None) -> str | None:
     """Fallback company name for postings whose page left it blank in the
     scraped data (verified live: Capital One's Workday tenant serves
@@ -1020,6 +1034,10 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
         or fields["company_name"]
         or source_name
     )
+    if has_entity_code(company_name):
+        # A legal entity with its tax ID / company code ("2100 NVIDIA USA"):
+        # show the brand the crawl source is named after instead.
+        company_name = clean_company_name(_crawl_source_brand(db, url_row.crawl_source_id)) or company_name
     posting.company_name = _fit(decode_entities(company_name), _COMPANY_NAME_MAX)
     posting.location = _fit(location, _LOCATION_MAX)
     # From the full string, not the 255-char display value above, so a long
@@ -1060,7 +1078,22 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
         posting.company_key = normalize_company_name(posting.company_name)
         posting.title_key = normalize_title(posting.title)
         posting.primary_posting_id = find_duplicate_primary(db, posting)
+        # The company's logo domain (see app.services.company_logos) — every
+        # scan/rescan may bring a better signal than the last one had.
+        resolve_company(
+            db,
+            company_key=posting.company_key,
+            company_name=posting.company_name,
+            company_url=result.company_url,
+            site_urls=[url_row.url, _crawl_source_board_url(db, url_row.crawl_source_id)],
+        )
     return posting
+
+
+def _crawl_source_board_url(db: Session, crawl_source_id: uuid.UUID | None) -> str | None:
+    if crawl_source_id is None:
+        return None
+    return db.scalar(select(CrawlSource.board_url).where(CrawlSource.id == crawl_source_id))
 
 
 def _merge_fields(result: ScanResult, llm_extraction: LlmExtraction | None) -> dict:

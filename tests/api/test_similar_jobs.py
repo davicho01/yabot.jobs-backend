@@ -20,7 +20,7 @@ def db() -> Session:
     # Local db fixture (not tests/api/conftest.py's, which only has
     # SavedSearch) — similar_jobs needs JobPostingUrl/JobPosting.
     engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine, tables=[m.JobPostingUrl.__table__, m.JobPosting.__table__])
+    Base.metadata.create_all(engine, tables=[m.JobPostingUrl.__table__, m.JobPosting.__table__, m.Company.__table__])
     session = sessionmaker(bind=engine, autoflush=False)()
     yield session
     session.close()

@@ -602,6 +602,7 @@ def get_resume_score_history(
             url_id=score.job_posting.url_id,
             job_title=score.job_posting.title,
             company_name=score.job_posting.company_name,
+            company_logo_url=score.job_posting.company_logo_url,
             overall_score=score.overall_score,
             missing_keywords=score.missing_keywords,
             created_at=score.created_at,
@@ -673,6 +674,7 @@ def get_missing_keywords_summary(
                 url_id=score.job_posting.url_id,
                 job_title=score.job_posting.title,
                 company_name=score.job_posting.company_name,
+                company_logo_url=score.job_posting.company_logo_url,
             )
 
     entries = sorted(

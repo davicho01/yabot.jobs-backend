@@ -154,6 +154,7 @@ class ResumeScoreHistoryEntryRead(BaseModel):
     url_id: uuid.UUID
     job_title: str | None
     company_name: str | None
+    company_logo_url: str | None = None
     overall_score: int
     missing_keywords: list[str]
     created_at: datetime
@@ -179,6 +180,7 @@ class MissingSkillJobRef(BaseModel):
     url_id: uuid.UUID
     job_title: str | None
     company_name: str | None
+    company_logo_url: str | None = None
 
 
 class MissingSkillSummaryEntry(BaseModel):

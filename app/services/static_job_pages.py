@@ -56,6 +56,7 @@ from app.models.enums import EmploymentType, JobSector, ScanStatus, WorkplaceTyp
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
 from app.services import geo
+from app.services.company_logos import logo_url_for
 from app.services.job_locations import split_locations
 from app.services.static_pages import (
     _TEMPLATE_ENV,
@@ -377,7 +378,7 @@ def load_link_index(db: Session, now: datetime) -> dict[str, LinkJob]:
             JobPostingUrl.id, JobPostingUrl.domain, JobPostingUrl.created_at,
             JobPosting.title, JobPosting.company_name, JobPosting.company_key, JobPosting.title_key,
             JobPosting.sector, JobPosting.metros, JobPosting.location, JobPosting.workplace_type,
-            JobPosting.posted_at, JobPosting.scanned_at,
+            JobPosting.posted_at, JobPosting.scanned_at, JobPosting.company_logo_key,
         )
         .join(JobPosting, JobPosting.url_id == JobPostingUrl.id)
         .where(_eligible_filter(now))
@@ -386,6 +387,12 @@ def load_link_index(db: Session, now: datetime) -> dict[str, LinkJob]:
     for row in _execute_with_retry(db, stmt):
         key = str(row.id)
         scanned = _iso(row.scanned_at or row.created_at)
+        if row.company_logo_key:
+            # The company's logo too, so a newly fetched or changed logo (see
+            # app.services.company_logos) re-renders its pages. Appended with
+            # "~" (not "|", the manifest's separator), after the date that
+            # sitemap lastmod reads from the front.
+            scanned = f"{scanned}~{row.company_logo_key.rsplit('-', 1)[-1].removesuffix('.png')}"
         # A URL with several posting rows: the newest scan wins, same as
         # to_job_detail's latest_posting.
         if key in index and index[key].scanned >= scanned:
@@ -442,6 +449,12 @@ class JobPage:
     salary_max: int | None = None
     salary_currency: str | None = None
     valid_through: str | None = None  # the employer's own, from its JSON-LD
+    company_domain: str | None = None
+    company_logo_key: str | None = None
+
+    @property
+    def company_logo_url(self) -> str | None:
+        return logo_url_for(self.company_logo_key)
 
     @property
     def company_display(self) -> str:
@@ -496,6 +509,7 @@ def load_job_pages(db: Session, url_ids: Iterable[str]) -> dict[str, JobPage]:
             JobPosting.workplace_type, JobPosting.employment_type, JobPosting.sector, JobPosting.description,
             JobPosting.posted_at, JobPosting.salary_min, JobPosting.salary_max, JobPosting.salary_currency,
             JobPosting.extracted_fields["validThrough"].as_string().label("valid_through"),
+            JobPosting.company_domain, JobPosting.company_logo_key,
         )
         .join(JobPosting, JobPosting.url_id == JobPostingUrl.id)
         .where(JobPostingUrl.id.in_([uuid.UUID(i) for i in ids]))
@@ -522,6 +536,8 @@ def load_job_pages(db: Session, url_ids: Iterable[str]) -> dict[str, JobPage]:
             salary_max=row.salary_max,
             salary_currency=row.salary_currency,
             valid_through=row.valid_through,
+            company_domain=row.company_domain,
+            company_logo_key=row.company_logo_key,
         )
     return pages
 
@@ -599,6 +615,15 @@ class RelatedIndex:
 # ---------------------------------------------------------------------------
 
 
+def _hiring_org(job: JobPage) -> dict:
+    org: dict = {"@type": "Organization", "name": job.company_display}
+    if job.company_domain:
+        org["sameAs"] = f"https://{job.company_domain}"
+    if job.company_logo_url:
+        org["logo"] = job.company_logo_url
+    return org
+
+
 def _url(path: str) -> str:
     return f"{settings.seo_pages_base_url}/{path}"
 
@@ -658,7 +683,7 @@ def _job_ld(job: JobPage, description_html: str, page_url: str) -> dict:
         "description": description_html or html.escape(job.title),
         "datePosted": job.date_posted.isoformat(),
         "validThrough": job.expires.isoformat(),
-        "hiringOrganization": {"@type": "Organization", "name": job.company_display},
+        "hiringOrganization": _hiring_org(job),
         "identifier": {"@type": "PropertyValue", "name": "Yabot Jobs", "value": job.url_id},
         "directApply": False,
         "url": page_url,

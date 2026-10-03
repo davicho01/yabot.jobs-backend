@@ -371,6 +371,9 @@ jobs:
       # 2026-10-02 10pm run was killed before publishing 7,121 new pages;
       # 1Gi then held the plan but not rendering every hub at once (fixed in
       # static_hub_pages.publish_hubs). 2Gi is headroom over both.
+      # --update-secrets adds the logo.dev key (company logos, see
+      # app.services.logo_dev) on top of the secrets gcloud-deploy.sh set,
+      # so it survives every redeploy; only this function calls logo.dev.
       - name: Deploy generate-static-job-pages
         run: |
           gcloud functions deploy generate-static-job-pages \
@@ -385,6 +388,7 @@ jobs:
             --no-allow-unauthenticated \
             --memory=2Gi \
             --cpu=1 \
+            --update-secrets=LOGO_DEV_SECRET_KEY=logo-dev-secret-key:latest \
             --update-labels=function=generate-static-job-pages
 
   deploy-browser-scaler:

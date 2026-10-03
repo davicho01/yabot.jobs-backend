@@ -39,7 +39,7 @@ def db() -> Session:
             m.Resume.__table__,
             m.ResumeScore.__table__,
             m.JobPostingUrl.__table__,
-            m.JobPosting.__table__,
+            m.JobPosting.__table__, m.Company.__table__,
             m.UserJobApplication.__table__,
             m.FreeTrialJob.__table__,
             m.TailoredResume.__table__,

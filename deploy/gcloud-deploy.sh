@@ -158,6 +158,9 @@ create_secret_from_env system-llm-api-key          SYSTEM_LLM_API_KEY           
 # pointed at MinIO. See deploy/.env.production.
 create_secret_from_env resume-storage-access-key   RESUME_STORAGE_ACCESS_KEY_ID     deploy/.env.production
 create_secret_from_env resume-storage-secret-key   RESUME_STORAGE_SECRET_ACCESS_KEY deploy/.env.production
+# logo.dev secret key (company logos, app/services/logo_dev.py) — only the
+# generate-static-job-pages function mounts it (see its deploy below).
+create_secret_from_env logo-dev-secret-key         LOGO_DEV_SECRET_KEY
 
 # Non-secret, shared across api/worker/crawl-worker:
 COMMON_ENV="GCP_PROJECT_ID=${PROJECT_ID},BROWSER_FETCH_SERVICE_URL=${BROWSER_FETCH_SERVICE_URL},FRONTEND_BASE_URL=https://yabot.jobs,SESSION_COOKIE_SECURE=true,SYSTEM_LLM_PROVIDER=deepseek,SYSTEM_LLM_MODEL=deepseek-v4-flash,RESUME_STORAGE_BUCKET=yabot.jobs-files,RESUME_STORAGE_REGION=us-east-1,SEO_PAGES_BUCKET=${SEO_PAGES_BUCKET},SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID=${SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID}"
@@ -642,7 +645,7 @@ gcloud functions deploy generate-static-job-pages \
   --trigger-http \
   --no-allow-unauthenticated \
   --set-env-vars="$COMMON_ENV" \
-  --set-secrets="$COMMON_SECRETS" \
+  --set-secrets="$COMMON_SECRETS,LOGO_DEV_SECRET_KEY=logo-dev-secret-key:latest" \
   --memory=2Gi \
   --cpu=1 \
   --timeout=540s \

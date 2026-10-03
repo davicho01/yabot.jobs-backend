@@ -24,7 +24,7 @@ def _jsonb_as_json_on_sqlite(_type, _compiler, **_kw):
 def session_factory(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(
-        engine, tables=[m.CrawlSource.__table__, m.JobPostingUrl.__table__, m.JobPosting.__table__]
+        engine, tables=[m.CrawlSource.__table__, m.JobPostingUrl.__table__, m.JobPosting.__table__, m.Company.__table__]
     )
     factory = sessionmaker(bind=engine, autoflush=False)
     monkeypatch.setattr(backfill_company_name, "SessionLocal", factory)

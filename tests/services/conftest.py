@@ -49,6 +49,8 @@ def _isolated_seo_settings(monkeypatch):
     monkeypatch.setattr(settings, "seo_pages_output_dir", None)
     monkeypatch.setattr(settings, "seo_pages_bucket", None)
     monkeypatch.setattr(settings, "seo_pages_cloudfront_distribution_id", None)
+    # Never call the real logo.dev API from tests, whatever a dev's .env says.
+    monkeypatch.setattr(settings, "logo_dev_secret_key", None)
     monkeypatch.setattr(page_store, "_store", None)
 
 
@@ -62,7 +64,7 @@ def scan_db() -> Session:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(
         engine,
-        tables=[m.CrawlSource.__table__, m.JobPostingUrl.__table__, m.JobPosting.__table__, m.UserJobApplication.__table__],
+        tables=[m.CrawlSource.__table__, m.JobPostingUrl.__table__, m.JobPosting.__table__, m.Company.__table__, m.UserJobApplication.__table__],
     )
     session = sessionmaker(bind=engine, autoflush=False)()
     yield session

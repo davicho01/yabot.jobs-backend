@@ -34,7 +34,7 @@ NOW = datetime(2026, 10, 2, 18, 0, tzinfo=timezone.utc)
 @pytest.fixture
 def db():
     engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine, tables=[m.JobPostingUrl.__table__, m.JobPosting.__table__])
+    Base.metadata.create_all(engine, tables=[m.JobPostingUrl.__table__, m.JobPosting.__table__, m.Company.__table__])
     session = sessionmaker(bind=engine, autoflush=False)()
     yield session
     session.close()
@@ -652,3 +652,40 @@ def test_hubs_are_rendered_one_at_a_time_as_they_upload_not_all_up_front(monkeyp
     hubs.publish_hubs(plan, SerialPool())
 
     assert [kind for kind, _ in events] == ["render", "upload"] * len(plan.pages)
+
+
+class TestCompanyLogos:
+    @pytest.fixture
+    def acme_with_logo(self, db, make_job):
+        row = make_job()
+        posting = db.query(m.JobPosting).filter_by(url_id=row.id).one()
+        posting.company_key = "acme"
+        db.add(
+            m.Company(
+                company_key="acme", display_name="Acme Corp", domain="acme.com", domain_source="manual",
+                logo_key="logos/acme.com-1.png", logo_domain="acme.com", logo_status="ok",
+            )
+        )
+        db.commit()
+        return row
+
+    def test_page_and_json_ld_carry_the_logo(self, db, acme_with_logo):
+        page = sjp.load_job_pages(db, [str(acme_with_logo.id)])[str(acme_with_logo.id)]
+        html_out = sjp.render_job_page(page)
+        org = _ld(html_out)["hiringOrganization"]
+        assert org["sameAs"] == "https://acme.com"
+        assert org["logo"] == "https://yabot.jobs/logos/acme.com-1.png"
+        assert 'class="company-logo"' in html_out
+
+    def test_no_logo_without_one(self, db, make_job):
+        row = make_job()
+        page = sjp.load_job_pages(db, [str(row.id)])[str(row.id)]
+        html_out = sjp.render_job_page(page)
+        assert _ld(html_out)["hiringOrganization"] == {"@type": "Organization", "name": "Acme Corp"}
+        assert 'class="company-logo"' not in html_out
+
+    def test_a_new_logo_changes_the_version(self, db, acme_with_logo):
+        before = sjp.eligible_job_ids(db, NOW)
+        db.query(m.Company).filter_by(company_key="acme").one().logo_key = "logos/acme.com-2.png"
+        db.commit()
+        assert sjp.eligible_job_ids(db, NOW) != before
