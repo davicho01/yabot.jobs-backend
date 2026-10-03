@@ -160,6 +160,7 @@ class TestBackfill:
         for key, url in rows:
             url_row = make_url(None)
             url_row.url = url
+            url_row.domain = url.split("/")[2]
             scan_db.add(m.JobPosting(url_id=url_row.id, company_name=key, company_key=key, extraction_status="success"))
         scan_db.commit()
 
