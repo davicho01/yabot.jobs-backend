@@ -18,7 +18,7 @@ from app.models.job_application import UserJobApplication
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
 from app.services.crawl_sources import register_discovered_board
-from app.services.job_dedup import find_duplicate_primary, normalize_company_name, normalize_title
+from app.services.job_dedup import clean_company_name, find_duplicate_primary, normalize_company_name, normalize_title
 from app.services.job_llm_extractor import LlmExtraction, extract_with_llm, html_to_text
 from app.services import geo
 from app.services.geo import resolve_area_codes, resolve_country_for_locations, resolve_places
@@ -970,7 +970,10 @@ def _crawl_source_name(db: Session, crawl_source_id: uuid.UUID | None) -> str | 
     hiringOrganization.name as "" on every job, not just missing — same
     empty result as no adapter support at all). CrawlSource.name is a
     human-readable label already on file for anything the crawler
-    discovered on its own, so it beats showing "unknown" to users.
+    discovered on its own, so it beats showing "unknown" to users — except
+    when it's a hostname (crawl_sources._company_name's last resort for
+    boards with no company slug), which the caller's clean_company_name
+    turns into None rather than storing as a company name.
     """
     if crawl_source_id is None:
         return None
@@ -1003,7 +1006,12 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
     # Entities are decoded first, so what's stored (and shown) is real text.
     location = decode_entities(fields["location"])
     posting.title = _fit(decode_entities(fields["title"]), _TITLE_MAX)
-    company_name = fields["company_name"] or _crawl_source_name(db, url_row.crawl_source_id)
+    # Cleaned at both steps: a page's own name can be careers wording
+    # ("Careers at Marriott"), and a crawl source's name can be the board's
+    # hostname ("starbucks.eightfold.ai") — see clean_company_name.
+    company_name = clean_company_name(fields["company_name"]) or clean_company_name(
+        _crawl_source_name(db, url_row.crawl_source_id)
+    )
     posting.company_name = _fit(decode_entities(company_name), _COMPANY_NAME_MAX)
     posting.location = _fit(location, _LOCATION_MAX)
     # From the full string, not the 255-char display value above, so a long

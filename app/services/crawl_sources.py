@@ -68,7 +68,10 @@ def _company_name(ats_type: str, board_key: str, url: str) -> str:
     Fusion/Clinch/Eightfold's first segment is a hostname (contains a
     "."), and ADP's is a pair of opaque client ids (see
     _NO_COMPANY_SLUG_ATS_TYPES) — domain is the best fallback label
-    available for those without an extra network fetch.
+    available for those without an extra network fetch. That hostname
+    label must never become a posting's company name:
+    app.services.jobs._upsert_posting falls back to this name, but through
+    job_dedup.clean_company_name, which drops hostnames.
     """
     slug = board_key.split("/")[0]
     if not slug or "." in slug or ats_type in _NO_COMPANY_SLUG_ATS_TYPES:

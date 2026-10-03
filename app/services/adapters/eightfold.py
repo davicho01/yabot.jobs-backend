@@ -17,6 +17,7 @@ from app.services.adapters.base import (
     get_with_retry,
 )
 from app.services.adapters.text import html_to_formatted_text
+from app.services.job_dedup import clean_company_name
 
 _EIGHTFOLD_SEARCH_PAGE_SIZE = 20
 _EIGHTFOLD_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
@@ -283,6 +284,23 @@ def extract(url: str, html: str) -> ExtractedJobFields | None:
     )
 
 
+def _title_company(html: str) -> str | None:
+    """The company from an Eightfold job page's title, which is "<job> |
+    <Company>" on every tenant checked (2026-10-03: "store manager, Tulsa |
+    Starbucks Coffee Company", "Systems Engineer | Lockheed Martin", "Sales
+    Representative | SLB", ...). Most tenants don't set og:site_name, and
+    without this the posting fell back to its crawl source's name — for an
+    auto-discovered Eightfold board, the bare hostname
+    ("starbucks.eightfold.ai")."""
+    title = base.og_title(html) or base.fallback_title(html)
+    if not title:
+        return None
+    segments = [seg.strip() for seg in title.split("|") if seg.strip()]
+    if len(segments) < 2:
+        return None
+    return clean_company_name(segments[-1])
+
+
 def scan_job_url(url: str) -> ScanResult | None:
     # Cheap, URL-only gate: Eightfold has no static host shape (any
     # white-labeled domain can host one), so this only checks the job-id
@@ -313,7 +331,7 @@ def scan_job_url(url: str) -> ScanResult | None:
         success=True,
         title=(fields.title if fields else None) or base.og_title(html) or base.fallback_title(html),
         description=description,
-        company_name=base.og_site_name(html),
+        company_name=base.og_site_name(html) or _title_company(html),
         location=fields.location if fields else None,
         workplace_type=workplace_type,
         employment_type=EmploymentType.UNKNOWN,

@@ -36,6 +36,51 @@ _COMPANY_SUFFIX_RE = re.compile(
 _PUNCTUATION_RE = re.compile(r"[^\w\s]")
 _WHITESPACE_RE = re.compile(r"\s+")
 
+# Careers-page wording that employers put in their og:site_name or JSON-LD
+# hiringOrganization instead of their name: "Careers at Marriott", "SBH
+# Careers", "WTW External Careers Site", "Corporate Careers | Trueblue".
+_CAREERS_WORDS = r"(?:careers?|jobs|job\s+openings)"
+_CAREERS_TAIL = r"(?:\s+(?:site|section|marketplace|portal|page|center|centre|hub))?"
+_CAREERS_PREFIX_RE = re.compile(rf"^{_CAREERS_WORDS}\s+(?:at|with)\s+", re.IGNORECASE)
+_CAREERS_SUFFIX_RE = re.compile(rf"\s*[-–—:]?\s*(?:external\s+)?{_CAREERS_WORDS}{_CAREERS_TAIL}\s*$", re.IGNORECASE)
+_CAREERS_ONLY_RE = re.compile(rf"^(?:corporate\s+|external\s+)?{_CAREERS_WORDS}{_CAREERS_TAIL}$", re.IGNORECASE)
+# A hostname standing in for a name (see app.services.crawl_sources._company_name):
+# on an ATS's shared domain, or a careers./jobs. subdomain — "starbucks.eightfold.ai",
+# "careers.qualcomm.com". A brand that merely contains a dot ("Super.com", "Harness.io")
+# is neither, and stays.
+_ATS_HOST_RE = re.compile(
+    r"^(?:[\w-]+\.)+(?:eightfold\.ai|myworkdayjobs\.com|myworkdaysite\.com|oraclecloud\.com|taleo\.net|"
+    r"icims\.com|clinchtalent\.com|ultipro\.com|successfactors\.(?:com|eu)|avature\.net)$",
+    re.IGNORECASE,
+)
+_CAREERS_HOST_RE = re.compile(r"^(?:careers?|jobs|apply)\.[\w-]+(?:\.[\w-]+)+$", re.IGNORECASE)
+
+
+def clean_company_name(name: str | None) -> str | None:
+    """The display company name to store, from what a page or crawl source
+    offered: careers wording stripped ("Careers at Marriott" -> "Marriott",
+    "Corporate Careers | Trueblue" -> "Trueblue"), and None for a hostname
+    standing in for a name ("starbucks.eightfold.ai"), so the caller falls
+    back to its next source. Conservative on purpose — real names that look
+    odd ("BambooHR", "Super.com", "Scale AI") pass through unchanged, and a
+    name that would clean down to nothing is kept as it was."""
+    if name is None:
+        return None
+    original = " ".join(name.split())
+    if not original:
+        return None
+    if _ATS_HOST_RE.match(original) or _CAREERS_HOST_RE.match(original):
+        return None
+    segments = [seg.strip() for seg in original.split("|") if seg.strip()]
+    for segment in segments:
+        if _CAREERS_ONLY_RE.match(segment):
+            continue
+        cleaned = _CAREERS_SUFFIX_RE.sub("", _CAREERS_PREFIX_RE.sub("", segment)).strip(" -–—:")
+        if cleaned:
+            return cleaned
+    return original
+
+
 # How similar two (already company-matched) titles must be to count as the
 # same role. High enough that "Software Engineer" and "Senior Software
 # Engineer" at the same company don't collapse into one.
