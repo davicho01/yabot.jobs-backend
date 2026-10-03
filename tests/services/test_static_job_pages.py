@@ -634,3 +634,21 @@ def test_hub_city_list_uses_the_geo_matched_city_not_the_first_comma_word():
     # Amazon writes locations country-first; the old first-word rule listed "USA" as a city.
     assert _link_job(location="USA, TX, Austin").city == "Austin"
     assert _link_job(location="Remote - US").city is None
+
+
+def test_hubs_are_rendered_one_at_a_time_as_they_upload_not_all_up_front(monkeypatch, store):
+    # Rendering all ~8k hubs before uploading any ran the first full backfill out of memory.
+    from app.services import static_hub_pages as hubs
+
+    events = []
+    monkeypatch.setattr(hubs, "render_hub", lambda hub: events.append(("render", hub.path)) or "<html>")
+    monkeypatch.setattr(hubs, "upload_html", lambda path, html, cc=None: events.append(("upload", path)))
+    plan = hubs.plan_hubs([_link_job(url_id=f"j{i}") for i in range(5)])
+
+    class SerialPool:
+        def map(self, fn, items):
+            return [fn(item) for item in items]
+
+    hubs.publish_hubs(plan, SerialPool())
+
+    assert [kind for kind, _ in events] == ["render", "upload"] * len(plan.pages)

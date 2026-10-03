@@ -369,9 +369,16 @@ def publish_hubs(plan: HubPlan, pool) -> list[str]:
     hub paths (for the sitemap)."""
     previous = set((read_json(HUB_MANIFEST_KEY) or {}).get("paths", []))
     live = sorted(plan.pages)
-    uploads = [(path, render_hub(plan.pages[path])) for path in live]
-    uploads += [(path, render_hub_gone(path)) for path in sorted(previous - set(live))]
-    list(pool.map(lambda kv: upload_html(kv[0], kv[1], CACHE_CONTROL), uploads))
+    retired = sorted(previous - set(live))
+
+    # Each hub is rendered inside its own upload task, so only the pages in
+    # flight are ever held in memory. Rendering all ~8k first (some run to
+    # hundreds of KB) is what ran the first full backfill out of memory.
+    def publish(path: str) -> None:
+        html = render_hub(plan.pages[path]) if path in plan.pages else render_hub_gone(path)
+        upload_html(path, html, CACHE_CONTROL)
+
+    list(pool.map(publish, live + retired))
     write_json(HUB_MANIFEST_KEY, {"paths": live})
-    logger.info("Published %d hub page(s); %d retired.", len(live), len(previous - set(live)))
+    logger.info("Published %d hub page(s); %d retired.", len(live), len(retired))
     return live

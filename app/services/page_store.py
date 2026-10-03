@@ -43,7 +43,10 @@ class S3PageStore:
             region_name=settings.seo_pages_region,
             aws_access_key_id=settings.resume_storage_access_key_id,
             aws_secret_access_key=settings.resume_storage_secret_access_key,
-            config=Config(s3={"addressing_style": "virtual"}),
+            # Enough pooled connections for the static-page uploaders'
+            # threads (static_job_pages.UPLOAD_WORKERS = 16); botocore's
+            # default of 10 made every extra thread open and discard its own.
+            config=Config(s3={"addressing_style": "virtual"}, max_pool_connections=32),
         )
 
     def put(self, key: str, body: str, content_type: str, cache_control: str | None = None) -> None:
