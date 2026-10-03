@@ -31,6 +31,9 @@ NOW = datetime(2026, 10, 3, tzinfo=timezone.utc)
         ("Verisk Careers | Verisk", "Verisk"),
         ("Texas Children's Careers", "Texas Children's"),
         ("  Hub   Group Careers ", "Hub Group"),
+        ("WellPower - All Jobs", "WellPower"),
+        ("Northwell Career Site", "Northwell"),
+        ("Roku Jobs", "Roku"),
     ],
 )
 def test_careers_wording_is_stripped(raw, expected):
@@ -86,12 +89,21 @@ class TestUpsert:
         posting = self._scan(scan_db, make_url(make_source()), "Careers at Marriott")
         assert (posting.company_name, posting.company_key) == ("Marriott", "marriott")
 
-    def test_a_hostname_named_source_never_becomes_the_company(self, scan_db, make_source, make_url):
+    def test_a_real_name_from_the_page_beats_a_hostname_named_source(self, scan_db, make_source, make_url):
         source = make_source()
         source.name = "starbucks.eightfold.ai"
         scan_db.commit()
+        posting = self._scan(scan_db, make_url(source), "Starbucks Coffee Company")
+        assert posting.company_name == "Starbucks Coffee Company"
+
+    def test_with_nothing_better_the_hostname_is_kept_not_lost(self, scan_db, make_source, make_url):
+        # e.g. careers.underarmour.com: no name on the page. Keeping the hostname keeps the
+        # company's jobs grouped (company_key, hub, related links); None would drop all that.
+        source = make_source()
+        source.name = "careers.underarmour.com"
+        scan_db.commit()
         posting = self._scan(scan_db, make_url(source), None)
-        assert posting.company_name is None
+        assert (posting.company_name, posting.company_key) == ("careers.underarmour.com", "careersunderarmourcom")
 
     def test_a_cleaned_source_name_is_still_a_fallback(self, scan_db, make_source, make_url):
         source = make_source()

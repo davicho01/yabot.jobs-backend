@@ -1008,9 +1008,17 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
     posting.title = _fit(decode_entities(fields["title"]), _TITLE_MAX)
     # Cleaned at both steps: a page's own name can be careers wording
     # ("Careers at Marriott"), and a crawl source's name can be the board's
-    # hostname ("starbucks.eightfold.ai") — see clean_company_name.
-    company_name = clean_company_name(fields["company_name"]) or clean_company_name(
-        _crawl_source_name(db, url_row.crawl_source_id)
+    # hostname ("starbucks.eightfold.ai") — see clean_company_name. When
+    # cleaning leaves nothing at all (a custom careers domain like
+    # careers.underarmour.com with no name on the page), keep the raw name
+    # rather than store none: a hostname still groups the company's jobs
+    # (company_key, hubs, "More jobs at"), which no name at all wouldn't.
+    source_name = _crawl_source_name(db, url_row.crawl_source_id)
+    company_name = (
+        clean_company_name(fields["company_name"])
+        or clean_company_name(source_name)
+        or fields["company_name"]
+        or source_name
     )
     posting.company_name = _fit(decode_entities(company_name), _COMPANY_NAME_MAX)
     posting.location = _fit(location, _LOCATION_MAX)

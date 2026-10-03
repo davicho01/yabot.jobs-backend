@@ -42,7 +42,9 @@ _WHITESPACE_RE = re.compile(r"\s+")
 _CAREERS_WORDS = r"(?:careers?|jobs|job\s+openings)"
 _CAREERS_TAIL = r"(?:\s+(?:site|section|marketplace|portal|page|center|centre|hub))?"
 _CAREERS_PREFIX_RE = re.compile(rf"^{_CAREERS_WORDS}\s+(?:at|with)\s+", re.IGNORECASE)
-_CAREERS_SUFFIX_RE = re.compile(rf"\s*[-–—:]?\s*(?:external\s+)?{_CAREERS_WORDS}{_CAREERS_TAIL}\s*$", re.IGNORECASE)
+_CAREERS_SUFFIX_RE = re.compile(
+    rf"\s*[-–—:]?\s*(?:external\s+|all\s+)?{_CAREERS_WORDS}{_CAREERS_TAIL}\s*$", re.IGNORECASE
+)
 _CAREERS_ONLY_RE = re.compile(rf"^(?:corporate\s+|external\s+)?{_CAREERS_WORDS}{_CAREERS_TAIL}$", re.IGNORECASE)
 # A hostname standing in for a name (see app.services.crawl_sources._company_name):
 # on an ATS's shared domain, or a careers./jobs. subdomain — "starbucks.eightfold.ai",
