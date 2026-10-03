@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ hub.title }} | Yabot Jobs</title>
+  <meta name="description" content="{{ hub.description }}" />
+  <link rel="canonical" href="{{ page_url }}" />
+  <meta name="robots" content="index, follow" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Yabot Jobs" />
+  <meta property="og:title" content="{{ hub.h1 }}" />
+  <meta property="og:description" content="{{ hub.description }}" />
+  <meta property="og:url" content="{{ page_url }}" />
+  <meta property="og:image" content="{{ base_url }}/og-image.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
+  {% include "_base_style.html.jinja" %}
+  {% include "_job_style.html.jinja" %}
+  {% include "_analytics.html.jinja" %}
+  <script type="application/ld+json">{{ ld_json|safe }}</script>
+</head>
+<body>
+  {% include "_header.html.jinja" %}
+  <main id="main">
+  <div class="wrap">
+    {% with trail=hub.trail %}{% include "_breadcrumb.html.jinja" %}{% endwith %}
+    <h1>{{ hub.h1 }}</h1>
+    <p class="hub-intro">{{ hub.description }}</p>
+    {% include "_scan_notice.html.jinja" %}
+    {% if hub.board %}<p><a class="btn btn--accent" href="{{ hub.board[1] }}">{{ hub.board[0] }}</a></p>{% endif %}
+
+    {% for heading, items in hub.link_lists %}
+    <section aria-label="{{ heading }}">
+      <h2>{{ heading }}</h2>
+      <ul class="link-list">
+        {% for label, url in items %}<li>{% if url %}<a href="{{ url }}">{{ label }}</a>{% else %}{{ label }}{% endif %}</li>{% endfor %}
+      </ul>
+    </section>
+    {% endfor %}
+
+    {% for section in hub.sections %}
+    <section>
+      <h2>{{ section.heading }}{% if section.total > section.jobs|length %} <span class="count">({{ "{:,}".format(section.total) }})</span>{% endif %}</h2>
+      {% with jobs=section.jobs %}{% include "_job_links.html.jinja" %}{% endwith %}
+      {% if section.more %}<p class="section-more"><a href="{{ section.more[1] }}">{{ section.more[0] }} &rarr;</a></p>{% endif %}
+    </section>
+    {% endfor %}
+  </div>
+  </main>
+</body>
+</html>

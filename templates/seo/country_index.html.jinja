@@ -38,6 +38,23 @@
       </li>
       {% endfor %}
     </ul>
+
+    {% if hub_links.locations %}
+    <h2 class="month-heading">Top locations</h2>
+    <ul class="date-list">
+      {% for name, path, count in hub_links.locations %}
+      <li><a href="{{ base_url }}/{{ path }}">{{ name }}</a> &mdash; <span class="count">{{ "{:,}".format(count) }} job{{ '' if count == 1 else 's' }}</span></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if hub_links.companies %}
+    <h2 class="month-heading">Top companies hiring</h2>
+    <ul class="date-list">
+      {% for name, path, count in hub_links.companies %}
+      <li><a href="{{ base_url }}/{{ path }}">{{ name }}</a> &mdash; <span class="count">{{ "{:,}".format(count) }} job{{ '' if count == 1 else 's' }}</span></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
   </div>
   </main>
 </body>

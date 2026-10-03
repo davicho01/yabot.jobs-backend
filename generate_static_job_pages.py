@@ -29,10 +29,13 @@ already frozen — won't end up on any page. Accepted trade-off, same
 
 Sectors with zero jobs that day are skipped entirely (no thin/empty page).
 
-Each run also brings the per-job pages (/job/{url_id}, see
-app.services.static_job_pages) up to date — new jobs, rescanned ones, and
-"no longer available" pages for jobs that closed — and then sends a single
-CloudFront invalidation covering everything both passes changed.
+Each run first brings the per-job pages up to date (see
+app.services.static_job_pages: new jobs at /jobs/us/<sector>/<day>/<title>-
+<place>-<id>, older ones staying at /job/<id>; rescanned ones re-rendered;
+"no longer available" pages for jobs that closed) along with the company and
+location hubs (app.services.static_hub_pages), then the day pages, which link
+each job at its page's path — and sends a single CloudFront invalidation
+covering everything both passes changed.
 
 Writes to SEO_PAGES_BUCKET in prod, or SEO_PAGES_OUTPUT_DIR in local dev
 (see app.services.page_store); with neither set, only --dry-run works.
@@ -50,7 +53,7 @@ from datetime import date, datetime
 
 from app.core.log_config import configure_logging
 from app.db.session import SessionLocal
-from app.services.static_job_pages import JobPagesResult, generate_job_pages
+from app.services.static_job_pages import JobPagesResult, generate_job_pages, read_job_paths
 from app.services.static_pages import DAY_BOUNDARY_TZ, collapse_invalidation_paths, generate_for_date, invalidate_paths
 
 configure_logging()
@@ -72,15 +75,22 @@ def main() -> None:
     db = SessionLocal()
     job_error: Exception | None = None
     try:
-        result = generate_for_date(db, target_date, dry_run=args.dry_run, invalidate=False)
-        # Isolated so a failure here can't cost the day pages (already
-        # written above) their CloudFront invalidation below.
+        # Job pages first: the day pages link each job at the path its page
+        # was published under (static_job_pages), and the country page lists
+        # the top company/location hubs this pass builds. Isolated so a
+        # failure here still lets the day pages go out (linking from the
+        # last saved manifest) and get their CloudFront invalidation below.
         try:
             job_result = generate_job_pages(db, dry_run=args.dry_run, full=args.full)
+            job_paths, hub_links = job_result.job_paths, job_result.country_links
         except Exception as exc:
             db.rollback()
             logger.exception("Per-job pages failed; the day pages are still published and invalidated.")
             job_result, job_error = JobPagesResult(), exc
+            job_paths, hub_links = (read_job_paths() if not args.dry_run else {}), None
+        result = generate_for_date(
+            db, target_date, dry_run=args.dry_run, invalidate=False, job_paths=job_paths, hub_links=hub_links
+        )
     finally:
         db.close()
 
@@ -93,9 +103,10 @@ def main() -> None:
         logger.info("%s %d country/sector page(s) for %s.", verb, len(result.job_counts), target_date.isoformat())
     if job_error is None:
         logger.info(
-            "%s job pages: %d new, %d re-rendered, %d marked no longer available, %d unchanged, %d deferred.",
-            verb, job_result.published, job_result.updated, job_result.removed, job_result.unchanged,
-            job_result.deferred,
+            "%s job pages: %d new, %d re-rendered, %d refreshed, %d marked no longer available, %d unchanged, "
+            "%d deferred; %d hub page(s).",
+            verb, job_result.published, job_result.updated, job_result.refreshed, job_result.removed,
+            job_result.unchanged, job_result.deferred, job_result.hubs,
         )
 
     if not args.dry_run:

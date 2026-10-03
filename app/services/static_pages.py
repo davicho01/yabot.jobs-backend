@@ -101,6 +101,13 @@ class JobRow:
     salary_min: int | None = None
     salary_max: int | None = None
     salary_currency: str | None = None
+    # Where this job's own static page lives (no leading slash) — see
+    # static_job_pages; set by generate_for_date from the job manifest.
+    path: str | None = None
+
+    @property
+    def href_path(self) -> str:
+        return self.path or f"job/{self.url_id}"
 
     @property
     def salary_display(self) -> str | None:
@@ -239,7 +246,7 @@ def _build_job_ld_json(jobs: list[JobRow], day_str: str) -> str:
             "hiringOrganization": {"@type": "Organization", "name": job.company_name or ""},
             "jobLocation": {"@type": "Place", "address": job.location or ""},
             "datePosted": job.posted_at.isoformat() if job.posted_at else day_str,
-            "url": f"{settings.seo_pages_base_url}/job/{job.url_id}",
+            "url": f"{settings.seo_pages_base_url}/{job.href_path}",
         }
         if job.salary_min is not None or job.salary_max is not None:
             value: dict = {"@type": "QuantitativeValue"}
@@ -279,16 +286,21 @@ def render_sector_index(*, country_slug: str, sector: JobSector, dates_with_coun
     )
 
 
-def render_country_index(*, country_slug: str, sector_totals: list[tuple[str, str, int]]) -> str:
+def render_country_index(
+    *, country_slug: str, sector_totals: list[tuple[str, str, int]], hub_links: dict | None = None
+) -> str:
     """`sector_totals`: [(sector_slug, sector_name, total_job_count), ...],
     already ordered how they should list (see sector_totals() below) — this
-    just renders, it doesn't re-sort."""
+    just renders, it doesn't re-sort. `hub_links`: {"companies": [...],
+    "locations": [...]} of (name, path, count) from
+    static_hub_pages.HubPlan.country_links, listed under the sectors."""
     country_name = COUNTRY_NAMES[country_slug]
     template = _TEMPLATE_ENV.get_template("country_index.html.jinja")
     return template.render(
         country_slug=country_slug,
         country_name=country_name,
         sector_totals=sector_totals,
+        hub_links=hub_links or {},
         base_url=settings.seo_pages_base_url,
     )
 
@@ -429,7 +441,13 @@ class GenerationResult:
 
 
 def generate_for_date(
-    db: Session, target_date: date, *, dry_run: bool = False, invalidate: bool = True
+    db: Session,
+    target_date: date,
+    *,
+    dry_run: bool = False,
+    invalidate: bool = True,
+    job_paths: dict[str, str] | None = None,
+    hub_links: dict | None = None,
 ) -> GenerationResult:
     """The whole run: for every country x sector with at least one job on
     `target_date` (DAY_BOUNDARY_TZ), write/overwrite that day's page, refresh
@@ -455,6 +473,12 @@ def generate_for_date(
     for country_slug, country_iso2, _ in _COUNTRIES:
         for sector in SECTOR_SLUGS:
             jobs = jobs_for_sector_day(db, country_iso2, sector, target_date)
+            if job_paths is not None:
+                # Each job links to wherever its page was published
+                # (static_job_pages); one not published yet (over a run's
+                # render cap) links to the app's own page for it instead.
+                for job in jobs:
+                    job.path = job_paths.get(job.url_id) or f"jobs/{job.url_id}"
             if not jobs:
                 continue
             sector_slug = SECTOR_SLUGS[sector]
@@ -480,7 +504,7 @@ def generate_for_date(
         write_manifest(manifest)
         for country_slug, _, _ in _COUNTRIES:
             country_html = render_country_index(
-                country_slug=country_slug, sector_totals=sector_totals(manifest, country_slug)
+                country_slug=country_slug, sector_totals=sector_totals(manifest, country_slug), hub_links=hub_links
             )
             country_key = f"jobs/{country_slug}"
             upload_html(country_key, country_html)

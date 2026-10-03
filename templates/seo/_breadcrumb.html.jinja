@@ -1,0 +1,5 @@
+{# Visible breadcrumb from a [(label, url or None)] trail; the same trail feeds
+   the page's BreadcrumbList JSON-LD (static_job_pages.breadcrumb_ld). #}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {% for label, url in trail %}{% if url %}<a href="{{ url }}">{{ label }}</a> &rsaquo; {% else %}<span aria-current="page">{{ label }}</span>{% endif %}{% endfor %}
+</nav>

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  {#- A company/location hub that no longer has enough live jobs (see
+      static_hub_pages): out of search, with links onward. -#}
+  <title>No Current Jobs | Yabot Jobs</title>
+  <meta name="robots" content="noindex, follow" />
+  {% include "_base_style.html.jinja" %}
+  {% include "_analytics.html.jinja" %}
+</head>
+<body>
+  {% include "_header.html.jinja" %}
+  <main id="main">
+  <div class="wrap">
+    <h1>No current jobs here</h1>
+    <p>There aren't enough open jobs on this page right now.</p>
+    <p class="sector-link-back"><a href="{{ base_url }}/jobs/{{ country_slug }}">Browse jobs in the United States &rarr;</a></p>
+    <p class="sector-link-back"><a href="{{ base_url }}/jobs">Search all jobs &rarr;</a></p>
+  </div>
+  </main>
+</body>
+</html>
