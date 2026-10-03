@@ -643,7 +643,8 @@ gcloud functions deploy generate-static-job-pages \
   --no-allow-unauthenticated \
   --set-env-vars="$COMMON_ENV" \
   --set-secrets="$COMMON_SECRETS" \
-  --memory=512Mi \
+  --memory=1Gi \
+  --cpu=1 \
   --timeout=540s \
   --update-labels=function=generate-static-job-pages
 

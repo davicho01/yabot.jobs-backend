@@ -365,6 +365,11 @@ jobs:
       # same reason as retry-failed-scans: this is that function's
       # first-ever deploy, before deploy/gcloud-deploy.sh's one-time setup
       # has applied its trigger config.
+      # --memory=1Gi/--cpu=1 pinned: each run loads the per-job page
+      # manifest (~280k entries) next to the list of eligible jobs, and at
+      # 512Mi the 2026-10-02 10pm run was killed ("Memory limit of 512 MiB
+      # exceeded with 522 MiB used") before publishing 7,121 new pages.
+      # 1Gi needs at least ~0.6 vCPU, hence --cpu=1.
       - name: Deploy generate-static-job-pages
         run: |
           gcloud functions deploy generate-static-job-pages \
@@ -377,6 +382,8 @@ jobs:
             --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=generate_static_job_pages.py \
             --trigger-http \
             --no-allow-unauthenticated \
+            --memory=1Gi \
+            --cpu=1 \
             --update-labels=function=generate-static-job-pages
 
   deploy-browser-scaler:
