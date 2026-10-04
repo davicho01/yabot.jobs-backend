@@ -1,0 +1,41 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowCloudFrontServicePrincipal",
+      "Effect": "Allow",
+      "Principal": {"Service": "cloudfront.amazonaws.com"},
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::yabot.jobs-frontend/*",
+      "Condition": {
+        "StringEquals": {"AWS:SourceArn": "arn:aws:cloudfront::031067070435:distribution/E2JQUGZZTUJPZ6"}
+      }
+    },
+    {
+      "Sid": "FrontendDeployMayOnlyTouchFrontendFiles",
+      "Effect": "Deny",
+      "Principal": {"AWS": "arn:aws:iam::031067070435:role/yabot-jobs-frontend-deploy"},
+      "Action": ["s3:PutObject", "s3:PutObjectAcl", "s3:DeleteObject", "s3:DeleteObjectVersion"],
+      "NotResource": [
+        "arn:aws:s3:::yabot.jobs-frontend/assets/*",
+        "arn:aws:s3:::yabot.jobs-frontend/landing/*",
+        "arn:aws:s3:::yabot.jobs-frontend/index.html",
+        "arn:aws:s3:::yabot.jobs-frontend/app.html",
+        "arn:aws:s3:::yabot.jobs-frontend/about.html",
+        "arn:aws:s3:::yabot.jobs-frontend/privacy.html",
+        "arn:aws:s3:::yabot.jobs-frontend/questions.html",
+        "arn:aws:s3:::yabot.jobs-frontend/about-david.jpg",
+        "arn:aws:s3:::yabot.jobs-frontend/apple-touch-icon.png",
+        "arn:aws:s3:::yabot.jobs-frontend/apple-touch-icon-white.png",
+        "arn:aws:s3:::yabot.jobs-frontend/favicon.ico",
+        "arn:aws:s3:::yabot.jobs-frontend/favicon.svg",
+        "arn:aws:s3:::yabot.jobs-frontend/favicon-16x16.png",
+        "arn:aws:s3:::yabot.jobs-frontend/favicon-32x32.png",
+        "arn:aws:s3:::yabot.jobs-frontend/icons.svg",
+        "arn:aws:s3:::yabot.jobs-frontend/og-image.png",
+        "arn:aws:s3:::yabot.jobs-frontend/robots.txt",
+        "arn:aws:s3:::yabot.jobs-frontend/sitemap.xml"
+      ]
+    }
+  ]
+}
