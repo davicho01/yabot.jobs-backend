@@ -326,7 +326,9 @@ def store_logo(company: Company, png: bytes, *, store: PageStore | None = None) 
     return key
 
 
-def companies_needing_logos(db: Session, now: datetime, limit: int) -> list[Company]:
+def companies_needing_logos(
+    db: Session, now: datetime, limit: int, skip_keys: set[str] | frozenset[str] = frozenset()
+) -> list[Company]:
     """Companies without a pinned (admin-set) logo that were never tried, or
     are due a re-check — the ones with the most canonical postings first, so
     a capped run covers what users see most. Includes companies with no
@@ -345,7 +347,7 @@ def companies_needing_logos(db: Session, now: datetime, limit: int) -> list[Comp
     not_pinned = Company.logo_origin.is_(None) | Company.logo_origin.not_in(PINNED_ORIGINS)
     stmt = (
         select(Company)
-        .where(not_pinned, due)
+        .where(not_pinned, due, Company.company_key.not_in(skip_keys) if skip_keys else True)
         .order_by(posting_count.desc(), Company.company_key)
         .limit(limit)
     )
@@ -366,6 +368,7 @@ def sync_company_logos(
     store: PageStore | None = None,
     client=None,
     budget_seconds: float = LOGO_SYNC_BUDGET_SECONDS,
+    attempted: set[str] | None = None,
 ) -> dict[str, int]:
     """Fetch logos from logo.dev for companies that need one (see
     companies_needing_logos) and store our own copies. Lookups run in a
@@ -375,7 +378,12 @@ def sync_company_logos(
     if client is None and not logo_dev.is_configured():
         return {}
     now = now or datetime.now(timezone.utc)
-    companies = companies_needing_logos(db, now, limit)
+    companies = companies_needing_logos(db, now, limit, attempted or frozenset())
+    if attempted is not None:
+        # A caller looping until done (one_off/sync_all_logos.py) passes the
+        # same set every round, so companies logo.dev is still indexing — left
+        # due for the next scheduled run — aren't picked again and again.
+        attempted.update(c.company_key for c in companies)
     if not companies:
         return {}
     own_client = client is None

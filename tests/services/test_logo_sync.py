@@ -288,3 +288,12 @@ class TestBrandNames:
             scan_db, make_url(source), ScanResult(success=True, title="Engineer", company_name="2100 Acme USA"), NOW
         )
         assert posting.company_name == "2100 Acme USA"
+
+
+class TestCatchUpRounds:
+    def test_attempted_companies_are_not_picked_again_in_the_same_catch_up(self, scan_db, fake, store):
+        fake.brands["indexing.com"] = (202, None)  # stays due, but this catch-up already tried it
+        company(scan_db, "indexing", "indexing.com")
+        attempted: set[str] = set()
+        assert cl.sync_company_logos(scan_db, now=NOW, store=store, client=fake.client(), attempted=attempted) == {"pending": 1}
+        assert cl.sync_company_logos(scan_db, now=NOW, store=store, client=fake.client(), attempted=attempted) == {}
