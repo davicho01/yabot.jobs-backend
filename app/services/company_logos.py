@@ -302,6 +302,8 @@ def set_manual_domain(db: Session, company: Company, domain_or_url: str | None) 
 # no download); a miss is worth retrying sooner as logo.dev keeps indexing.
 LOGO_RECHECK_OK = timedelta(days=90)
 LOGO_RECHECK_MISS = timedelta(days=30)
+# An error (timeout, logo.dev outage) says nothing about the company — retry soon.
+LOGO_RECHECK_ERROR = timedelta(days=1)
 LOGO_SYNC_LIMIT = 300
 LOGO_SYNC_WORKERS = 4
 # Wall-clock budget per sync: it runs inside the static-pages Cloud Function
@@ -342,7 +344,11 @@ def companies_needing_logos(
     due = (
         Company.logo_status.is_(None)
         | ((Company.logo_status == logo_dev.STATUS_OK) & (Company.logo_checked_at < now - LOGO_RECHECK_OK))
-        | ((Company.logo_status != logo_dev.STATUS_OK) & (Company.logo_checked_at < now - LOGO_RECHECK_MISS))
+        | ((Company.logo_status == logo_dev.STATUS_ERROR) & (Company.logo_checked_at < now - LOGO_RECHECK_ERROR))
+        | (
+            Company.logo_status.not_in((logo_dev.STATUS_OK, logo_dev.STATUS_ERROR))
+            & (Company.logo_checked_at < now - LOGO_RECHECK_MISS)
+        )
     )
     not_pinned = Company.logo_origin.is_(None) | Company.logo_origin.not_in(PINNED_ORIGINS)
     stmt = (
@@ -405,7 +411,7 @@ def sync_company_logos(
     for company, lookup in zip(companies, lookups):
         status = lookup.result.status if lookup else "deferred"
         counts[status] = counts.get(status, 0) + 1
-        if lookup is None or lookup.result.status == logo_dev.STATUS_PENDING:
+        if lookup is None or lookup.result.status in (logo_dev.STATUS_PENDING, logo_dev.STATUS_RATE_LIMITED):
             continue  # retried next run
         if lookup.found_domain and usable_domain(company) is None:
             company.domain = lookup.found_domain
@@ -485,6 +491,8 @@ def _lookup(
                 return _Lookup(logo_dev.LogoDevResult(logo_dev.STATUS_NONE))
             domain = found
         return _Lookup(logo_dev.fetch_logo(domain, known_etag=etag, client=client), found_domain=found)
+    except logo_dev.RateLimited:
+        return _Lookup(logo_dev.LogoDevResult(logo_dev.STATUS_RATE_LIMITED))
     except Exception:  # one bad lookup must never sink the whole run
         logger.exception("Logo lookup failed for %s", company_key)
         return _Lookup(logo_dev.LogoDevResult(logo_dev.STATUS_ERROR))

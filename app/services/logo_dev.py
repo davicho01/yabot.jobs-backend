@@ -14,6 +14,8 @@ looked up by name with the search endpoint first; see find_domain.
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -31,7 +33,37 @@ STATUS_OK = logo_images.STATUS_OK
 STATUS_UNCHANGED = "unchanged"  # same etag as what we already store
 STATUS_NONE = logo_images.STATUS_NONE
 STATUS_PENDING = "pending"  # logo.dev is still indexing the brand (202)
+STATUS_RATE_LIMITED = "rate_limited"  # 429 — nothing wrong with the company; retry next run
 STATUS_ERROR = logo_images.STATUS_ERROR
+
+
+class RateLimited(Exception):
+    """logo.dev answered 429: over our per-minute allowance."""
+
+
+class _Pacer:
+    """Spaces calls evenly to stay under a per-minute limit, across all the
+    sync's threads. logo.dev's limits for our key (from its RateLimit-Limit
+    headers, verified 2026-10-04): 100 logo lookups and 500 searches per
+    minute — the first scheduled sync, unpaced, got 159 lookups refused."""
+
+    def __init__(self, per_minute: float):
+        self.interval = 60.0 / per_minute
+        self._lock = threading.Lock()
+        self._next = 0.0
+
+    def wait(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            slot = max(now, self._next)
+            self._next = slot + self.interval
+        if slot > now:
+            time.sleep(slot - now)
+
+
+# A little under the limits, for clock skew and anything else using the key.
+_lookup_pacer = _Pacer(per_minute=90)
+_search_pacer = _Pacer(per_minute=450)
 
 
 @dataclass
@@ -54,11 +86,14 @@ def new_client() -> httpx.Client:
 
 
 def fetch_logo(domain: str, *, known_etag: str | None = None, client: httpx.Client) -> LogoDevResult:
+    _lookup_pacer.wait()
     try:
         response = client.get(f"{API_BASE}/v2/brands/logo", params={"domain": domain})
     except httpx.HTTPError as exc:
         logger.info("logo.dev lookup failed for %s (%s)", domain, exc)
         return LogoDevResult(STATUS_ERROR)
+    if response.status_code == 429:
+        return LogoDevResult(STATUS_RATE_LIMITED)
     if response.status_code == 404:
         return LogoDevResult(STATUS_NONE)
     if response.status_code == 202:
@@ -106,8 +141,11 @@ def find_domain(company_name: str, company_key: str, *, client: httpx.Client) ->
     cleaned = strip_entity_code(company_name)
     if cleaned != company_name:
         company_name, company_key = cleaned, normalize_company_name(cleaned) or company_key
+    _search_pacer.wait()
     try:
         response = client.get(f"{API_BASE}/search", params={"q": company_name})
+        if response.status_code == 429:
+            raise RateLimited(company_name)
         results = response.json() if response.status_code == 200 else []
     except (httpx.HTTPError, ValueError) as exc:
         logger.info("logo.dev search failed for %s (%s)", company_name, exc)

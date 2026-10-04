@@ -26,6 +26,7 @@ class FakeLogoDev:
         self.image = image or png()
         self.calls: list[str] = []
         self.downloads: list[str] = []
+        self.search_rate_limited = False
 
     def client(self) -> httpx.Client:
         def handler(request: httpx.Request) -> httpx.Response:
@@ -37,6 +38,8 @@ class FakeLogoDev:
                 body = {"data": {"url": f"https://img.example/tmp/{domain}?sig=1", "etag": etag}}
                 return httpx.Response(status, json=body if status == 200 else {})
             if request.url.path == "/search":
+                if self.search_rate_limited:
+                    return httpx.Response(429)
                 return httpx.Response(200, json=self.search.get(request.url.params["q"], []))
             return httpx.Response(404)
 
@@ -297,3 +300,36 @@ class TestCatchUpRounds:
         attempted: set[str] = set()
         assert cl.sync_company_logos(scan_db, now=NOW, store=store, client=fake.client(), attempted=attempted) == {"pending": 1}
         assert cl.sync_company_logos(scan_db, now=NOW, store=store, client=fake.client(), attempted=attempted) == {}
+
+
+class TestRateLimits:
+    def test_a_429_lookup_is_retried_next_run_not_recorded_as_an_error(self, scan_db, fake, store):
+        fake.brands["acme.com"] = (429, None)
+        row = company(scan_db)
+        assert sync(scan_db, fake, store) == {"rate_limited": 1}
+        assert row.logo_status is None  # still due on the very next run
+
+    def test_a_429_search_is_not_taken_for_no_match(self, scan_db, fake, store):
+        fake.search_rate_limited = True
+        row = company(scan_db, "acme", None, None)
+        assert sync(scan_db, fake, store) == {"rate_limited": 1}
+        assert row.logo_status is None
+
+    def test_errors_are_retried_after_a_day_not_a_month(self, scan_db, fake, store):
+        fake.brands["acme.com"] = (500, None)
+        row = company(scan_db)
+        assert sync(scan_db, fake, store) == {"error": 1}
+        fake.brands["acme.com"] = (200, "e1")
+        assert sync(scan_db, fake, store, now=NOW + timedelta(hours=23)) == {}
+        assert sync(scan_db, fake, store, now=NOW + timedelta(days=1, minutes=1)) == {"ok": 1}
+        assert row.logo_status == "ok"
+
+    def test_the_pacer_spaces_calls_across_threads(self):
+        import time
+        from concurrent.futures import ThreadPoolExecutor
+
+        pacer = logo_dev._Pacer(per_minute=600)  # 0.1s apart
+        start = time.monotonic()
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(lambda _: pacer.wait(), range(5)))
+        assert time.monotonic() - start >= 0.39  # 5 calls: 4 gaps of 0.1s

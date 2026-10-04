@@ -14,14 +14,22 @@ Pages pick the new logos up on the next scheduled static-pages run (each
 job page's version includes its logo).
 
 Usage:
-    python -m one_off.sync_all_logos [--max-minutes 50]
+    python -m one_off.sync_all_logos [--max-minutes 170]
+
+logo.dev allows our key 100 logo lookups a minute (see logo_dev._Pacer),
+so ~9.6k companies take a couple of hours — give its Cloud Run job a
+3-hour timeout.
 """
 
 import argparse
 import logging
 import time
 
+from sqlalchemy import update
+
 from app.db.session import SessionLocal
+from app.models.company import Company
+from app.services.logo_dev import STATUS_ERROR
 from app.services import logo_dev
 from app.services.company_logos import sync_company_logos
 
@@ -32,7 +40,7 @@ logger = logging.getLogger("app.sync_all_logos")
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--max-minutes", type=float, default=50, help="Stop starting new rounds after this long.")
+    parser.add_argument("--max-minutes", type=float, default=170, help="Stop starting new rounds after this long.")
     args = parser.parse_args()
     if not logo_dev.is_configured():
         raise SystemExit("LOGO_DEV_SECRET_KEY is not set.")
@@ -42,6 +50,13 @@ def main() -> None:
     totals: dict[str, int] = {}
     db = SessionLocal()
     try:
+        # Errors are transient (timeouts, logo.dev outages, and the first
+        # scheduled run's unpaced 429s) — try them again now too.
+        retried = db.execute(
+            update(Company).where(Company.logo_status == STATUS_ERROR).values(logo_status=None)
+        ).rowcount
+        db.commit()
+        logger.info("%d companies with an earlier error queued again", retried)
         while time.monotonic() < deadline:
             budget = min(300.0, deadline - time.monotonic())
             counts = sync_company_logos(db, budget_seconds=budget, attempted=attempted)

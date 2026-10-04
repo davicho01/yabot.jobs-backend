@@ -51,6 +51,11 @@ def _isolated_seo_settings(monkeypatch):
     monkeypatch.setattr(settings, "seo_pages_cloudfront_distribution_id", None)
     # Never call the real logo.dev API from tests, whatever a dev's .env says.
     monkeypatch.setattr(settings, "logo_dev_secret_key", None)
+    # No rate-limit pacing against the mocked logo.dev (tested on its own).
+    from app.services import logo_dev
+
+    monkeypatch.setattr(logo_dev._lookup_pacer, "interval", 0.0)
+    monkeypatch.setattr(logo_dev._search_pacer, "interval", 0.0)
     monkeypatch.setattr(page_store, "_store", None)
 
 
