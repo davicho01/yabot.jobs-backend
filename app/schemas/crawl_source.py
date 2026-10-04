@@ -69,3 +69,6 @@ class CrawlSourceRead(BaseModel):
     coverage_sample_count: int
     coverage_flagged_at: datetime | None
     created_at: datetime
+    # The logo of the company this source is named after (see
+    # app.api.routes.crawl_sources.list_crawl_sources); only set in listings.
+    logo_url: str | None = None

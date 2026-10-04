@@ -103,3 +103,26 @@ class TestSetLogo:
         with pytest.raises(HTTPException) as exc:
             self._upload(db, b"not an image")
         assert exc.value.status_code == 422 and "isn't an image" in exc.value.detail
+
+
+class TestSourceListLogos:
+    def test_each_source_carries_its_named_companys_logo(self, db, monkeypatch):
+        from app.api.routes.crawl_sources import list_crawl_sources
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "seo_pages_base_url", "https://yabot.jobs")
+
+        _source(db, "Netflix")
+        _source(db, "lever/aledade")
+        _source(db, "No Logo Co")
+        db.add_all([
+            m.Company(company_key="netflix", display_name="Netflix", logo_key="logos/netflix-1.png"),
+            m.Company(company_key="aledade", display_name="Aledade", logo_key="logos/aledade-1.png"),
+        ])
+        db.commit()
+        logos = {s.name: s.logo_url for s in list_crawl_sources(db)}
+        assert logos == {
+            "Netflix": "https://yabot.jobs/logos/netflix-1.png",
+            "lever/aledade": "https://yabot.jobs/logos/aledade-1.png",
+            "No Logo Co": None,
+        }

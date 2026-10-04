@@ -16,7 +16,7 @@ from app.schemas.admin import AdminCompanyRead, CrawlSourceStatsRead, ScanDayCou
 from app.schemas.crawl_source import CrawlSourceCreate, CrawlSourceRead, CrawlSourceUpdate
 from app.services import admin as admin_service
 from app.services.ats_adapters import detect_ats_source, detect_embedded_ats_source
-from app.services.company_logos import logo_url_for
+from app.services.company_logos import logo_url_for, source_search_name
 from app.services.crawl_queue import enqueue_crawl, ensure_topic
 from app.services.job_dedup import normalize_company_name
 from app.services.job_queue import enqueue_source_scan
@@ -28,7 +28,23 @@ router = APIRouter(prefix="/admin/crawl-sources", tags=["admin"], dependencies=[
 @router.get("", response_model=list[CrawlSourceRead])
 def list_crawl_sources(db: Session = Depends(get_db)) -> list[CrawlSourceRead]:
     sources = db.scalars(select(CrawlSource).order_by(CrawlSource.name)).all()
-    return list(sources)
+    # Each source's logo: the company it's named after ("Netflix" ->
+    # company "netflix"; "lever/aledade" -> "aledade"), found in one query
+    # for the whole list rather than counting every source's postings.
+    keys = {source.id: normalize_company_name(source_search_name(source.name)) for source in sources}
+    logos = dict(
+        db.execute(
+            select(Company.company_key, Company.logo_key).where(
+                Company.company_key.in_({key for key in keys.values() if key}), Company.logo_key.is_not(None)
+            )
+        ).all()
+    )
+    result = []
+    for source in sources:
+        read = CrawlSourceRead.model_validate(source)
+        read.logo_url = logo_url_for(logos.get(keys[source.id]))
+        result.append(read)
+    return result
 
 
 @router.post("", response_model=CrawlSourceRead, status_code=status.HTTP_201_CREATED)
