@@ -246,6 +246,10 @@ class AtsType(StrEnum):
     # www.applitrack.com/{client}/onlineapp, listing and postings served as
     # a document.write() JavaScript feed (see adapters/applitrack.py).
     APPLITRACK = "applitrack"
+    # SchoolSpring (PowerSchool) — a multi-tenant K-12 job board at
+    # {district}.schoolspring.com, a SPA over a public REST API on
+    # api.schoolspring.com (see adapters/schoolspring.py).
+    SCHOOLSPRING = "schoolspring"
     # ApplicantPro (rebranded "isolved Talent Acquisition") — a multi-tenant
     # ATS at {tenant}.applicantpro.com, jobs server-rendered as plain
     # anchors on a listing endpoint, each detail page a full schema.org
