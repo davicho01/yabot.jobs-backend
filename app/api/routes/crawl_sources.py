@@ -17,7 +17,7 @@ from app.schemas.crawl_source import CrawlSourceCreate, CrawlSourceRead, CrawlSo
 from app.services import admin as admin_service
 from app.services.ats_adapters import detect_ats_source, detect_embedded_ats_source
 from app.services.company_logos import logo_url_for, source_search_name
-from app.services.company_names import MANUAL, apply_source_company
+from app.services.company_names import MANUAL
 from app.services.crawl_queue import enqueue_crawl, ensure_topic
 from app.services.job_dedup import normalize_company_name
 from app.services.job_queue import enqueue_source_scan
@@ -99,12 +99,11 @@ def update_crawl_source(
             detail="status can only be 'active' once board_url resolves to a supported ats_type.",
         )
 
-    renames = any(
-        field in data and data[field] != getattr(source, field) for field in ("name", "sub_brands", "is_official")
-    )
     if "name" in data or "sub_brands" in data:
         # An admin set the company's name: it's confirmed, and nothing
         # automatic (a placeholder promotion, the curation pass) changes it.
+        # It applies to jobs scanned from now on; existing jobs keep the name
+        # they were scanned with until their next rescan.
         data["name_source"] = MANUAL
     for field, value in data.items():
         setattr(source, field, value)
@@ -115,10 +114,6 @@ def update_crawl_source(
             status_code=status.HTTP_409_CONFLICT,
             detail="A crawl source for this board_url already exists.",
         ) from exc
-    if renames:
-        # Every job from this source shows the new name (or a sub-brand) at
-        # once; its static pages follow on the next page runs.
-        apply_source_company(db, source)
     return source
 
 

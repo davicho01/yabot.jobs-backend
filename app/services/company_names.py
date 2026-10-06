@@ -14,6 +14,11 @@ the company in a usable form (promotable_name) replaces the placeholder,
 once; until then its jobs get the cleaned page name (today's rules). An
 admin edit marks the name "manual", and nothing automatic changes it after.
 
+A name change of either kind applies to jobs scanned from then on: existing
+jobs keep the name they were scanned with until their next rescan. Only the
+deliberate bulk run (one_off/apply_source_company_names.py) renames
+existing jobs.
+
 Jobs with no crawl source, or from a source that isn't a company's own site
 (a job board), keep the cleaned page name.
 """
@@ -107,8 +112,9 @@ def promote_placeholder(db: Session, source: CrawlSource, page_name: str | None)
     """Replace a placeholder source name with the company the page names,
     once. The update only applies while the name is still a placeholder, so
     concurrent scan lanes for the same source can't race each other into
-    overwriting it. Returns whether this call promoted it; on success the
-    source's earlier jobs are renamed to match."""
+    overwriting it. Returns whether this call promoted it. Like any name
+    change, it applies to jobs scanned from now on — earlier jobs keep their
+    name until rescanned."""
     name = promotable_name(page_name)
     if source.name_source != PLACEHOLDER or not name:
         return False
@@ -123,14 +129,16 @@ def promote_placeholder(db: Session, source: CrawlSource, page_name: str | None)
         return False
     db.refresh(source)
     logger.info("Named crawl source %s %r from its job pages.", source.id, source.name)
-    apply_source_company(db, source)
     return True
 
 
 def apply_source_company(db: Session, source: CrawlSource) -> int:
-    """Recompute company_name/company_key for every job from `source` — after
-    its name or sub-brands change — and make sure each resulting company has
-    its Company row (domain, logo). Returns how many jobs changed."""
+    """Recompute company_name/company_key for every existing job from
+    `source` and make sure each resulting company has its Company row
+    (domain, logo). Returns how many jobs changed. Only for deliberate,
+    reviewed bulk runs (one_off/apply_source_company_names.py): an ordinary
+    name change — in admin, or a placeholder promotion — applies to jobs
+    scanned from then on, never to existing ones."""
     from app.services.company_logos import resolve_company  # avoids an import cycle via jobs
 
     rows = db.execute(

@@ -72,7 +72,7 @@ class TestUpsertAndPromotion:
         scan_db.commit()
         return scan_db.query(JobPosting).filter_by(url_id=url_row.id).one()
 
-    def test_a_placeholder_is_promoted_once_from_a_usable_page_and_its_earlier_jobs_follow(self, scan_db, make_source, make_url):
+    def test_a_placeholder_is_promoted_once_and_only_later_jobs_use_it(self, scan_db, make_source, make_url):
         source = make_source()
         source.name, source.name_source = "Jj", PLACEHOLDER
         scan_db.commit()
@@ -84,8 +84,11 @@ class TestUpsertAndPromotion:
 
         stored = scan_db.get(CrawlSource, source.id)
         assert (stored.name, stored.name_source) == ("Johnson & Johnson", AUTO)
+        later = self._scan(scan_db, make_url(source), "6084-Janssen Research & Development, LLC Legal Entity")
+        assert later.company_name == "Johnson & Johnson"
         scan_db.expire_all()
-        assert scan_db.get(JobPosting, earlier.id).company_name == "Johnson & Johnson"
+        # A name change applies to jobs scanned from now on; the earlier job keeps its name until rescanned.
+        assert scan_db.get(JobPosting, earlier.id).company_name != "Johnson & Johnson"
 
     def test_a_manual_name_is_never_changed_by_a_scan(self, scan_db, make_source, make_url):
         source = make_source()
@@ -123,7 +126,7 @@ class TestApplySourceCompany:
 
 
 class TestAdminUpdate:
-    def test_renaming_a_source_confirms_the_name_and_renames_its_jobs(self, scan_db, make_source, make_url, monkeypatch):
+    def test_renaming_a_source_confirms_the_name_for_future_jobs_only(self, scan_db, make_source, make_url, monkeypatch):
         from app.api.routes.crawl_sources import update_crawl_source
         from app.schemas.crawl_source import CrawlSourceRead, CrawlSourceUpdate
 
@@ -144,7 +147,12 @@ class TestAdminUpdate:
 
         read = CrawlSourceRead.model_validate(updated)
         assert (read.name, read.name_source, read.sub_brands) == ("Johnson & Johnson", MANUAL, ["Janssen"])
-        assert scan_db.get(JobPosting, posting.id).company_name == "Janssen"
+        assert scan_db.get(JobPosting, posting.id).company_name == "Jj"  # existing jobs keep their name
+
+        later = jobs._upsert_posting(
+            scan_db, make_url(source), ScanResult(success=True, title="Scientist", company_name="Janssen Biotech, Inc."), NOW
+        )
+        assert later.company_name == "Janssen"  # the next scan uses the new name and sub-brands
 
     def test_changing_only_the_crawl_settings_does_not_touch_the_name(self, scan_db, make_source):
         from app.api.routes.crawl_sources import update_crawl_source
