@@ -61,12 +61,16 @@ def test_hostnames_are_dropped_so_the_next_fallback_is_used(host):
 @pytest.mark.parametrize(
     "name",
     ["BambooHR", "Ashby", "Super.com", "Harness.io", "11x.ai", "Scale AI", "Netflix", "Starbucks Coffee Company",
-     "Estée Lauder Companies", "Careers", "Jobs", "Corporate Careers"],
+     "Estée Lauder Companies"],
 )
 def test_real_names_pass_through_unchanged(name):
-    # Odd-looking but real (BambooHR hires on its own Greenhouse board; Super.com
-    # is a brand), or careers wording with nothing else to keep.
+    # Odd-looking but real (BambooHR hires on its own Greenhouse board; Super.com is a brand).
     assert clean_company_name(name) == name
+
+
+@pytest.mark.parametrize("name", ["Careers", "Jobs", "Corporate Careers", "Candidate Experience site"])
+def test_nothing_but_careers_wording_cleans_to_none_so_the_next_source_wins(name):
+    assert clean_company_name(name) is None
 
 
 def test_empty_and_none():
@@ -95,9 +99,16 @@ class TestUpsert:
         scan_db.commit()
         return scan_db.query(JobPosting).filter_by(url_id=url_row.id).one()
 
-    def test_careers_wording_from_the_page_is_cleaned_and_keyed(self, scan_db, make_source, make_url):
-        posting = self._scan(scan_db, make_url(make_source()), "Careers at Marriott")
+    def test_careers_wording_from_the_page_is_cleaned_and_keyed_when_there_is_no_source(self, scan_db, make_url):
+        posting = self._scan(scan_db, make_url(None), "Careers at Marriott")
         assert (posting.company_name, posting.company_key) == ("Marriott", "marriott")
+
+    def test_a_confirmed_source_name_wins_over_the_page(self, scan_db, make_source, make_url):
+        source = make_source()
+        source.name = "Marriott"
+        scan_db.commit()
+        posting = self._scan(scan_db, make_url(source), "Careers at Marriott International")
+        assert (posting.company_name, posting.page_company_name) == ("Marriott", "Careers at Marriott International")
 
     def test_a_real_name_from_the_page_beats_a_hostname_named_source(self, scan_db, make_source, make_url):
         source = make_source()

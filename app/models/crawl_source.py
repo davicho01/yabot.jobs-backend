@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Float, Index, Integer, String, Text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, Index, Integer, String, Text, true
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -49,7 +50,22 @@ class CrawlSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
     )
 
+    # The company's official name: every job from this source shows it (or
+    # one of sub_brands) — the official company site is the authority on
+    # who owns a job. See app.services.company_names.
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Where `name` came from: "placeholder" (an unconfirmed slug/hostname
+    # label from crawl_sources._company_name — the first scan with a usable
+    # company name replaces it), "auto" (set from evidence) or "manual" (set
+    # by an admin; nothing automatic ever changes it).
+    name_source: Mapped[str] = mapped_column(String(12), default="auto", server_default="auto", nullable=False)
+    # Brands this source's jobs show instead of `name` when the job page
+    # names one ("HomeGoods", "Marshalls" on TJX's site).
+    sub_brands: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]", nullable=False)
+    # The company's own careers site (true) vs a job board or aggregator
+    # (false): official sources own their jobs, are crawled first, and their
+    # copy of a job wins over copies found elsewhere.
+    is_official: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true(), nullable=False)
     ats_type: Mapped[str | None] = mapped_column(String(20))
     board_url: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default=CrawlSourceStatus.ACTIVE, nullable=False)

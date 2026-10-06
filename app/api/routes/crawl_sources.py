@@ -17,6 +17,7 @@ from app.schemas.crawl_source import CrawlSourceCreate, CrawlSourceRead, CrawlSo
 from app.services import admin as admin_service
 from app.services.ats_adapters import detect_ats_source, detect_embedded_ats_source
 from app.services.company_logos import logo_url_for, source_search_name
+from app.services.company_names import MANUAL, apply_source_company
 from app.services.crawl_queue import enqueue_crawl, ensure_topic
 from app.services.job_dedup import normalize_company_name
 from app.services.job_queue import enqueue_source_scan
@@ -54,7 +55,8 @@ def create_crawl_source(payload: CrawlSourceCreate, db: Session = Depends(get_db
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
 
-    source = CrawlSource(name=payload.name, ats_type=ats_type, board_url=payload.board_url)
+    # An admin typed this name, so it's the company's confirmed official name.
+    source = CrawlSource(name=payload.name, ats_type=ats_type, board_url=payload.board_url, name_source=MANUAL)
     db.add(source)
     try:
         db.flush()
@@ -97,6 +99,13 @@ def update_crawl_source(
             detail="status can only be 'active' once board_url resolves to a supported ats_type.",
         )
 
+    renames = any(
+        field in data and data[field] != getattr(source, field) for field in ("name", "sub_brands", "is_official")
+    )
+    if "name" in data or "sub_brands" in data:
+        # An admin set the company's name: it's confirmed, and nothing
+        # automatic (a placeholder promotion, the curation pass) changes it.
+        data["name_source"] = MANUAL
     for field, value in data.items():
         setattr(source, field, value)
     try:
@@ -106,6 +115,10 @@ def update_crawl_source(
             status_code=status.HTTP_409_CONFLICT,
             detail="A crawl source for this board_url already exists.",
         ) from exc
+    if renames:
+        # Every job from this source shows the new name (or a sub-brand) at
+        # once; its static pages follow on the next page runs.
+        apply_source_company(db, source)
     return source
 
 

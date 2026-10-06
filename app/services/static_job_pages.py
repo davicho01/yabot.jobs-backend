@@ -269,7 +269,7 @@ def legacy_job_path(url_id: str) -> str:
 
 # ---------------------------------------------------------------------------
 # Manifest entries:
-# "<PAGE_VERSION>|<scanned_at>|<path>|<rendered_at>|<content_hash>"
+# "<PAGE_VERSION>|<scanned_at>|<path>|<rendered_at>|<content_hash>|<company_key>"
 # ---------------------------------------------------------------------------
 
 
@@ -280,9 +280,14 @@ class ManifestEntry:
     path: str
     rendered_at: str  # ISO; "" for entries written before it was recorded
     content_hash: str = ""  # content_hash(); "" for entries from before it
+    # The company the page was rendered under. A crawl source rename (or a
+    # new sub-brand) changes a job's company without a rescan, so this is
+    # what gets its page re-checked — see app.services.company_names. ""
+    # for entries from before it, which only a --full run refreshes.
+    company_key: str = ""
 
     def dump(self) -> str:
-        return f"{self.version}|{self.scanned}|{self.path}|{self.rendered_at}|{self.content_hash}"
+        return f"{self.version}|{self.scanned}|{self.path}|{self.rendered_at}|{self.content_hash}|{self.company_key}"
 
 
 def parse_entry(url_id: str, raw: str) -> ManifestEntry:
@@ -297,6 +302,7 @@ def parse_entry(url_id: str, raw: str) -> ManifestEntry:
         path=parts[2] if len(parts) > 2 and parts[2] else legacy_job_path(url_id),
         rendered_at=parts[3] if len(parts) > 3 else "",
         content_hash=parts[4] if len(parts) > 4 else "",
+        company_key=parts[5] if len(parts) > 5 else "",
     )
 
 
@@ -938,7 +944,17 @@ def generate_job_pages(
     # only if their own content changed (content_hash).
     new_ids = [i for i in index if i not in previous]
     removed_ids = [i for i in previous if i not in index]
-    check_ids = [i for i in index if i in previous and (full or previous[i].scanned != index[i].scanned)]
+    check_ids = [
+        i
+        for i in index
+        if i in previous
+        and (
+            full
+            or previous[i].scanned != index[i].scanned
+            # Renamed without a rescan: its source's name or sub-brands changed.
+            or (previous[i].company_key and previous[i].company_key != (index[i].company_key or ""))
+        )
+    ]
     deferred = 0
     if max_renders is not None and len(new_ids) > max_renders:
         deferred = len(new_ids) - max_renders
@@ -1006,7 +1022,7 @@ def generate_job_pages(
         list(pool.map(lambda kv: upload_html(kv[0], kv[1], CACHE_CONTROL), uploads))
         pages.update(
             (i, ManifestEntry(str(PAGE_VERSION), index[i].scanned, index[i].path, rendered_at,
-                              content_hash(loaded[i])).dump())
+                              content_hash(loaded[i]), index[i].company_key or "").dump())
             for i in ids
         )
 
@@ -1021,7 +1037,9 @@ def generate_job_pages(
             changed = []
             for i, job in loaded.items():
                 if not full and content_hash(job) == previous[i].content_hash:
-                    pages[i] = replace(previous[i], scanned=index[i].scanned).dump()
+                    pages[i] = replace(
+                        previous[i], scanned=index[i].scanned, company_key=index[i].company_key or previous[i].company_key
+                    ).dump()
                     result.rescanned_unchanged += 1
                 else:
                     changed.append(i)

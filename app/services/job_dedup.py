@@ -58,7 +58,18 @@ _ATS_HOST_RE = re.compile(
     r"dayforcehcm\.com|jobs|careers)$",
     re.IGNORECASE,
 )
-_CAREERS_HOST_RE = re.compile(r"^(?:careers?|jobs|apply)\.[\w-]+(?:\.[\w-]+)+$", re.IGNORECASE)
+_CAREERS_HOST_RE = re.compile(r"^(?:careers?|jobs|apply|hiring)\.[\w-]+(?:\.[\w-]+)+$", re.IGNORECASE)
+# Careers-portal wording — Oracle "Candidate Experience" site names and the like
+# ("JPMC Candidate Experience page", "Chubb External", "Molina Talent
+# Acquisition", "Employment Opportunities at BuzzFeed, Inc.", "6090-Johnson &
+# Johnson Services Inc. Legal Entity").
+_PORTAL_SUFFIX_RE = re.compile(
+    r"(?:^|\s*[-–—:]?\s+|\s*[-–—:]\s*)(?:the\s+)?"
+    r"(?:candidate\s+experience(?:\s+external)?\s+(?:site|page)|candidate\s+site|talent\s+acquisition|legal\s+entity|external)"
+    r"(?:\s*[-–—]\s*\w+)?\s*$",
+    re.IGNORECASE,
+)
+_PORTAL_PREFIX_RE = re.compile(r"^(?:employment|career)\s+opportunities\s+(?:at|with)\s+", re.IGNORECASE)
 
 
 def _is_careers_label(segment: str) -> bool:
@@ -69,7 +80,9 @@ def _is_careers_label(segment: str) -> bool:
 
 
 def _strip_careers_wording(segment: str) -> str:
-    return _CAREERS_SUFFIX_RE.sub("", _CAREERS_PREFIX_RE.sub("", segment)).strip(" -–—:|")
+    segment = _PORTAL_PREFIX_RE.sub("", _CAREERS_PREFIX_RE.sub("", segment))
+    segment = _PORTAL_SUFFIX_RE.sub("", segment)
+    return _CAREERS_SUFFIX_RE.sub("", segment).strip(" -–—:|")
 
 
 def clean_company_name(name: str | None) -> str | None:
@@ -78,8 +91,10 @@ def clean_company_name(name: str | None) -> str | None:
     "Corporate Careers | Trueblue" -> "Trueblue"), and None for a hostname
     standing in for a name ("starbucks.eightfold.ai"), so the caller falls
     back to its next source. Conservative on purpose — real names that look
-    odd ("BambooHR", "Super.com", "Scale AI") pass through unchanged, and a
-    name that would clean down to nothing is kept as it was.
+    odd ("BambooHR", "Super.com", "Scale AI") pass through unchanged. A name
+    that is nothing but careers/portal wording ("Candidate Experience site",
+    "Careers") cleans to None too, so the caller's next source (the crawl
+    source's brand) wins; the caller keeps the raw name as a last resort.
 
     With "|"-separated parts: when one of them is careers wording, the
     company is the last part ("Studio Associate | Careers | Lucid Motors",
@@ -102,7 +117,7 @@ def clean_company_name(name: str | None) -> str | None:
         cleaned = _strip_careers_wording(segment)
         if cleaned:
             return cleaned
-    return original
+    return None
 
 
 # How similar two (already company-matched) titles must be to count as the
@@ -135,6 +150,66 @@ _ENTITY_CODE_RE = re.compile(r"^(?:\d{2}-\d{7}|\d{3,})\s+")
 
 def has_entity_code(name: str | None) -> bool:
     return bool(name and _ENTITY_CODE_RE.match(name.strip()))
+
+
+# prefers_source_brand: the codes Workday/Oracle tenants put in front of the
+# hiring legal entity, beyond has_entity_code's narrow set — alphanumeric
+# ("B10 Wells Fargo Bank", "US0001 Sysco Jackson", "UW1861 University of
+# Washington", "469g Siemens…", "IN10 (FCRS = IN010) Novartis…"), hyphenated
+# ("6090-Johnson & Johnson…", "1072-28 Target India") and parenthesized
+# ("(0122) Sanofi…"). Three or more characters with a digit, so "3M" isn't one.
+_ALNUM_CODE_RE = re.compile(r"^\(?(?=[a-z]*\d)[a-z0-9]{3,8}\)?(?:\s*\([^)]*\))?\s*(?:[-–]\s*)?\s(?=\S)", re.IGNORECASE)
+_HYPHEN_CODE_RE = re.compile(r"^\d{3,}(?:-\d+)?(?:-|\s+)(?=[^\d\s])")
+_PAREN_CODE_RE = re.compile(r"^\(\s*\w+\s*\)\s+")
+# A bare two-digit code ("02 CACI, INC.-FEDERAL", "20 Saia Motor Freight Line
+# LLC") only with a legal-form suffix in the name, so brands that start with a
+# number ("84 Lumber", "99 Ranch Market", "24 Hour Fitness") never qualify.
+_TWO_DIGIT_CODE_RE = re.compile(r"^\d{2}\s*(?:-\s*)?\s(?=\S)")
+_LEGAL_FORM_RE = re.compile(
+    r"\b(?:llc|l\.l\.c|inc|incorporated|corp|corporation|company|co|l\.?p|ltd|limited|plc|pllc|p\.?c|p\.?a|n\.\s?a)\b\.?",
+    re.IGNORECASE,
+)
+_PORTAL_ANYWHERE_RE = re.compile(
+    r"candidate\s+experience|candidate\s+site|talent\s+acquisition|legal\s+entity|\sexternal\s*$|"
+    r"^(?:employment|career)\s+opportunities\s+(?:at|with)\s",
+    re.IGNORECASE,
+)
+
+
+def prefers_source_brand(name: str | None) -> bool:
+    """True when a scanned company name describes a legal entity (with an
+    internal code) or a careers portal rather than the brand — so
+    _upsert_posting shows the brand the crawl source is named after instead
+    ("B10 Wells Fargo Bank, N. A." -> "Wells Fargo", "Candidate Experience
+    site" -> "IU Health"), which also groups a company's subsidiaries under
+    one name. Broader than has_entity_code because getting it wrong only
+    swaps in that brand; has_entity_code/strip_entity_code stay narrow for
+    the logo name search (app.services.logo_dev)."""
+    if not name:
+        return False
+    text = " ".join(name.split())
+    if has_entity_code(text) or _PORTAL_ANYWHERE_RE.search(text):
+        return True
+    if _ALNUM_CODE_RE.match(text) or _HYPHEN_CODE_RE.match(text) or _PAREN_CODE_RE.match(text):
+        return True
+    return bool(_TWO_DIGIT_CODE_RE.match(text) and _LEGAL_FORM_RE.search(text))
+
+
+# A trailing "(…)" note on a crawl source's admin label ("CenterWell (Humana
+# primary care / home health)").
+_SOURCE_NOTE_RE = re.compile(r"\s*\([^)]*\)\s*$")
+
+
+def brand_from_source_name(name: str | None) -> str | None:
+    """The brand a crawl source's admin label names, for showing as a company:
+    None for a board slug ("lever/aledade") or a hostname
+    ("jpmc.fa.oraclecloud.com"), and without a trailing "(…)" note."""
+    if not name:
+        return None
+    bare = _SOURCE_NOTE_RE.sub("", name).strip()
+    if not bare or "/" in bare:
+        return None
+    return clean_company_name(bare)
 
 
 def strip_entity_code(name: str) -> str:

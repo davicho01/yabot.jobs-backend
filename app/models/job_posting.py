@@ -59,6 +59,10 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
 
     title: Mapped[str | None] = mapped_column(String(255))
     company_name: Mapped[str | None] = mapped_column(String(255))
+    # The raw company name the scanned page gave; company_name is derived
+    # from it and the crawl source (app.services.company_names), so a source
+    # rename or new sub-brand can recompute company_name without a rescan.
+    page_company_name: Mapped[str | None] = mapped_column(String(255))
     location: Mapped[str | None] = mapped_column(String(255))
     # The individual locations parsed out of `location` (which adapters join
     # with "; " when a posting lists several) — what location filtering and

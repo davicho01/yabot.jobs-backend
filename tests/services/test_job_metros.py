@@ -148,7 +148,7 @@ def test_upsert_stores_decoded_text_and_places_split_correctly(scan_db, make_sou
     scan_db.commit()
 
     assert posting.title == "Sales & Marketing Lead"
-    assert posting.company_name == "Bob Office & Warehouse"
+    assert posting.page_company_name == "Bob Office & Warehouse"
     assert posting.location == "1403 - Tacoma & Gordon, Canada; Austin, TX"
     assert posting.locations == ["1403 - Tacoma & Gordon, Canada", "Austin, TX"]
     # Only Austin counts: the Canadian entry no longer leaves a "Tacoma" fragment that files it under Washington.

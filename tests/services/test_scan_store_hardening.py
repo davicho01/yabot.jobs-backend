@@ -60,7 +60,7 @@ def test_upsert_stores_hostile_page_content_cleanly(scan_db, make_source, make_u
 
     posting = scan_db.query(JobPosting).filter_by(url_id=url_row.id).one()
     assert len(posting.title) == 255 and len(posting.location) == 255
-    assert posting.company_name == "Company"
+    assert posting.page_company_name == "Company"  # the raw page value, NUL-stripped
     assert posting.salary_currency == "USD"
     assert posting.description == "description"
     for stored in (posting.raw_source, posting.extracted_fields, posting.description, posting.title):
@@ -88,7 +88,9 @@ def test_upsert_falls_back_to_crawl_source_name_when_company_name_missing(scan_d
     assert posting.company_name == "Capital One"
 
 
-def test_upsert_prefers_scraped_company_name_over_crawl_source(scan_db, make_source, make_url):
+def test_upsert_shows_the_official_source_name_and_keeps_the_scraped_one(scan_db, make_source, make_url):
+    # The official company site owns the job (app.services.company_names): its
+    # crawl source's name wins; the page's own name is kept raw alongside.
     source = make_source()
     source.name = "Capital One"
     scan_db.commit()
@@ -99,7 +101,7 @@ def test_upsert_prefers_scraped_company_name_over_crawl_source(scan_db, make_sou
     scan_db.commit()
 
     posting = scan_db.query(JobPosting).filter_by(url_id=url_row.id).one()
-    assert posting.company_name == "Real Scraped Co"
+    assert (posting.company_name, posting.page_company_name) == ("Capital One", "Real Scraped Co")
 
 
 def test_upsert_leaves_company_name_null_for_user_submitted_url_without_source(scan_db, make_url):

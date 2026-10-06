@@ -278,6 +278,22 @@ class TestGenerate:
         assert b"Staff Engineer" in store.get(path)
         assert f"/{path}" in result.touched_paths
 
+    def test_a_company_rename_without_a_rescan_re_renders_the_page(self, db, make_job, store):
+        # A crawl source rename (app.services.company_names) changes the job's
+        # company but not its scanned_at.
+        row = make_job()
+        sjp.generate_job_pages(db, now=NOW)
+        assert sjp.generate_job_pages(db, now=NOW).updated == 0
+        posting = db.query(m.JobPosting).filter_by(url_id=row.id).one()
+        posting.company_name, posting.company_key = "Globex", "globex"
+        db.commit()
+
+        result = sjp.generate_job_pages(db, now=NOW)
+
+        assert result.updated == 1
+        assert b"Globex" in store.get(_path(store, row.id))
+        assert sjp.generate_job_pages(db, now=NOW).updated == 0  # recorded, not re-checked forever
+
     def test_a_closed_job_gets_the_gone_page_and_leaves_the_sitemap(self, db, make_job, store):
         row = make_job()
         sjp.generate_job_pages(db, now=NOW)

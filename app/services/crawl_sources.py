@@ -86,7 +86,10 @@ def _upsert(
     if existing is not None:
         return existing
 
-    source = CrawlSource(name=name, ats_type=ats_type, board_url=board_url, status=status)
+    # A discovered board's name is a generated label (a humanized slug or a
+    # hostname), not a confirmed company name: the first scan whose page
+    # names the company replaces it (see app.services.company_names).
+    source = CrawlSource(name=name, ats_type=ats_type, board_url=board_url, status=status, name_source="placeholder")
     try:
         with db.begin_nested():
             db.add(source)
