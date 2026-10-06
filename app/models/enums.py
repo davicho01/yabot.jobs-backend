@@ -242,6 +242,10 @@ class AtsType(StrEnum):
     # (jobs.canyonsdistrict.org/hr) — a server-side DataTables JSON feed
     # for the listing, plain-HTML detail pages (see adapters/canyons.py).
     CANYONS = "canyons"
+    # Frontline AppliTrack — a multi-tenant K-12/education ATS at
+    # www.applitrack.com/{client}/onlineapp, listing and postings served as
+    # a document.write() JavaScript feed (see adapters/applitrack.py).
+    APPLITRACK = "applitrack"
     # ApplicantPro (rebranded "isolved Talent Acquisition") — a multi-tenant
     # ATS at {tenant}.applicantpro.com, jobs server-rendered as plain
     # anchors on a listing endpoint, each detail page a full schema.org
