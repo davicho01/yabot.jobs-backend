@@ -13,26 +13,32 @@ page's path is decided once, when it's first published, and stored in the
 manifest — later renders reuse it even if a rescan changes the title, sector
 or posted date, so a URL never moves and nothing ever needs a redirect.
 
-Driven by generate_static_job_pages.py on the same schedule as the day pages,
-incrementally: a manifest (_meta/job-pages.json) records every live page —
-the posting's scanned_at when it was rendered, its path and when it was
-rendered — so each run only
+Driven by generate_static_job_pages.py on the same schedule as the day pages.
+A page is rendered once and then left alone: its related-job and hub links
+are a snapshot from that day (the hubs, day pages and sitemaps, rebuilt
+every run, are what stay current), and its logo is the company's stable
+alias (company_logos.logo_alias_key), which is updated in place. A manifest
+(_meta/job-pages.json) records every live page — the posting's scanned_at
+and a hash of the page's own content when it was rendered, its path and
+when — so each run only
 
-  - renders jobs that are new, or whose scanned_at moved (a rescan),
+  - renders jobs that are new, first, ahead of anything else,
+  - re-renders a rescanned job (its scanned_at moved) only if its own content
+    changed (content_hash); otherwise just records the new scanned_at,
   - replaces jobs that stopped qualifying (closed, flagged, now a duplicate,
     rescanned into a failure, past MAX_AGE_DAYS, deleted) with a noindex
     "no longer available" page. Deleting the object instead would fall through
     to CloudFront's SPA fallback: a soft 404 that redirects.
-  - spends any render capacity left over on re-rendering the pages rendered
-    longest ago, so their related-job links don't go stale forever,
 
-then rebuilds the hubs and the sitemaps. Bump PAGE_VERSION when the template
-or rendering changes: the next runs re-render every page, MAX_RENDERS_PER_RUN
-at a time (--full does it all at once).
+then rebuilds the hubs and the sitemaps. A template or rendering change
+reaches existing pages only through the backfill job (--full), run by hand
+when the change is worth it; PAGE_VERSION records which version rendered a
+page.
 """
 
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import logging
@@ -41,7 +47,7 @@ import unicodedata
 import uuid
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterable
@@ -56,7 +62,7 @@ from app.models.enums import EmploymentType, JobSector, ScanStatus, WorkplaceTyp
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
 from app.services import geo
-from app.services.company_logos import logo_url_for
+from app.services.company_logos import logo_alias_url, write_logo_alias
 from app.services.job_locations import split_locations
 from app.services.static_pages import (
     _TEMPLATE_ENV,
@@ -74,7 +80,9 @@ from app.services.static_pages import (
 
 logger = logging.getLogger("app.static_job_pages")
 
-PAGE_VERSION = 2
+# Which rendering a page came from. Informational: bumping it re-renders
+# nothing by itself (run the backfill job, --full, for that).
+PAGE_VERSION = 3
 MANIFEST_KEY = "_meta/job-pages.json"
 SITEMAP_INDEX_KEY = "sitemap-job-pages.xml"
 SITEMAP_SHARD_SIZE = 45_000  # under the sitemap protocol's 50,000-URL cap
@@ -88,17 +96,12 @@ RENDER_BATCH_SIZE = 500
 # Save the manifest every this many batches, so a run that dies partway
 # (the backfill, mostly) keeps what it already published.
 CHECKPOINT_EVERY_BATCHES = 10
-# Renders per scheduled run, so a big backlog (the first run, a source
-# rescan, a PAGE_VERSION bump) catches up over a few runs instead of
-# blowing the function's 540s timeout. Whatever's left over stays out of
-# the manifest and is simply picked up next run. --full (the backfill job,
-# with an hour to work) is uncapped.
+# Renders per scheduled run, a safety valve for a burst (the first run, a
+# source rescan that really changed thousands of postings). New pages go
+# first; whatever's left over is picked up next run. --full (the backfill
+# job, with hours to work) is uncapped.
 MAX_RENDERS_PER_RUN = 8_000
 UPLOAD_WORKERS = 16
-# Leftover render capacity re-renders pages last rendered longer ago than
-# this, so their related-job links don't go stale for good — without
-# re-rendering every page on every run.
-REFRESH_AFTER_DAYS = 7
 COUNTRY_SLUG = "us"
 # A job page's "More jobs at …" and "Similar jobs" lists.
 RELATED_LIMIT = 6
@@ -265,28 +268,35 @@ def legacy_job_path(url_id: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Manifest entries: "<PAGE_VERSION>|<scanned_at>|<path>|<rendered_at>"
+# Manifest entries:
+# "<PAGE_VERSION>|<scanned_at>|<path>|<rendered_at>|<content_hash>"
 # ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class ManifestEntry:
-    version_key: str  # "<PAGE_VERSION>|<scanned_at>" — a change means re-render
+    version: str  # the PAGE_VERSION that rendered it
+    scanned: str  # the posting's scanned_at (ISO) when it was last checked
     path: str
     rendered_at: str  # ISO; "" for entries written before it was recorded
+    content_hash: str = ""  # content_hash(); "" for entries from before it
 
     def dump(self) -> str:
-        return f"{self.version_key}|{self.path}|{self.rendered_at}"
+        return f"{self.version}|{self.scanned}|{self.path}|{self.rendered_at}|{self.content_hash}"
 
 
 def parse_entry(url_id: str, raw: str) -> ManifestEntry:
-    """Tolerates the older two-part "<version>|<scanned_at>" entries, whose
-    pages all live at /job/<url_id>."""
+    """Tolerates the older entries: two-part "<version>|<scanned_at>" ones,
+    whose pages all live at /job/<url_id>, and four-part ones without a
+    content hash, whose scanned_at may carry a "~<logo hash>" suffix from
+    when a new logo meant a re-render."""
     parts = raw.split("|")
     return ManifestEntry(
-        version_key="|".join(parts[:2]),
+        version=parts[0],
+        scanned=(parts[1] if len(parts) > 1 else "").split("~", 1)[0],
         path=parts[2] if len(parts) > 2 and parts[2] else legacy_job_path(url_id),
         rendered_at=parts[3] if len(parts) > 3 else "",
+        content_hash=parts[4] if len(parts) > 4 else "",
     )
 
 
@@ -378,7 +388,7 @@ def load_link_index(db: Session, now: datetime) -> dict[str, LinkJob]:
             JobPostingUrl.id, JobPostingUrl.domain, JobPostingUrl.created_at,
             JobPosting.title, JobPosting.company_name, JobPosting.company_key, JobPosting.title_key,
             JobPosting.sector, JobPosting.metros, JobPosting.location, JobPosting.workplace_type,
-            JobPosting.posted_at, JobPosting.scanned_at, JobPosting.company_logo_key,
+            JobPosting.posted_at, JobPosting.scanned_at,
         )
         .join(JobPosting, JobPosting.url_id == JobPostingUrl.id)
         .where(_eligible_filter(now))
@@ -387,12 +397,6 @@ def load_link_index(db: Session, now: datetime) -> dict[str, LinkJob]:
     for row in _execute_with_retry(db, stmt):
         key = str(row.id)
         scanned = _iso(row.scanned_at or row.created_at)
-        if row.company_logo_key:
-            # The company's logo too, so a newly fetched or changed logo (see
-            # app.services.company_logos) re-renders its pages. Appended with
-            # "~" (not "|", the manifest's separator), after the date that
-            # sitemap lastmod reads from the front.
-            scanned = f"{scanned}~{row.company_logo_key.rsplit('-', 1)[-1].removesuffix('.png')}"
         # A URL with several posting rows: the newest scan wins, same as
         # to_job_detail's latest_posting.
         if key in index and index[key].scanned >= scanned:
@@ -450,11 +454,21 @@ class JobPage:
     salary_currency: str | None = None
     valid_through: str | None = None  # the employer's own, from its JSON-LD
     company_domain: str | None = None
-    company_logo_key: str | None = None
+    company_key: str | None = None
+    company_logo_key: str | None = None  # the stored logo, if it has one yet
 
     @property
     def company_logo_url(self) -> str | None:
-        return logo_url_for(self.company_logo_key)
+        """The company's stable alias — its logo, or the placeholder until
+        it has one — so a page rendered once still shows a logo that arrives
+        later."""
+        return logo_alias_url(self.company_key)
+
+    @property
+    def company_logo_ld_url(self) -> str | None:
+        """For the JSON-LD hiringOrganization: only a real logo, never the
+        placeholder (still the alias URL, so a changed logo needs no re-render)."""
+        return self.company_logo_url if self.company_logo_key else None
 
     @property
     def company_display(self) -> str:
@@ -509,7 +523,7 @@ def load_job_pages(db: Session, url_ids: Iterable[str]) -> dict[str, JobPage]:
             JobPosting.workplace_type, JobPosting.employment_type, JobPosting.sector, JobPosting.description,
             JobPosting.posted_at, JobPosting.salary_min, JobPosting.salary_max, JobPosting.salary_currency,
             JobPosting.extracted_fields["validThrough"].as_string().label("valid_through"),
-            JobPosting.company_domain, JobPosting.company_logo_key,
+            JobPosting.company_domain, JobPosting.company_key, JobPosting.company_logo_key,
         )
         .join(JobPosting, JobPosting.url_id == JobPostingUrl.id)
         .where(JobPostingUrl.id.in_([uuid.UUID(i) for i in ids]))
@@ -537,9 +551,23 @@ def load_job_pages(db: Session, url_ids: Iterable[str]) -> dict[str, JobPage]:
             salary_currency=row.salary_currency,
             valid_through=row.valid_through,
             company_domain=row.company_domain,
+            company_key=row.company_key,
             company_logo_key=row.company_logo_key,
         )
     return pages
+
+
+def content_hash(job: JobPage) -> str:
+    """A hash of what the page shows about the job itself, so a rescan that
+    changed none of it re-renders nothing. Leaves out the logo (served from
+    the company's stable alias) and the related/hub links (a snapshot)."""
+    fields = [
+        job.title, job.company_name, job.domain, job.location, list(job.locations), job.workplace_type,
+        job.employment_type, job.sector, job.description, job.posted_at.isoformat() if job.posted_at else None,
+        job.salary_min, job.salary_max, job.salary_currency, job.valid_through, job.company_domain,
+        job.company_key,
+    ]
+    return hashlib.sha256(json.dumps(fields, default=str).encode()).hexdigest()[:16]
 
 
 def _execute_with_retry(db: Session, stmt):
@@ -619,8 +647,8 @@ def _hiring_org(job: JobPage) -> dict:
     org: dict = {"@type": "Organization", "name": job.company_display}
     if job.company_domain:
         org["sameAs"] = f"https://{job.company_domain}"
-    if job.company_logo_url:
-        org["logo"] = job.company_logo_url
+    if job.company_logo_ld_url:
+        org["logo"] = job.company_logo_ld_url
     return org
 
 
@@ -847,7 +875,7 @@ def build_job_sitemaps(pages: dict[str, str], hub_paths: Iterable[str] = ()) -> 
     job_urls = []
     for url_id, raw in pages.items():
         entry = parse_entry(url_id, raw)
-        job_urls.append((entry.path, entry.version_key.rsplit("|", 1)[-1][:10]))
+        job_urls.append((entry.path, entry.scanned[:10] or None))
     out = build_sitemaps("sitemap-job-pages", job_urls)
     hubs = sorted(hub_paths)
     if hubs:
@@ -871,8 +899,8 @@ def build_job_sitemaps(pages: dict[str, str], hub_paths: Iterable[str] = ()) -> 
 @dataclass
 class JobPagesResult:
     published: int = 0  # new pages
-    updated: int = 0  # re-rendered: rescanned, or a full/version re-render
-    refreshed: int = 0  # re-rendered with leftover capacity so links stay fresh
+    updated: int = 0  # re-rendered: a rescan changed the content, or --full
+    rescanned_unchanged: int = 0  # rescanned, same content: only the manifest moved
     removed: int = 0  # replaced with the "no longer available" page
     unchanged: int = 0
     deferred: int = 0  # over this run's render cap; picked up next run
@@ -899,62 +927,44 @@ def generate_job_pages(
     rendered_at = now.isoformat()
     previous = {} if dry_run else {i: parse_entry(i, raw) for i, raw in read_job_manifest()["pages"].items()}
     index = load_link_index(db, now)
-    # A rescan (scanned_at moved) or a PAGE_VERSION bump changes the key.
-    current = {i: f"{PAGE_VERSION}|{job.scanned}" for i, job in index.items()}
     for i, job in index.items():
         job.path = previous[i].path if i in previous else new_job_path(job)
     if full:
         max_renders = None
 
-    # Already-published pages first (rescanned or stale-versioned: a crawler
-    # may be reading the outdated copy right now), then brand-new ones.
-    changed_ids = [i for i in current if i in previous and (full or previous[i].version_key != current[i])]
-    new_ids = [i for i in current if i not in previous]
-    removed_ids = [i for i in previous if i not in current]
+    # New pages first: a job without a page is invisible, while an outdated
+    # page only shows yesterday's version of itself. Already-published pages
+    # are only looked at when rescanned (or with --full), and re-rendered
+    # only if their own content changed (content_hash).
+    new_ids = [i for i in index if i not in previous]
+    removed_ids = [i for i in previous if i not in index]
+    check_ids = [i for i in index if i in previous and (full or previous[i].scanned != index[i].scanned)]
     deferred = 0
-    if max_renders is not None and len(changed_ids) + len(new_ids) > max_renders:
-        deferred = len(changed_ids) + len(new_ids) - max_renders
-        changed_ids = changed_ids[:max_renders]
-        new_ids = new_ids[: max_renders - len(changed_ids)]
-    # Leftover capacity re-renders the pages rendered longest ago (past
-    # REFRESH_AFTER_DAYS), so their related-job links catch up over time.
-    refresh_ids: list[str] = []
-    if max_renders is not None and not deferred:
-        room = max_renders - len(changed_ids) - len(new_ids)
-        touched = set(changed_ids)
-        refresh_before = (now - timedelta(days=REFRESH_AFTER_DAYS)).isoformat()
-        stale = sorted(
-            (previous[i].rendered_at, i)
-            for i in current
-            if i in previous and i not in touched and previous[i].rendered_at < refresh_before
-        )
-        refresh_ids = [i for _, i in stale[:room]]
+    if max_renders is not None and len(new_ids) > max_renders:
+        deferred = len(new_ids) - max_renders
+        new_ids = new_ids[:max_renders]
+    room = None if max_renders is None else max_renders - len(new_ids)
 
     # What will be live once this run is done: everything already published
     # plus this run's new pages. Deferred new jobs aren't linked from
     # anywhere until they're published.
-    live_ids = (set(previous) & set(current)) | set(new_ids)
+    live_ids = (set(previous) & set(index)) | set(new_ids)
     live = [index[i] for i in live_ids]
     hub_plan = static_hub_pages.plan_hubs(live)
 
     result = JobPagesResult(
         published=len(new_ids),
-        updated=len(changed_ids),
-        refreshed=len(refresh_ids),
         removed=len(removed_ids),
-        unchanged=len(current) - len(new_ids) - len(changed_ids) - len(refresh_ids) - deferred,
-        deferred=deferred,
         hubs=len(hub_plan.pages),
         job_paths={i: index[i].path for i in live_ids},
         country_links=hub_plan.country_links(),
     )
     logger.info(
-        "Job pages: %d new, %d to re-render, %d to refresh, %d to remove, %d unchanged, %d deferred to the next "
-        "run; %d hub page(s)%s.",
-        result.published, result.updated, result.refreshed, result.removed, result.unchanged, deferred,
-        result.hubs, " (dry run)" if dry_run else "",
+        "Job pages: %d new, %d rescanned to check, %d to remove, %d new deferred to the next run; %d hub page(s)%s.",
+        len(new_ids), len(check_ids), len(removed_ids), deferred, result.hubs, " (dry run)" if dry_run else "",
     )
     if dry_run:
+        result.deferred = deferred
         return result
 
     related = RelatedIndex(live)
@@ -972,29 +982,55 @@ def generate_job_pages(
     # every CHECKPOINT_EVERY_BATCHES. It starts as the old manifest, gains
     # each rendered page's new entry, and drops each page replaced by the
     # "no longer available" one. What's left untouched is the unchanged
-    # pages plus deferred changed ones (old entry, so retried next run);
+    # pages plus deferred changed ones (old entry, so rechecked next run);
     # deferred new jobs are never added, so they stay out of the sitemap.
     pages = {i: entry.dump() for i, entry in previous.items()}
     batches_done = 0
+    placeholders: set[str] = set()  # companies whose placeholder alias this run already wrote
+    rerendered: list[str] = []
 
     def checkpoint(force: bool = False) -> None:
         if force or batches_done % CHECKPOINT_EVERY_BATCHES == 0:
             write_json(MANIFEST_KEY, {"pages": pages})
 
+    def publish(pool, ids: list[str], loaded: dict[str, JobPage]) -> None:
+        # A company with no logo yet still needs its alias to exist, as the
+        # placeholder, before a page points at it.
+        missing = {
+            loaded[i].company_key for i in ids
+            if loaded[i].company_key and not loaded[i].company_logo_key and loaded[i].company_key not in placeholders
+        }
+        placeholders.update(missing)
+        list(pool.map(lambda key: write_logo_alias(key, None), missing))
+        uploads = [(index[i].path, render_job_page(loaded[i], index[i].path, links_for(index[i]))) for i in ids]
+        list(pool.map(lambda kv: upload_html(kv[0], kv[1], CACHE_CONTROL), uploads))
+        pages.update(
+            (i, ManifestEntry(str(PAGE_VERSION), index[i].scanned, index[i].path, rendered_at,
+                              content_hash(loaded[i])).dump())
+            for i in ids
+        )
+
     with ThreadPoolExecutor(max_workers=UPLOAD_WORKERS) as pool:
-        to_render = changed_ids + new_ids + refresh_ids
-        for start in range(0, len(to_render), RENDER_BATCH_SIZE):
-            batch = to_render[start : start + RENDER_BATCH_SIZE]
-            loaded = load_job_pages(db, batch)
-            uploads = [
-                (index[i].path, render_job_page(loaded[i], index[i].path, links_for(index[i])))
-                for i in batch
-                if i in loaded
-            ]
-            list(pool.map(lambda kv: upload_html(kv[0], kv[1], CACHE_CONTROL), uploads))
-            pages.update(
-                (i, ManifestEntry(current[i], index[i].path, rendered_at).dump()) for i in batch if i in loaded
-            )
+        for start in range(0, len(new_ids), RENDER_BATCH_SIZE):
+            loaded = load_job_pages(db, new_ids[start : start + RENDER_BATCH_SIZE])
+            publish(pool, list(loaded), loaded)
+            batches_done += 1
+            checkpoint()
+        for start in range(0, len(check_ids), RENDER_BATCH_SIZE):
+            loaded = load_job_pages(db, check_ids[start : start + RENDER_BATCH_SIZE])
+            changed = []
+            for i, job in loaded.items():
+                if not full and content_hash(job) == previous[i].content_hash:
+                    pages[i] = replace(previous[i], scanned=index[i].scanned).dump()
+                    result.rescanned_unchanged += 1
+                else:
+                    changed.append(i)
+            if room is not None:
+                deferred += max(0, len(changed) - room)
+                changed = changed[:room]
+                room -= len(changed)
+            publish(pool, changed, loaded)
+            rerendered.extend(changed)
             batches_done += 1
             checkpoint()
         for start in range(0, len(removed_ids), RENDER_BATCH_SIZE):
@@ -1010,11 +1046,15 @@ def generate_job_pages(
         checkpoint(force=True)
         hub_paths = static_hub_pages.publish_hubs(hub_plan, pool)
 
+    result.updated = len(rerendered)
+    result.deferred = deferred
+    result.unchanged = len(index) - result.published - result.updated - deferred
+
     for key, xml in build_job_sitemaps(pages, hub_paths).items():
         upload_xml(key, xml)
         result.touched_paths.append(f"/{key}")
     # Hubs are rewritten every run; they all sit under /jobs/, which
     # collapse_invalidation_paths turns into one wildcard.
-    result.touched_paths.extend(f"/{previous[i].path}" for i in changed_ids + refresh_ids + removed_ids)
+    result.touched_paths.extend(f"/{previous[i].path}" for i in rerendered + removed_ids)
     result.touched_paths.extend(f"/{path}" for path in hub_paths)
     return result

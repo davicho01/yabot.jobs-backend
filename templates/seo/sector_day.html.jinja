@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
   {% include "_base_style.html.jinja" %}
-  {% include "_analytics.html.jinja" %}
+  {% with page_type = "day" %}{% include "_analytics.html.jinja" %}{% endwith %}
   <script type="application/ld+json">{{ job_ld_json|safe }}</script>
 </head>
 <body>
@@ -37,7 +37,7 @@
     <ul class="job-list">
     {% for job in jobs %}
       <li>
-        <div class="job-title"><a href="{{ base_url }}/{{ job.href_path }}">{{ job.title }}</a></div>
+        <div class="job-title"><a href="{{ base_url }}/{{ job.href_path }}" data-track="day_job">{{ job.title }}</a></div>
         <div class="job-meta">
           {% if job.company_logo_url %}<img class="company-logo-sm" src="{{ job.company_logo_url }}" alt="" width="18" height="18" loading="lazy" />{% endif %}
           {{ job.company_name or "Unknown company" }}
@@ -55,12 +55,12 @@
     </div>
     <p class="sector-link-back"><a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}">Browse all {{ sector_name }} days &rarr;</a></p>
 
-    {% if jobs | selectattr("company_logo_url") | list %}<p class="logo-credit">Logos by <a href="https://logo.dev" rel="noopener">Logo.dev</a></p>{% endif %}
     <footer class="other-sectors">
       Other sectors:
       {% for name, slug in other_sectors %}<a href="{{ base_url }}/jobs/{{ country_slug }}/{{ slug }}">{{ name }}</a>{% if not loop.last %} &middot; {% endif %}{% endfor %}
     </footer>
   </div>
   </main>
+  {% include "_footer.html.jinja" %}
 </body>
 </html>

@@ -2,7 +2,7 @@
 <ul class="job-list">
   {% for j in jobs %}
   <li>
-    <div class="job-title"><a href="{{ base_url }}/{{ j.path }}">{{ j.title }}</a></div>
+    <div class="job-title"><a href="{{ base_url }}/{{ j.path }}" data-track="{{ track | default('job') }}">{{ j.title }}</a></div>
     <div class="job-meta">{{ j.company_display }}{% if j.location %} &middot; {{ j.location }}{% endif %} &middot; Posted {{ j.day.strftime('%b %-d, %Y') }}</div>
   </li>
   {% endfor %}

@@ -10,8 +10,9 @@ indexing are left for the scheduled runs. Safe to re-run or stop at any
 time. Needs LOGO_DEV_SECRET_KEY and SEO_PAGES_BUCKET (or
 SEO_PAGES_OUTPUT_DIR locally).
 
-Pages pick the new logos up on the next scheduled static-pages run (each
-job page's version includes its logo).
+Job pages show a new logo as soon as it's stored (they load the company's
+stable alias, see company_logos.logo_alias_key); hubs and day pages pick it
+up on the next scheduled static-pages run.
 
 Usage:
     python -m one_off.sync_all_logos [--max-minutes 170]

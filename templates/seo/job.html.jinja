@@ -18,7 +18,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
   {% include "_base_style.html.jinja" %}
   {% include "_job_style.html.jinja" %}
-  {% include "_analytics.html.jinja" %}
+  {% with page_type = "job" %}{% include "_analytics.html.jinja" %}{% endwith %}
   <script type="application/ld+json">{{ job_ld_json|safe }}</script>
 </head>
 <body>
@@ -31,8 +31,8 @@
     <p class="meta-line">{{ job.company_display }}{% if job.location %} &middot; {{ job.location }}{% endif %}</p>
     <p class="job-lead">{{ lead }}</p>
     <div class="job-cta">
-      <a class="btn btn--accent" href="{{ base_url }}/jobs/{{ job.url_id }}">Apply on Yabot Jobs</a>
-      <a class="btn btn--line" href="{{ base_url }}/jobs/{{ job.url_id }}">Save this job</a>
+      <a class="btn btn--accent" href="{{ base_url }}/jobs/{{ job.url_id }}" data-track="apply">Apply on Yabot Jobs</a>
+      <a class="btn btn--line" href="{{ base_url }}/jobs/{{ job.url_id }}" data-track="save">Save this job</a>
       <span>Sign in free to get the application link, save the job, or tailor your resume to it.</span>
     </div>
 
@@ -51,15 +51,15 @@
     {% if links.same_company %}
     <section class="job-related" aria-labelledby="company-h">
       <h2 id="company-h">More jobs at {{ job.company_display }}</h2>
-      {% with jobs=links.same_company %}{% include "_job_links.html.jinja" %}{% endwith %}
-      {% if links.company_hub %}<p class="sector-link-back"><a href="{{ base_url }}/{{ links.company_hub }}">All jobs at {{ job.company_display }} &rarr;</a></p>{% endif %}
+      {% with jobs=links.same_company, track="company_job" %}{% include "_job_links.html.jinja" %}{% endwith %}
+      {% if links.company_hub %}<p class="sector-link-back"><a href="{{ base_url }}/{{ links.company_hub }}" data-track="company_hub">All jobs at {{ job.company_display }} &rarr;</a></p>{% endif %}
     </section>
     {% endif %}
 
     {% if links.similar %}
     <section class="job-related" aria-labelledby="similar-h">
       <h2 id="similar-h">Similar jobs</h2>
-      {% with jobs=links.similar %}{% include "_job_links.html.jinja" %}{% endwith %}
+      {% with jobs=links.similar, track="similar_job" %}{% include "_job_links.html.jinja" %}{% endwith %}
     </section>
     {% endif %}
 
@@ -67,13 +67,13 @@
     <nav class="job-more" aria-label="More jobs">
       <h2>Browse more jobs</h2>
       <ul>
-        {% for label, path in links.location_hubs %}<li><a href="{{ base_url }}/{{ path }}">{{ label }}</a></li>{% endfor %}
-        {% if sector_link %}<li><a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_link[0] }}">{{ sector_link[1] }} jobs in {{ country_name }}</a></li>{% endif %}
+        {% for label, path in links.location_hubs %}<li><a href="{{ base_url }}/{{ path }}" data-track="location_hub">{{ label }}</a></li>{% endfor %}
+        {% if sector_link %}<li><a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_link[0] }}" data-track="sector">{{ sector_link[1] }} jobs in {{ country_name }}</a></li>{% endif %}
       </ul>
     </nav>
     {% endif %}
-    {% if job.company_logo_url %}<p class="logo-credit">Logos by <a href="https://logo.dev" rel="noopener">Logo.dev</a></p>{% endif %}
   </div>
   </main>
+  {% include "_footer.html.jinja" %}
 </body>
 </html>

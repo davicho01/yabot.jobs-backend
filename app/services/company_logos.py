@@ -29,16 +29,19 @@ served from our own domain, so showing one costs no third-party request.
 from __future__ import annotations
 
 import hashlib
+import io
 import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from typing import Any
 from urllib.parse import urlsplit
 
 import tldextract
+from PIL import Image, ImageDraw
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -170,7 +173,9 @@ def logo_url_for(logo_key: str | None) -> str | None:
 def _clear_automatic_logo(company: Company) -> None:
     """The company's domain changed: an automatic logo belonged to the old
     one, so drop it and let the next sync fetch the new domain's. A pinned
-    (admin-set) logo stays — it never depended on the domain."""
+    (admin-set) logo stays — it never depended on the domain. Runs at scan
+    time, so it leaves the stable alias (logo_alias_key) alone: the company
+    is now never-tried, so the next sync rewrites it either way."""
     if company.logo_origin in PINNED_ORIGINS:
         return
     company.logo_key = company.logo_origin = company.logo_etag = company.logo_source_url = None
@@ -312,6 +317,15 @@ LOGO_SYNC_WORKERS = 4
 LOGO_SYNC_BUDGET_SECONDS = 120
 # Content-addressed keys never change in place, so caches can keep them forever.
 LOGO_CACHE_CONTROL = "public, max-age=31536000, immutable"
+# Each company's stable alias: the logo, or a placeholder until there is one,
+# overwritten in place. Static job pages are rendered once and point here,
+# so a logo arriving later needs no re-render — just this one object and a
+# /logos/c/* invalidation (generate_static_job_pages.py). A day in browser
+# caches, which nothing can invalidate.
+LOGO_ALIAS_PREFIX = "logos/c/"
+LOGO_ALIAS_CACHE_CONTROL = "public, max-age=86400"
+_PLACEHOLDER_BACKGROUND = (232, 236, 241, 255)
+_PLACEHOLDER_MARK = (154, 165, 180, 255)
 
 
 def _slug(company_key: str) -> str:
@@ -320,12 +334,49 @@ def _slug(company_key: str) -> str:
 
 def store_logo(company: Company, png: bytes, *, store: PageStore | None = None) -> str:
     """Store a normalized logo as our own copy and point the company at it.
-    The key is content-addressed, so the same image is never re-uploaded."""
+    The key is content-addressed, so the same image is never re-uploaded.
+    The company's stable alias always gets it too."""
+    store = store or get_page_store()
     key = f"logos/{_slug(company.company_key)}-{hashlib.sha256(png).hexdigest()[:8]}.png"
     if key != company.logo_key:
-        (store or get_page_store()).put(key, png, "image/png", cache_control=LOGO_CACHE_CONTROL)
+        store.put(key, png, "image/png", cache_control=LOGO_CACHE_CONTROL)
     company.logo_key = key
+    write_logo_alias(company.company_key, png, store=store)
     return key
+
+
+def logo_alias_key(company_key: str) -> str:
+    return f"{LOGO_ALIAS_PREFIX}{_slug(company_key)}.png"
+
+
+def logo_alias_url(company_key: str | None) -> str | None:
+    return logo_url_for(logo_alias_key(company_key)) if company_key else None
+
+
+@lru_cache(maxsize=1)
+def placeholder_logo_png() -> bytes:
+    """A neutral building mark on a light tile, the size of a stored logo."""
+    size = logo_images.OUTPUT_SIZE
+    image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((0, 0, size - 1, size - 1), radius=size // 6, fill=_PLACEHOLDER_BACKGROUND)
+    draw.rectangle((40, 30, 88, 100), fill=_PLACEHOLDER_MARK)  # the building
+    for row in range(3):  # its windows
+        for col in range(2):
+            x, y = 50 + col * 18, 40 + row * 18
+            draw.rectangle((x, y, x + 9, y + 9), fill=_PLACEHOLDER_BACKGROUND)
+    out = io.BytesIO()
+    image.save(out, format="PNG", optimize=True)
+    return out.getvalue()
+
+
+def write_logo_alias(company_key: str, png: bytes | None, *, store: PageStore | None = None) -> None:
+    """Point the company's stable alias at its logo, or at the placeholder
+    when it has none. Overwriting is always safe: the alias mirrors the
+    database, so writing it twice writes the same thing."""
+    (store or get_page_store()).put(
+        logo_alias_key(company_key), png or placeholder_logo_png(), "image/png", cache_control=LOGO_ALIAS_CACHE_CONTROL
+    )
 
 
 def companies_needing_logos(
@@ -427,6 +478,7 @@ def sync_company_logos(
             company.logo_source_url = f"https://logo.dev/{company.logo_domain}"
         elif result.status == logo_dev.STATUS_NONE:
             company.logo_key = company.logo_origin = company.logo_etag = company.logo_source_url = None
+            write_logo_alias(company.company_key, None, store=store)
         # STATUS_ERROR keeps whatever logo was there; STATUS_UNCHANGED too.
     db.commit()
     logger.info("Company logos: %s", ", ".join(f"{n} {status}" for status, n in sorted(counts.items())))
@@ -524,4 +576,5 @@ def clear_manual_logo(db: Session, company: Company) -> None:
     """Back to automatic: drop the pinned logo; the next sync fetches one."""
     company.logo_key = company.logo_origin = company.logo_etag = company.logo_source_url = None
     company.logo_status = company.logo_checked_at = company.logo_domain = None
+    write_logo_alias(company.company_key, None)
     db.flush()

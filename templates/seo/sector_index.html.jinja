@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
   {% include "_base_style.html.jinja" %}
-  {% include "_analytics.html.jinja" %}
+  {% with page_type = "sector_index" %}{% include "_analytics.html.jinja" %}{% endwith %}
 </head>
 <body>
   {% include "_header.html.jinja" %}
@@ -44,5 +44,6 @@
     {% endfor %}
   </div>
   </main>
+  {% include "_footer.html.jinja" %}
 </body>
 </html>

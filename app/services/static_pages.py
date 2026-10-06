@@ -74,12 +74,18 @@ SECTOR_SLUGS: dict[JobSector, str] = {sector: slug for sector, slug, _ in _SECTO
 SECTOR_DISPLAY_NAMES: dict[JobSector, str] = {sector: name for sector, _, name in _SECTOR_INFO}
 SECTORS_BY_SLUG: dict[str, JobSector] = {slug: sector for sector, slug, _ in _SECTOR_INFO}
 
+_TEMPLATES_DIR = Path(__file__).resolve().parent.parent.parent / "templates" / "seo"
 _TEMPLATE_ENV = Environment(
-    loader=FileSystemLoader(str(Path(__file__).resolve().parent.parent.parent / "templates" / "seo")),
+    loader=FileSystemLoader(str(_TEMPLATES_DIR)),
     autoescape=select_autoescape(["html.jinja"]),
     trim_blocks=True,
     lstrip_blocks=True,
 )
+# The one analytics script every SEO page loads (see publish_assets). Under
+# jobs/, which the frontend's deploy already leaves alone in the bucket.
+ANALYTICS_SCRIPT_KEY = "jobs/_assets/analytics.js"
+ASSET_CACHE_CONTROL = "public, max-age=3600"
+_TEMPLATE_ENV.globals["analytics_script_key"] = ANALYTICS_SCRIPT_KEY
 
 
 def day_bounds_utc(local_day: date) -> tuple[datetime, datetime]:
@@ -387,6 +393,15 @@ def upload_html(key: str, html_content: str, cache_control: str | None = None) -
 
 def upload_xml(key: str, xml_content: str) -> None:
     get_page_store().put(key, xml_content, "application/xml")
+
+
+def publish_assets() -> list[str]:
+    """Upload the shared scripts every page loads, and return their paths to
+    invalidate. Every run, so a change to one ships with the next run
+    without touching any page."""
+    body = (_TEMPLATES_DIR / "assets" / "analytics.js").read_text()
+    get_page_store().put(ANALYTICS_SCRIPT_KEY, body, "text/javascript; charset=utf-8", ASSET_CACHE_CONTROL)
+    return [f"/{ANALYTICS_SCRIPT_KEY}"]
 
 
 def read_json(key: str) -> dict | None:

@@ -174,7 +174,7 @@ class TestRendering:
         page = sjp.render_job_page(sjp.load_job_pages(db, [str(row.id)])[str(row.id)])
         assert "<h1>Software Engineer</h1>" in page
         assert f'<link rel="canonical" href="https://yabot.jobs/job/{row.id}" />' in page
-        assert f'href="https://yabot.jobs/jobs/{row.id}">Apply on Yabot Jobs</a>' in page
+        assert f'href="https://yabot.jobs/jobs/{row.id}" data-track="apply">Apply on Yabot Jobs</a>' in page
         assert "<strong>things</strong>" in page
         assert "https://example.com/jobs/" not in page  # the apply URL stays behind login
 
@@ -219,7 +219,9 @@ class TestRendering:
 class TestSitemaps:
     def test_shards_and_index(self, monkeypatch):
         monkeypatch.setattr(sjp, "SITEMAP_SHARD_SIZE", 2)
-        out = sjp.build_job_sitemaps({"a": "2026-10-01T00:00:00+00:00", "b": "2026-10-02T00:00:00+00:00", "c": "2026-10-02T00:00:00+00:00"})
+        out = sjp.build_job_sitemaps(
+            {"a": "3|2026-10-01T00:00:00+00:00", "b": "3|2026-10-02T00:00:00+00:00", "c": "3|2026-10-02T00:00:00+00:00"}
+        )
         assert set(out) == {"sitemap-job-pages.xml", "sitemap-job-pages-1.xml", "sitemap-job-pages-2.xml"}
         assert "<loc>https://yabot.jobs/sitemap-job-pages-2.xml</loc>" in out["sitemap-job-pages.xml"]
         assert "<loc>https://yabot.jobs/job/a</loc><lastmod>2026-10-01</lastmod>" in out["sitemap-job-pages-1.xml"]
@@ -304,13 +306,12 @@ class TestGenerate:
         assert result.published == 1
         assert b"Apply on Yabot Jobs" in store.get(_path(store, row.id))
 
-    def test_full_or_a_page_version_bump_re_renders_everything(self, db, make_job, store, monkeypatch):
+    def test_only_full_re_renders_existing_pages_a_page_version_bump_does_not(self, db, make_job, store, monkeypatch):
         make_job()
         sjp.generate_job_pages(db, now=NOW)
-        assert sjp.generate_job_pages(db, now=NOW, full=True).updated == 1
         monkeypatch.setattr(sjp, "PAGE_VERSION", sjp.PAGE_VERSION + 1)
-        assert sjp.generate_job_pages(db, now=NOW).updated == 1
         assert sjp.generate_job_pages(db, now=NOW).updated == 0
+        assert sjp.generate_job_pages(db, now=NOW, full=True).updated == 1
 
     def test_render_cap_defers_the_rest_to_later_runs(self, db, make_job, store):
         rows = [make_job() for _ in range(5)]
@@ -331,15 +332,44 @@ class TestGenerate:
             make_job()
         assert sjp.generate_job_pages(db, now=NOW, full=True, max_renders=1).published == 3
 
-    def test_a_version_bump_under_the_cap_makes_progress_every_run(self, db, make_job, store, monkeypatch):
-        for _ in range(3):
-            make_job()
+    def test_new_pages_come_before_changed_ones_under_the_cap(self, db, make_job, store):
+        old = [make_job(title=f"Old {i}") for i in range(2)]
         sjp.generate_job_pages(db, now=NOW)
-        monkeypatch.setattr(sjp, "PAGE_VERSION", sjp.PAGE_VERSION + 1)
+        for row in old:
+            posting = db.query(m.JobPosting).filter_by(url_id=row.id).one()
+            posting.title, posting.scanned_at = posting.title + " (edited)", NOW
+        new = [make_job(title=f"New {i}") for i in range(2)]
+        db.commit()
 
-        runs = [sjp.generate_job_pages(db, now=NOW, max_renders=2).updated for _ in range(3)]
+        first = sjp.generate_job_pages(db, now=NOW, max_renders=3)
+        assert (first.published, first.updated, first.deferred) == (2, 1, 1)
+        assert all(store.get(_path(store, r.id)) for r in new)
 
-        assert runs == [2, 1, 0]
+        second = sjp.generate_job_pages(db, now=NOW, max_renders=3)
+        assert (second.published, second.updated, second.deferred) == (0, 1, 0)
+
+    def test_a_rescan_that_changed_nothing_only_moves_the_manifest(self, db, make_job, store, monkeypatch):
+        row = make_job()
+        sjp.generate_job_pages(db, now=NOW)
+        db.query(m.JobPosting).filter_by(url_id=row.id).one().scanned_at = NOW
+        db.commit()
+        uploads = []
+        monkeypatch.setattr(sjp, "upload_html", lambda key, html_content, cc=None: uploads.append(key))
+
+        result = sjp.generate_job_pages(db, now=NOW)
+
+        assert (result.updated, result.rescanned_unchanged, uploads) == (0, 1, [])
+        entry = sjp.parse_entry(str(row.id), json.loads(store.get(sjp.MANIFEST_KEY))["pages"][str(row.id)])
+        assert entry.scanned.startswith(NOW.date().isoformat())
+        assert sjp.generate_job_pages(db, now=NOW).rescanned_unchanged == 0  # settled
+
+    def test_pages_from_before_content_hashes_are_left_alone_until_rescanned(self, db, make_job, store):
+        row = make_job()
+        scanned = sjp.eligible_job_ids(db, NOW)[str(row.id)]
+        old_entry = f"2|{scanned}~1a2b3c4d|jobs/us/x/{row.id}|2026-10-01T00:00:00"  # with the old logo suffix
+        store.put(sjp.MANIFEST_KEY, json.dumps({"pages": {str(row.id): old_entry}}), "application/json")
+        result = sjp.generate_job_pages(db, now=NOW)
+        assert (result.updated, result.unchanged) == (0, 1)
 
 
 
@@ -397,12 +427,13 @@ class TestGeneratorScript:
         monkeypatch.setattr(script, "read_job_paths", lambda: {})
         monkeypatch.setattr(script, "generate_job_pages", lambda db, dry_run, full: (_ for _ in ()).throw(RuntimeError("boom")))
         monkeypatch.setattr(script, "invalidate_paths", lambda paths: invalidated.append(paths))
+        monkeypatch.setattr(script, "publish_assets", lambda: ["/jobs/_assets/analytics.js"])
         monkeypatch.setattr("sys.argv", ["generate_static_job_pages.py"])
 
         with pytest.raises(RuntimeError, match="boom"):
             script.main()
 
-        assert invalidated == [["/jobs/*", "/sitemap-jobs.xml"]]
+        assert invalidated == [["/jobs/*", "/sitemap-jobs.xml", "/logos/c/*"]]
 
 
 # --- SEO overhaul: URLs, manifest entries, related links, hubs, content ----
@@ -459,10 +490,18 @@ class TestPaths:
 class TestManifestEntries:
     def test_old_two_part_entries_live_at_job_slash_id(self):
         entry = sjp.parse_entry("abc", "1|2026-10-01T00:00:00+00:00")
-        assert (entry.version_key, entry.path, entry.rendered_at) == ("1|2026-10-01T00:00:00+00:00", "job/abc", "")
+        assert (entry.version, entry.scanned, entry.path, entry.rendered_at, entry.content_hash) == (
+            "1", "2026-10-01T00:00:00+00:00", "job/abc", "", ""
+        )
+
+    def test_old_four_part_entries_lose_the_logo_suffix(self):
+        entry = sjp.parse_entry("abc", "2|2026-10-01T00:00:00+00:00~1a2b3c4d|jobs/us/x/abc|2026-10-03T00:00:00")
+        assert (entry.scanned, entry.path, entry.content_hash) == ("2026-10-01T00:00:00+00:00", "jobs/us/x/abc", "")
 
     def test_round_trip(self):
-        entry = sjp.ManifestEntry("2|2026-10-01T00:00:00+00:00", "jobs/us/sales/2026-10-01/x-abc", "2026-10-03T00:00:00")
+        entry = sjp.ManifestEntry(
+            "3", "2026-10-01T00:00:00+00:00", "jobs/us/sales/2026-10-01/x-abc", "2026-10-03T00:00:00", "0123456789abcdef"
+        )
         assert sjp.parse_entry("abc", entry.dump()) == entry
 
 
@@ -492,11 +531,11 @@ class TestUrlLifecycle:
         assert _path(store, row.id) == first
         assert b"Staff Engineer" in store.get(first)
 
-    def test_stale_pages_are_refreshed_with_leftover_capacity_only_after_a_week(self, db, make_job, store):
+    def test_a_page_is_never_re_rendered_just_for_being_old(self, db, make_job, store):
         make_job()
         sjp.generate_job_pages(db, now=NOW)
-        assert sjp.generate_job_pages(db, now=NOW + timedelta(days=1)).refreshed == 0
-        assert sjp.generate_job_pages(db, now=NOW + timedelta(days=8)).refreshed == 1
+        later = sjp.generate_job_pages(db, now=NOW + timedelta(days=30))
+        assert (later.updated, later.unchanged) == (0, 1)
 
 
 class TestRelated:
@@ -669,23 +708,79 @@ class TestCompanyLogos:
         db.commit()
         return row
 
-    def test_page_and_json_ld_carry_the_logo(self, db, acme_with_logo):
+    def test_page_and_json_ld_carry_the_stable_alias(self, db, acme_with_logo):
         page = sjp.load_job_pages(db, [str(acme_with_logo.id)])[str(acme_with_logo.id)]
         html_out = sjp.render_job_page(page)
         org = _ld(html_out)["hiringOrganization"]
         assert org["sameAs"] == "https://acme.com"
-        assert org["logo"] == "https://yabot.jobs/logos/acme.com-1.png"
-        assert 'class="company-logo"' in html_out
+        assert org["logo"] == "https://yabot.jobs/logos/c/acme.png"
+        assert '<img class="company-logo" src="https://yabot.jobs/logos/c/acme.png"' in html_out
 
-    def test_no_logo_without_one(self, db, make_job):
+    def test_without_a_logo_the_page_shows_the_placeholder_but_json_ld_has_none(self, db, make_job):
         row = make_job()
         page = sjp.load_job_pages(db, [str(row.id)])[str(row.id)]
         html_out = sjp.render_job_page(page)
         assert _ld(html_out)["hiringOrganization"] == {"@type": "Organization", "name": "Acme Corp"}
+        assert 'src="https://yabot.jobs/logos/c/acme.png"' in html_out
+
+    def test_no_logo_image_without_a_company_key(self, db, make_job):
+        row = make_job(company_key=None)
+        html_out = sjp.render_job_page(sjp.load_job_pages(db, [str(row.id)])[str(row.id)])
         assert 'class="company-logo"' not in html_out
 
-    def test_a_new_logo_changes_the_version(self, db, acme_with_logo):
-        before = sjp.eligible_job_ids(db, NOW)
+    def test_a_new_logo_re_renders_nothing(self, db, acme_with_logo, store):
+        sjp.generate_job_pages(db, now=NOW)
         db.query(m.Company).filter_by(company_key="acme").one().logo_key = "logos/acme.com-2.png"
         db.commit()
-        assert sjp.eligible_job_ids(db, NOW) != before
+        result = sjp.generate_job_pages(db, now=NOW)
+        assert (result.updated, result.unchanged) == (0, 1)
+
+    def test_publishing_writes_the_placeholder_alias_for_a_company_without_a_logo(self, db, make_job, store):
+        from app.services import company_logos
+
+        make_job(company_key="newco")
+        sjp.generate_job_pages(db, now=NOW)
+        assert store.get("logos/c/newco.png") == company_logos.placeholder_logo_png()
+
+
+class TestSharedChrome:
+    """Every SEO page: the Logo.dev credit in the footer (free-plan terms: a
+    followable link, no noreferrer), and the shared analytics script told
+    what kind of page it is."""
+
+    def test_every_page_template_has_the_footer_and_the_analytics_script(self):
+        from app.services.static_pages import _TEMPLATES_DIR
+
+        for path in _TEMPLATES_DIR.glob("*.html.jinja"):
+            if path.name.startswith("_"):
+                continue
+            source = path.read_text()
+            assert '{% include "_footer.html.jinja" %}' in source, path.name
+            assert 'with page_type = "' in source and '{% include "_analytics.html.jinja" %}' in source, path.name
+
+    def test_job_page_footer_credit_page_type_and_tracked_links(self, db, make_job):
+        row = make_job()
+        page = sjp.render_job_page(sjp.load_job_pages(db, [str(row.id)])[str(row.id)])
+        assert 'Logos provided by <a href="https://logo.dev">Logo.dev</a>' in page
+        assert "noreferrer" not in page
+        assert 'src="https://yabot.jobs/jobs/_assets/analytics.js" async data-page-type="job"' in page
+        assert "googletagmanager" not in page  # only in the shared script
+        assert 'data-track="save"' in page
+
+    def test_gone_page_says_what_it_is(self):
+        assert 'data-page-type="job_gone"' in sjp.render_job_gone(None)
+
+    def test_the_shared_script_denies_eu_cookies_honors_gpc_and_sends_no_ads_data(self):
+        from app.services.static_pages import _TEMPLATES_DIR
+
+        script = (_TEMPLATES_DIR / "assets" / "analytics.js").read_text()
+        assert 'analytics_storage: "denied", region: CONSENT_REGIONS' in script
+        assert '"DE"' in script and '"GB"' in script and '"CH"' in script
+        assert "navigator.globalPrivacyControl" in script
+        assert "allow_google_signals: false" in script and "allow_ad_personalization_signals: false" in script
+
+    def test_publish_assets_uploads_the_script(self, store):
+        from app.services import static_pages
+
+        assert static_pages.publish_assets() == ["/jobs/_assets/analytics.js"]
+        assert b"G-CDDT9RZ59T" in store.get(static_pages.ANALYTICS_SCRIPT_KEY)

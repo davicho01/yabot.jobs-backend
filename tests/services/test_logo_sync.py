@@ -83,6 +83,12 @@ class TestSync:
         assert (row.logo_origin, row.logo_etag, row.logo_status, row.logo_domain) == ("logo_dev", "e1", "ok", "acme.com")
         assert fake.downloads == ["https://img.example/tmp/acme.com?sig=1&format=png&size=256"]
 
+    def test_the_stable_alias_gets_the_logo_too(self, scan_db, fake, store):
+        fake.brands["acme.com"] = (200, "e1")
+        row = company(scan_db)
+        sync(scan_db, fake, store)
+        assert store.get(cl.logo_alias_key("acme")) == store.get(row.logo_key)
+
     def test_unchanged_etag_skips_the_download(self, scan_db, fake, store):
         fake.brands["acme.com"] = (200, "e1")
         row = company(scan_db)
@@ -100,6 +106,7 @@ class TestSync:
         row = company(scan_db)
         assert sync(scan_db, fake, store) == {"none": 1}
         assert row.logo_key is None
+        assert store.get(cl.logo_alias_key("acme")) == cl.placeholder_logo_png()
         assert sync(scan_db, fake, store, now=NOW + timedelta(days=29)) == {}
         assert sync(scan_db, fake, store, now=NOW + timedelta(days=31)) == {"none": 1}
 
@@ -256,8 +263,27 @@ class TestManual:
         cl.set_manual_logo(scan_db, row, png(), origin=cl.ORIGIN_UPLOAD, source_url="newco.png")
         assert row.logo_key.startswith("logos/newco-") and store.get(row.logo_key)
         assert row.logo_origin == "upload"
+        assert store.get(cl.logo_alias_key("newco")) == store.get(row.logo_key)
         cl.clear_manual_logo(scan_db, row)
         assert (row.logo_key, row.logo_origin, row.logo_status) == (None, None, None)
+        assert store.get(cl.logo_alias_key("newco")) == cl.placeholder_logo_png()
+
+
+class TestAlias:
+    def test_alias_key_is_stable_per_company(self):
+        assert cl.logo_alias_key("Acme & Co") == "logos/c/acme-co.png"
+        assert cl.logo_alias_url("acme") == "https://yabot.jobs/logos/c/acme.png"
+        assert cl.logo_alias_url(None) is None
+
+    def test_placeholder_is_a_stored_logo_sized_png(self):
+        from io import BytesIO
+
+        from PIL import Image
+
+        from app.services import logo_images
+
+        image = Image.open(BytesIO(cl.placeholder_logo_png()))
+        assert (image.format, image.size) == ("PNG", (logo_images.OUTPUT_SIZE, logo_images.OUTPUT_SIZE))
 
 
 class TestBrandNames:

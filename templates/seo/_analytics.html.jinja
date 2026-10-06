@@ -1,12 +1,6 @@
-  {#- Google Analytics 4, the same property as the frontend's landing page and app
-      (yabot.jobs-frontend: index.html, src/utils/analytics.ts). These pages carry
-      no credentials in their URLs, so gtag's default page view is fine here. -#}
-  <script async src="https://www.googletagmanager.com/gtag/js?id=G-CDDT9RZ59T"></script>
-  <script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag() {
-      dataLayer.push(arguments);
-    }
-    gtag("js", new Date());
-    gtag("config", "G-CDDT9RZ59T");
-  </script>
+  {#- Google Analytics 4: everything (consent defaults, settings, click
+      tracking) lives in one shared script, published by
+      generate_static_job_pages.py every run (static_pages.publish_assets), so
+      changing it never means re-rendering the pages. Each page only says what
+      kind of page it is. -#}
+  <script src="{{ base_url }}/{{ analytics_script_key }}" async data-page-type="{{ page_type | default('other') }}"></script>

@@ -31,15 +31,18 @@ Sectors with zero jobs that day are skipped entirely (no thin/empty page).
 
 Each run first brings the per-job pages up to date (see
 app.services.static_job_pages: new jobs at /jobs/us/<sector>/<day>/<title>-
-<place>-<id>, older ones staying at /job/<id>; rescanned ones re-rendered;
-"no longer available" pages for jobs that closed) along with the company and
+<place>-<id>, older ones staying at /job/<id>; rescanned ones re-rendered
+only if their content changed; "no longer available" pages for jobs that
+closed — every other page is left as first rendered) along with the company and
 location hubs (app.services.static_hub_pages), then the day pages, which link
 each job at its page's path — and sends a single CloudFront invalidation
 covering everything both passes changed.
 
-Before any of that, each run crawls logos for companies that need one (see
-app.services.company_logos.sync_company_logos, capped at a couple of
-minutes), so the pages rendered right after already show them.
+Before any of that, each run publishes the shared analytics script the pages
+load (static_pages.publish_assets) and crawls logos for companies that need
+one (see app.services.company_logos.sync_company_logos, capped at a couple of
+minutes). Job pages show a company's logo through its stable alias, so one
+arriving later shows up on pages already published.
 
 Writes to SEO_PAGES_BUCKET in prod, or SEO_PAGES_OUTPUT_DIR in local dev
 (see app.services.page_store); with neither set, only --dry-run works.
@@ -48,7 +51,7 @@ Usage:
     python generate_static_job_pages.py                      # today (Pacific), publishes
     python generate_static_job_pages.py --date 2026-09-25    # a specific day
     python generate_static_job_pages.py --dry-run            # report only, no S3/CloudFront calls
-    python generate_static_job_pages.py --full               # also re-render every per-job page (backfill)
+    python generate_static_job_pages.py --full               # also re-render every per-job page (after a template change)
 """
 
 import argparse
@@ -57,9 +60,15 @@ from datetime import date, datetime
 
 from app.core.log_config import configure_logging
 from app.db.session import SessionLocal
-from app.services.company_logos import sync_company_logos
+from app.services.company_logos import LOGO_ALIAS_PREFIX, sync_company_logos
 from app.services.static_job_pages import JobPagesResult, generate_job_pages, read_job_paths
-from app.services.static_pages import DAY_BOUNDARY_TZ, collapse_invalidation_paths, generate_for_date, invalidate_paths
+from app.services.static_pages import (
+    DAY_BOUNDARY_TZ,
+    collapse_invalidation_paths,
+    generate_for_date,
+    invalidate_paths,
+    publish_assets,
+)
 
 configure_logging()
 logger = logging.getLogger("app.generate_static_job_pages")
@@ -77,6 +86,8 @@ def main() -> None:
     args = _parse_args()
     target_date = date.fromisoformat(args.date) if args.date else datetime.now(DAY_BOUNDARY_TZ).date()
 
+    # The shared scripts first, so no page ever points at one not there yet.
+    asset_paths = [] if args.dry_run else publish_assets()
     db = SessionLocal()
     job_error: Exception | None = None
     try:
@@ -116,14 +127,19 @@ def main() -> None:
         logger.info("%s %d country/sector page(s) for %s.", verb, len(result.job_counts), target_date.isoformat())
     if job_error is None:
         logger.info(
-            "%s job pages: %d new, %d re-rendered, %d refreshed, %d marked no longer available, %d unchanged, "
-            "%d deferred; %d hub page(s).",
-            verb, job_result.published, job_result.updated, job_result.refreshed, job_result.removed,
+            "%s job pages: %d new, %d re-rendered, %d rescanned with no change, %d marked no longer available, "
+            "%d unchanged, %d deferred; %d hub page(s).",
+            verb, job_result.published, job_result.updated, job_result.rescanned_unchanged, job_result.removed,
             job_result.unchanged, job_result.deferred, job_result.hubs,
         )
 
     if not args.dry_run:
-        invalidate_paths(collapse_invalidation_paths(result.touched_paths + job_result.touched_paths))
+        # Company logo aliases are overwritten in place (sync_company_logos
+        # above, or an admin): one wildcard, whatever changed.
+        logo_paths = [f"/{LOGO_ALIAS_PREFIX}*"]
+        invalidate_paths(
+            collapse_invalidation_paths(result.touched_paths + job_result.touched_paths + asset_paths + logo_paths)
+        )
     if job_error is not None:
         raise job_error  # still report the run as failed, after the day pages are fully out
 
