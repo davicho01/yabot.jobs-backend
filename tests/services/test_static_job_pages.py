@@ -716,6 +716,14 @@ class TestCompanyLogos:
         assert org["logo"] == "https://yabot.jobs/logos/c/acme.png"
         assert '<img class="company-logo" src="https://yabot.jobs/logos/c/acme.png"' in html_out
 
+    def test_logo_sits_on_the_company_line_above_the_title(self, db, acme_with_logo):
+        page = sjp.load_job_pages(db, [str(acme_with_logo.id)])[str(acme_with_logo.id)]
+        html_out = sjp.render_job_page(page)
+        company_line = re.search(r'<p class="company-line">(.*?)</p>', html_out, re.S).group(1)
+        assert 'class="company-logo"' in company_line and "<span>Acme Corp</span>" in company_line
+        assert html_out.index('class="company-line"') < html_out.index("<h1>")
+        assert '<p class="meta-line">Austin, TX</p>' in html_out
+
     def test_without_a_logo_the_page_shows_the_placeholder_but_json_ld_has_none(self, db, make_job):
         row = make_job()
         page = sjp.load_job_pages(db, [str(row.id)])[str(row.id)]

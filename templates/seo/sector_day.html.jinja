@@ -39,7 +39,7 @@
       <li>
         <div class="job-title"><a href="{{ base_url }}/{{ job.href_path }}" data-track="day_job">{{ job.title }}</a></div>
         <div class="job-meta">
-          {% if job.company_logo_url %}<img class="company-logo-sm" src="{{ job.company_logo_url }}" alt="" width="18" height="18" loading="lazy" />{% endif %}
+          {% if job.company_logo_url %}<img class="company-logo-sm" src="{{ job.company_logo_url }}" alt="" width="24" height="24" loading="lazy" />{% endif %}
           {{ job.company_name or "Unknown company" }}
           {% if job.location %} &middot; {{ job.location }}{% endif %}
           {% if job.salary_display %} &middot; {{ job.salary_display }}{% endif %}

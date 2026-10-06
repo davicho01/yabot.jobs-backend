@@ -26,9 +26,9 @@
   <main id="main">
   <div class="wrap">
     {% include "_breadcrumb.html.jinja" %}
-    {% if job.company_logo_url %}<img class="company-logo" src="{{ job.company_logo_url }}" alt="{{ job.company_display }} logo" width="56" height="56" />{% endif %}
+    <p class="company-line">{% if job.company_logo_url %}<img class="company-logo" src="{{ job.company_logo_url }}" alt="{{ job.company_display }} logo" width="40" height="40" />{% endif %}<span>{{ job.company_display }}</span></p>
     <h1>{{ job.title }}</h1>
-    <p class="meta-line">{{ job.company_display }}{% if job.location %} &middot; {{ job.location }}{% endif %}</p>
+    {% if job.location %}<p class="meta-line">{{ job.location }}</p>{% endif %}
     <p class="job-lead">{{ lead }}</p>
     <div class="job-cta">
       <a class="btn btn--accent" href="{{ base_url }}/jobs/{{ job.url_id }}" data-track="apply">Apply on Yabot Jobs</a>
