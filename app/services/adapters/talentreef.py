@@ -32,6 +32,15 @@ _BRANDS_URL = "https://prod-kong.internal.talentreef.com/clients/{client_id}/rec
 # instead of brandId, but filtering directly on brandId (from the /brands
 # endpoint above) returns the same population without needing to know that
 # resolution mechanism.
+# Each career page's own config names the clients whose postings it lists:
+# just the tenant (Associated Food Stores, 10934) or a franchisor plus its
+# franchisees (Jack in the Box, 10345: 59 franchisee clients). The site's own
+# search filters on these client ids as well as on brand (verified live in its
+# JS bundle). Brand alone isn't enough, because a brand can be shared across
+# unrelated clients: AFS's "ACE Hardware" brand (1322) also pulls in other
+# Ace operators (Niemann Foods in MN/WI/IL, Lowes in TX), 144 postings
+# against AFS's own 127.
+_CAREER_PAGES_URL = "https://prod-kong.internal.talentreef.com/apply/clients/{client_id}/careerPages/"
 _SEARCH_URL = "https://prod-kong.internal.talentreef.com/apply/proxy-es/search-en-us/posting/_search"
 _PAGE_SIZE = 200
 _JOB_ID_RE = re.compile(r"-(\d+)\.html$")
@@ -57,8 +66,28 @@ def _brand_ids(client_id: str) -> list[str]:
     return [b["id"] for b in brands if isinstance(b, dict) and b.get("id")]
 
 
-def _search(brand_ids: list[str], *, from_: int, extra_filters: list[dict] | None = None) -> dict:
-    filters = [{"terms": {"brandId": brand_ids}}, *(extra_filters or [])]
+def _client_ids(client_id: str) -> list[str]:
+    response = get_with_retry(_CAREER_PAGES_URL.format(client_id=client_id), timeout=TIMEOUT)
+    response.raise_for_status()
+    pages = response.json()
+    ids = {client_id}
+    for page in pages if isinstance(pages, list) else []:
+        if not isinstance(page, dict):
+            continue
+        if page.get("clientId"):
+            ids.add(str(page["clientId"]))
+        ids.update(
+            str(client["legacyClientId"])
+            for client in page.get("clients") or []
+            if isinstance(client, dict) and client.get("legacyClientId")
+        )
+    return sorted(ids)
+
+
+def _search(
+    brand_ids: list[str], client_ids: list[str], *, from_: int, extra_filters: list[dict] | None = None
+) -> dict:
+    filters = [{"terms": {"brandId": brand_ids}}, {"terms": {"clientId": client_ids}}, *(extra_filters or [])]
     body = {
         "from": from_,
         "size": _PAGE_SIZE,
@@ -80,6 +109,7 @@ def _fetch_jobs(host: str) -> list[str]:
     brand_ids = _brand_ids(client_id)
     if not brand_ids:
         return []
+    client_ids = _client_ids(client_id)
 
     # High-volume boards (Jack in the Box alone runs ~7k open reqs across
     # its franchisee network) — filter server-side to just-posted-recently
@@ -90,7 +120,7 @@ def _fetch_jobs(host: str) -> list[str]:
     from_ = 0
     total = None
     while total is None or from_ < total:
-        data = _search(brand_ids, from_=from_, extra_filters=date_filter)
+        data = _search(brand_ids, client_ids, from_=from_, extra_filters=date_filter)
         hits = data.get("hits", {})
         total = hits.get("total", 0)
         batch = hits.get("hits", [])
