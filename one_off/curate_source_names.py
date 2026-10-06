@@ -19,7 +19,9 @@ Reports, per source:
     ({"<source name>": ["HomeGoods", "Marshalls"]}) and pass it with
     --sub-brands-file together with --write.
 
-Renaming jobs to match is a separate step (one_off/apply_source_company_names.py).
+Only crawl_sources rows change: the names apply to jobs scanned from now on.
+(one_off/backfill_recent_company_names.py re-applies them to the last few
+days' jobs, to validate.)
 
 Usage:
     python -m one_off.curate_source_names                     # report only
@@ -163,7 +165,7 @@ def main() -> None:
                 source.sub_brands = [" ".join(b.split()) for b in brands if b and b.strip()]
                 logger.info("Sub-brands for %r: %s", source.name, source.sub_brands)
         db.commit()
-        logger.info("Written. Next: python -m one_off.apply_source_company_names --dry-run")
+        logger.info("Written. To validate on recent jobs: python -m one_off.backfill_recent_company_names --dry-run")
     finally:
         db.close()
 

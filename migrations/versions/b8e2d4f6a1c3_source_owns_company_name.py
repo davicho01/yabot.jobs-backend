@@ -15,9 +15,13 @@ one of its jobs shows — see app.services.company_names. Adds:
 - crawl_sources.is_official: the company's own careers site (true) vs a job
   board/aggregator (false).
 - job_postings.page_company_name: the raw company name the scanned page gave,
-  so names can be recomputed (a source rename, new sub-brands) without a
-  rescan. Seeded from company_name, which is still the raw page value for
-  nearly every row.
+  filled in by scans from now on. Existing rows are deliberately left NULL —
+  the new naming applies to jobs scanned going forward, and copying 600k+
+  rows here would rewrite the whole table under one long lock. Readers treat
+  NULL as "the current company_name is the page's".
+
+Every change here is metadata-only on Postgres 11+ (new columns with constant
+defaults, or nullable without one), so it runs in seconds.
 """
 from typing import Sequence, Union
 
@@ -41,7 +45,6 @@ def upgrade() -> None:
     )
     op.add_column('crawl_sources', sa.Column('is_official', sa.Boolean(), server_default=sa.true(), nullable=False))
     op.add_column('job_postings', sa.Column('page_company_name', sa.String(length=255), nullable=True))
-    op.execute('UPDATE job_postings SET page_company_name = company_name WHERE company_name IS NOT NULL')
 
 
 def downgrade() -> None:

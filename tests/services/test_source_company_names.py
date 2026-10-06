@@ -11,7 +11,7 @@ import pytest
 
 from app.models import CrawlSource, JobPosting
 from app.models.enums import ScanStatus
-from app.services import company_names, jobs
+from app.services import jobs
 from app.services.adapters.base import ScanResult
 from app.services.company_names import AUTO, MANUAL, PLACEHOLDER, company_for, matching_sub_brand, promotable_name
 
@@ -99,32 +99,6 @@ class TestUpsertAndPromotion:
         assert scan_db.get(CrawlSource, source.id).name == "J&J"
 
 
-class TestApplySourceCompany:
-    def test_a_rename_and_new_sub_brands_recompute_every_job_from_the_raw_page_name(self, scan_db, make_source, make_url, monkeypatch):
-        monkeypatch.setattr("app.services.company_logos.resolve_company", lambda *a, **k: None)
-        source = make_source()
-        source.name = "TJX Companies"
-        rows = []
-        for page in ("Marshalls of MA", "Homegoods LLC", "Marmaxx Operating Corp"):
-            url_row = make_url(source)
-            posting = JobPosting(url_id=url_row.id, title="Associate", page_company_name=page, company_name="TJX Companies",
-                                 company_key="tjx", extraction_status=ScanStatus.SUCCESS)
-            scan_db.add(posting)
-            rows.append(posting)
-        scan_db.commit()
-
-        source.name, source.sub_brands = "TJX", ["Marshalls", "HomeGoods"]
-        changed = company_names.apply_source_company(scan_db, source)
-        scan_db.commit()
-        scan_db.expire_all()
-
-        assert changed == 3
-        assert [(scan_db.get(JobPosting, p.id).company_name, scan_db.get(JobPosting, p.id).company_key) for p in rows] == [
-            ("Marshalls", "marshalls"), ("HomeGoods", "homegoods"), ("TJX", "tjx")
-        ]
-        assert company_names.apply_source_company(scan_db, source) == 0  # idempotent
-
-
 class TestAdminUpdate:
     def test_renaming_a_source_confirms_the_name_for_future_jobs_only(self, scan_db, make_source, make_url, monkeypatch):
         from app.api.routes.crawl_sources import update_crawl_source
@@ -194,27 +168,41 @@ class TestOneOffs:
         # Gem's 11x.ai jobs (12) are under the 20-job floor; TJX's entity-coded name never qualifies.
         assert [(s.name, name, n) for s, name, n in candidates] == [("TJX", "Marshalls of MA", 25)]
 
-    def test_apply_renames_every_job_to_its_source_and_cleans_no_source_jobs(self, scan_db, make_source, make_url, monkeypatch):
-        from one_off import apply_source_company_names as apply
+    def test_recent_backfill_renames_only_the_last_days_jobs_and_keeps_their_page_name(self, scan_db, make_source, make_url, monkeypatch):
+        from datetime import timedelta
 
-        monkeypatch.setattr("app.services.company_logos.resolve_company", lambda *a, **k: None)
+        from one_off import backfill_recent_company_names as backfill
+
         wells = make_source()
         wells.name = "Wells Fargo"
         scan_db.commit()
-        self._jobs(scan_db, make_url, wells, "B10 Wells Fargo Bank, N. A.", 2)
-        self._jobs(scan_db, make_url, None, "Careers at Marriott", 1)
+        now = datetime.now(timezone.utc)
+        rows = {}
+        for label, found, page in (("recent", now - timedelta(hours=6), "B10 Wells Fargo Bank, N. A."),
+                                   ("old", now - timedelta(days=10), "I16 Wells Fargo International")):
+            url_row = make_url(wells)
+            url_row.created_at = found
+            # Existing rows have no page_company_name yet: the migration doesn't backfill it.
+            rows[label] = JobPosting(url_id=url_row.id, title="Analyst", company_name=page, company_key=page.lower(),
+                                     extraction_status=ScanStatus.SUCCESS)
+            scan_db.add(rows[label])
+        scan_db.commit()
 
-        changes = apply.planned_changes(scan_db)
-        assert changes["Wells Fargo"][("B10 Wells Fargo Bank, N. A.", "Wells Fargo")] == 2
-        assert changes["(no source)"][("Careers at Marriott", "Marriott")] == 1
+        changes = backfill.planned_changes(scan_db, now - timedelta(days=2))
+        assert [(old, new) for _, old, new, _ in changes] == [("B10 Wells Fargo Bank, N. A.", "Wells Fargo")]
 
-        monkeypatch.setattr(apply, "SessionLocal", lambda: scan_db)
+        monkeypatch.setattr(backfill, "SessionLocal", lambda: scan_db)
         monkeypatch.setattr(scan_db, "close", lambda: None)
-        monkeypatch.setattr("sys.argv", ["apply_source_company_names"])
-        apply.main()
+        monkeypatch.setattr("sys.argv", ["backfill_recent_company_names", "--days", "2"])
+        backfill.main()
         scan_db.expire_all()
-        assert sorted(p.company_name for p in scan_db.query(JobPosting)) == ["Marriott", "Wells Fargo", "Wells Fargo"]
-        assert apply.planned_changes(scan_db) == {}  # idempotent
+
+        recent, old = scan_db.get(JobPosting, rows["recent"].id), scan_db.get(JobPosting, rows["old"].id)
+        assert (recent.company_name, recent.company_key, recent.page_company_name) == (
+            "Wells Fargo", "wells fargo", "B10 Wells Fargo Bank, N. A."
+        )
+        assert old.company_name == "I16 Wells Fargo International"  # older than the window: untouched
+        assert backfill.planned_changes(scan_db, now - timedelta(days=2)) == []  # idempotent
 
     def test_discovered_boards_start_with_a_placeholder_name(self, scan_db):
         from app.services.crawl_sources import register_discovered_board
