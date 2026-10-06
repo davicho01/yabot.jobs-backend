@@ -65,7 +65,13 @@ def get_instance_count(service_name: str, *, lookback_minutes: int = 5) -> int:
     last `lookback_minutes` — deliberately a window, not an instant point,
     so a momentary dip to 0 between scan-lane wake-ups doesn't read as
     "idle" (see browser_scaler.py). Returns 0 if the metric has no data
-    (nothing has run recently)."""
+    (nothing has run recently).
+
+    Counts only state="active" instances: Cloud Run keeps an idle instance
+    around for up to ~15 minutes after its last request (not configurable),
+    and counting those held yabot-jobs-browser's warm floor up long after a
+    burst drained. Verified live 2026-10-06: after the 2pm burst, worker had
+    0-3 active vs 9-17 idle instances for ~15 minutes."""
     now = datetime.now(timezone.utc)
     start = now - timedelta(minutes=lookback_minutes)
     response = httpx.get(
@@ -74,7 +80,8 @@ def get_instance_count(service_name: str, *, lookback_minutes: int = 5) -> int:
         params={
             "filter": (
                 'metric.type="run.googleapis.com/container/instance_count" '
-                f'AND resource.labels.service_name="{service_name}"'
+                f'AND resource.labels.service_name="{service_name}" '
+                'AND metric.labels.state="active"'
             ),
             "interval.startTime": start.isoformat(),
             "interval.endTime": now.isoformat(),
