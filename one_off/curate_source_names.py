@@ -4,7 +4,8 @@ show), and report what needs a human.
 
 Reports, per source:
   - AUTO-FIX: a name carrying an admin note ("CenterWell (Humana primary
-    care / home health)") -> the note dropped; a board slug or hostname
+    care / home health)") -> the note dropped, unless the note doubts the
+    source ("Sphere (company unconfirmed)": REVIEW); a board slug or hostname
     ("greenhouse/clearstreet", "careers.honda.com") -> the first of: the name
     most of its jobs' pages agree on (company_names.promotable_name), the
     company in most of its stored page titles — that the board's own address
@@ -22,6 +23,10 @@ Reports, per source:
     ({"<source name>": ["HomeGoods", "Marshalls"]}) and pass it with
     --sub-brands-file together with --write.
 
+REVIEW decisions go in --names-file ({"jobs.l3harris.com": "L3Harris
+Technologies"}), set as manual names. Both files name sources as this report
+shows them, and either can be the JSON itself instead of a path.
+
 Only crawl_sources rows change: the names apply to jobs scanned from now on.
 (one_off/backfill_recent_company_names.py re-applies them to the last few
 days' jobs, to validate.)
@@ -29,12 +34,13 @@ days' jobs, to validate.)
 Usage:
     python -m one_off.curate_source_names                     # report only
     python -m one_off.curate_source_names --write             # apply AUTO-FIX names
-    python -m one_off.curate_source_names --write --sub-brands-file brands.json
+    python -m one_off.curate_source_names --write --names-file names.json --sub-brands-file brands.json
 """
 
 import argparse
 import json
 import logging
+import re
 from collections import Counter, defaultdict
 
 from sqlalchemy import select
@@ -55,6 +61,9 @@ MIN_MAJORITY = 0.5
 SUB_BRAND_MIN_JOBS = 20
 REVIEW_MIN_JOBS = 10
 _STOPWORDS = {"inc", "llc", "the", "and", "corp", "co", "company", "group", "services", "usa", "us", "of", "ltd"}
+# An admin note that's a doubt about the source, not a description of it
+# ("Sphere (company unconfirmed)", "Black Ore (possibly stale)"): kept, for review.
+_DOUBT_NOTE_RE = re.compile(r"\((?=[^)]*(?:unconfirmed|stale|flag for review|unclear|low confidence))[^)]*\)\s*$", re.I)
 
 
 def _tokens(text: str | None) -> set[str]:
@@ -100,8 +109,14 @@ def _matches_board(name: str, source: CrawlSource) -> bool:
     return any(token in haystack for token in _tokens(name))
 
 
+def _is_name(candidate: str | None) -> bool:
+    """Whether a proposed name is a name at all, not a board slug or hostname
+    ("greenhouse/coalition" left over as its old jobs' company name)."""
+    return bool(candidate) and brand_from_source_name(candidate) is not None
+
+
 def curate(db) -> tuple[dict, list, list]:
-    """(auto_fixes {source: new name}, review [(source, dominant, share)],
+    """(auto_fixes {source: new name}, review [(source, proposal, why)],
     sub_brand_candidates [(source, page name, jobs)])."""
     page_names = _page_names(db)
     auto_fixes: dict = {}
@@ -121,28 +136,31 @@ def curate(db) -> tuple[dict, list, list]:
 
         brand = brand_from_source_name(source.name)
         if brand != source.name and source.name_source != MANUAL:
-            if brand:  # just a "(…)" note dropped
+            if brand and _DOUBT_NOTE_RE.search(source.name):
+                review.append((source, brand, f"its note doubts the source; pages say {dominant!r}"))
+            elif brand:  # just a "(…)" note dropped
                 auto_fixes[source] = brand
             else:  # a slug or hostname: the name has to come from its jobs
                 majority = dominant if share >= MIN_MAJORITY else None
                 titled = _title_name(db, source.id)
-                confirmed = next((c for c in (majority, titled) if c and _matches_board(c, source)), None)
+                confirmed = next((c for c in (majority, titled) if _is_name(c) and _matches_board(c, source)), None)
                 proposal = majority or titled
                 if confirmed:
                     auto_fixes[source] = confirmed
                 elif proposal:
                     # Not confirmed by the board's own address: a department
                     # ("Business Systems, Data & AI" on jpmc.fa.oraclecloud.com),
-                    # a code ("L3HHCM20"), a placeholder ("UNAVAILABLE").
-                    review.append((source, proposal, share))
+                    # a code ("L3HHCM20"), a placeholder ("UNAVAILABLE"), the slug.
+                    review.append((source, proposal, f"pages say it ({share:.0%}); the board address doesn't confirm it"))
         elif (
             brand
             and dominant
             and share >= MIN_MAJORITY
             and sum(names.values()) >= REVIEW_MIN_JOBS
+            and _words(brand) != _words(dominant)
             and not (_tokens(brand) & _tokens(dominant))
         ):
-            review.append((source, dominant, share))
+            review.append((source, dominant, f"pages say it ({share:.0%}); shares no word with the source name"))
 
         own = _tokens(auto_fixes.get(source, source.name))
         for name, n in names.most_common():
@@ -154,9 +172,53 @@ def curate(db) -> tuple[dict, list, list]:
     return auto_fixes, review, candidates
 
 
+def _sources_named(by_name: dict, source_name: str) -> list:
+    sources = by_name.get(source_name, [])
+    if not sources:
+        logger.warning("No crawl source named %r; skipped.", source_name)
+    return sources
+
+
+def write_changes(db, auto_fixes: dict, names: dict | None = None, sub_brands: dict | None = None) -> None:
+    """Apply the AUTO-FIX names, then the reviewed names ({"<source name as
+    reported>": "New Name"}, set as manual, so nothing renames them
+    automatically again), then the sub-brands ({"<source name as reported>":
+    ["Brand", ...]}). Both files name sources as the report showed them."""
+    by_name: dict = defaultdict(list)
+    for source in db.scalars(select(CrawlSource)):
+        by_name[source.name].append(source)
+
+    for source, name in auto_fixes.items():
+        source.name, source.name_source = name[:255], AUTO
+    for source_name, new in (names or {}).items():
+        new = " ".join((new or "").split())
+        if not new:
+            logger.warning("Empty name for %r; skipped.", source_name)
+            continue
+        for source in _sources_named(by_name, source_name):
+            source.name, source.name_source = new[:255], MANUAL
+            logger.info("Named %r -> %r", source_name, source.name)
+    for source_name, brands in (sub_brands or {}).items():
+        for source in _sources_named(by_name, source_name):
+            source.sub_brands = list(dict.fromkeys(" ".join(b.split()) for b in brands if b and b.strip()))
+            logger.info("Sub-brands for %r: %s", source.name, source.sub_brands)
+    db.commit()
+
+
+def _load(path_or_json: str | None) -> dict | None:
+    """A JSON file, or the JSON itself (a Cloud Run job has no local files)."""
+    if not path_or_json:
+        return None
+    if path_or_json.lstrip().startswith("{"):
+        return json.loads(path_or_json)
+    with open(path_or_json) as fh:
+        return json.load(fh)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--write", action="store_true", help="Apply the AUTO-FIX names (and --sub-brands-file).")
+    parser.add_argument("--write", action="store_true", help="Apply the AUTO-FIX names (and the files below).")
+    parser.add_argument("--names-file", help='JSON {"<source name>": "Company Name"} from the REVIEW list, with --write.')
     parser.add_argument("--sub-brands-file", help='JSON {"<source name>": ["Sub Brand", ...]} to set, with --write.')
     args = parser.parse_args()
     db = SessionLocal()
@@ -164,8 +226,8 @@ def main() -> None:
         auto_fixes, review, candidates = curate(db)
         for source, name in sorted(auto_fixes.items(), key=lambda kv: kv[0].name):
             logger.info("AUTO-FIX     %r -> %r  (%s)", source.name, name, source.board_url)
-        for source, dominant, share in review:
-            logger.info("REVIEW       %r: its pages say %r (%.0f%%)  (%s)", source.name, dominant, share * 100, source.board_url)
+        for source, proposal, why in review:
+            logger.info("REVIEW       %r: %r — %s  (%s)", source.name, proposal, why, source.board_url)
         for source, name, n in candidates:
             logger.info("SUB-BRAND?   %r: %r on %d job(s)", source.name, name, n)
         logger.info(
@@ -174,20 +236,7 @@ def main() -> None:
         if not args.write:
             return
 
-        for source, name in auto_fixes.items():
-            source.name, source.name_source = name[:255], AUTO
-        if args.sub_brands_file:
-            with open(args.sub_brands_file) as fh:
-                wanted = json.load(fh)
-            by_name = {s.name: s for s in db.scalars(select(CrawlSource))}
-            for source_name, brands in wanted.items():
-                source = by_name.get(source_name)
-                if source is None:
-                    logger.warning("No crawl source named %r; skipped.", source_name)
-                    continue
-                source.sub_brands = [" ".join(b.split()) for b in brands if b and b.strip()]
-                logger.info("Sub-brands for %r: %s", source.name, source.sub_brands)
-        db.commit()
+        write_changes(db, auto_fixes, _load(args.names_file), _load(args.sub_brands_file))
         logger.info("Written. To validate on recent jobs: python -m one_off.backfill_recent_company_names --dry-run")
     finally:
         db.close()

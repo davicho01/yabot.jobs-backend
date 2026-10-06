@@ -205,6 +205,53 @@ class TestOneOffs:
         assert {s.name: new for s, new in auto_fixes.items()} == {"jobs.l3harris.com": "L3Harris Technologies"}
         assert review == []
 
+    def test_curation_never_proposes_a_slug_keeps_doubt_notes_and_matches_short_names(
+        self, scan_db, make_source, make_url
+    ):
+        from one_off.curate_source_names import curate
+
+        slug, doubted, short = (make_source() for _ in range(3))
+        slug.name, slug.board_url = "greenhouse/coalition", "https://boards.greenhouse.io/coalition"
+        doubted.name = "Sphere (company unconfirmed)"
+        short.name = "HP"
+        scan_db.commit()
+        self._jobs(scan_db, make_url, slug, "greenhouse/coalition", 5)  # old jobs named after the slug
+        self._jobs(scan_db, make_url, short, "HP", 12)
+
+        auto_fixes, review, _ = curate(scan_db)
+
+        assert auto_fixes == {}
+        assert sorted((s.name, proposal) for s, proposal, _ in review) == [
+            ("Sphere (company unconfirmed)", "Sphere"),
+            ("greenhouse/coalition", "greenhouse/coalition"),
+        ]
+
+    def test_curation_write_applies_auto_fixes_reviewed_names_and_sub_brands(self, scan_db, make_source):
+        from one_off.curate_source_names import write_changes
+
+        noted, l3harris, tjx, twin_a, twin_b = (make_source() for _ in range(5))
+        noted.name, l3harris.name, tjx.name = "CenterWell (Humana home health)", "jobs.l3harris.com", "TJX"
+        twin_a.name = twin_b.name = "Brigham Young University"
+        scan_db.commit()
+
+        write_changes(
+            scan_db,
+            {noted: "CenterWell"},
+            names={"jobs.l3harris.com": " L3Harris  Technologies ", "Brigham Young University": "BYU", "nope": "X"},
+            sub_brands={"TJX": ["HomeGoods", " Marshalls ", "HomeGoods", ""]},
+        )
+
+        assert (noted.name, noted.name_source) == ("CenterWell", AUTO)
+        assert (l3harris.name, l3harris.name_source) == ("L3Harris Technologies", MANUAL)
+        assert {twin_a.name, twin_b.name} == {"BYU"}
+        assert tjx.sub_brands == ["HomeGoods", "Marshalls"]
+
+    def test_curation_files_can_be_inline_json(self):
+        from one_off.curate_source_names import _load
+
+        assert _load('{"jobs.l3harris.com": "L3Harris Technologies"}') == {"jobs.l3harris.com": "L3Harris Technologies"}
+        assert _load(None) is None
+
     def test_recent_backfill_renames_only_the_last_days_jobs_and_keeps_their_page_name(self, scan_db, make_source, make_url, monkeypatch):
         from datetime import timedelta
 
