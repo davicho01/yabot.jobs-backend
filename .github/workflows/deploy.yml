@@ -371,6 +371,9 @@ jobs:
       # 2026-10-02 10pm run was killed before publishing 7,121 new pages;
       # 1Gi then held the plan but not rendering every hub at once (fixed in
       # static_hub_pages.publish_hubs). 2Gi is headroom over both.
+      # --timeout=1800s: a run that spends its full MAX_RENDERS_PER_RUN
+      # re-render budget took ~490s by 2026-10-06, close to the 540s
+      # default. The scheduler's --attempt-deadline is 1800s to match.
       # --update-secrets adds the logo.dev key (company logos, see
       # app.services.logo_dev) on top of the secrets gcloud-deploy.sh set,
       # so it survives every redeploy; only this function calls logo.dev.
@@ -388,6 +391,7 @@ jobs:
             --no-allow-unauthenticated \
             --memory=2Gi \
             --cpu=1 \
+            --timeout=1800s \
             --update-secrets=LOGO_DEV_SECRET_KEY=logo-dev-secret-key:latest \
             --update-labels=function=generate-static-job-pages
 
