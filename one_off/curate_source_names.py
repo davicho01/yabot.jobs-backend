@@ -3,15 +3,18 @@
 show), and report what needs a human.
 
 Reports, per source:
-  - AUTO-FIX: a name that's a board slug, a hostname or carries an admin note
-    ("greenhouse/clearstreet", "jpmc.fa.oraclecloud.com", "CenterWell (Humana
-    primary care / home health)") -> the note stripped, else the name most of
-    its jobs' pages agree on (company_names.promotable_name), else the
-    company in most of its stored page titles. Written with --write, unless
-    an admin already set the name (name_source "manual").
+  - AUTO-FIX: a name carrying an admin note ("CenterWell (Humana primary
+    care / home health)") -> the note dropped; a board slug or hostname
+    ("greenhouse/clearstreet", "careers.honda.com") -> the first of: the name
+    most of its jobs' pages agree on (company_names.promotable_name), the
+    company in most of its stored page titles — that the board's own address
+    confirms (one of its words in it: "Honda" in careers.honda.com), so
+    "L3HHCM20" on jobs.l3harris.com loses to a "L3Harris ..." page title.
+    Written with --write, unless an admin already set the name ("manual").
   - REVIEW: a usable-looking name that shares no word with the name most of
-    its jobs' pages give ("Gem" vs "11x.ai") — maybe the wrong company.
-    Never written; fix in admin.
+    its jobs' pages give ("Gem" vs "11x.ai"), and a slug/hostname whose
+    proposed name the board's address doesn't confirm (a department, an
+    internal code) — maybe the wrong company. Never written; fix in admin.
   - SUB-BRAND?: page names on 20+ of a source's jobs that aren't a legal
     entity code or portal wording and don't share a word with the source's
     name (TJX -> "Homegoods LLC", "Marshalls of MA"). Never written as is:
@@ -88,6 +91,15 @@ def _title_name(db, source_id) -> str | None:
     return name if n / sum(votes.values()) >= MIN_MAJORITY else None
 
 
+def _matches_board(name: str, source: CrawlSource) -> bool:
+    """Whether a name taken from a source's job pages is confirmed by the
+    board's own address: one of its words (3+ letters) appears in the
+    source's slug/hostname name or board URL ("Honda" in careers.honda.com,
+    "Toast" in careers.toasttab.com)."""
+    haystack = f"{source.name} {source.board_url}".lower()
+    return any(token in haystack for token in _tokens(name))
+
+
 def curate(db) -> tuple[dict, list, list]:
     """(auto_fixes {source: new name}, review [(source, dominant, share)],
     sub_brand_candidates [(source, page name, jobs)])."""
@@ -109,9 +121,20 @@ def curate(db) -> tuple[dict, list, list]:
 
         brand = brand_from_source_name(source.name)
         if brand != source.name and source.name_source != MANUAL:
-            proposal = brand or (dominant if share >= MIN_MAJORITY else None) or _title_name(db, source.id)
-            if proposal and proposal != source.name:
-                auto_fixes[source] = proposal
+            if brand:  # just a "(…)" note dropped
+                auto_fixes[source] = brand
+            else:  # a slug or hostname: the name has to come from its jobs
+                majority = dominant if share >= MIN_MAJORITY else None
+                titled = _title_name(db, source.id)
+                confirmed = next((c for c in (majority, titled) if c and _matches_board(c, source)), None)
+                proposal = majority or titled
+                if confirmed:
+                    auto_fixes[source] = confirmed
+                elif proposal:
+                    # Not confirmed by the board's own address: a department
+                    # ("Business Systems, Data & AI" on jpmc.fa.oraclecloud.com),
+                    # a code ("L3HHCM20"), a placeholder ("UNAVAILABLE").
+                    review.append((source, proposal, share))
         elif (
             brand
             and dominant

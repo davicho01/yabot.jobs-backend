@@ -139,11 +139,13 @@ class TestAdminUpdate:
         assert scan_db.get(CrawlSource, source.id).name_source == AUTO
 
 class TestOneOffs:
-    def _jobs(self, scan_db, make_url, source, page_name, n):
+    def _jobs(self, scan_db, make_url, source, page_name, n, page_title=None):
+        raw = {"html_excerpt": f"<html><head><title>{page_title}</title></head></html>"} if page_title else None
         for _ in range(n):
             url_row = make_url(source)
             scan_db.add(JobPosting(url_id=url_row.id, title="Engineer", page_company_name=page_name, company_name=page_name,
-                                   company_key=(page_name or "").lower(), extraction_status=ScanStatus.SUCCESS))
+                                   company_key=(page_name or "").lower(), extraction_status=ScanStatus.SUCCESS,
+                                   raw_source=raw))
         scan_db.commit()
 
     def test_curation_fixes_slugs_and_notes_flags_mismatches_and_lists_sub_brands(self, scan_db, make_source, make_url):
@@ -167,6 +169,41 @@ class TestOneOffs:
         assert [(s.name, dominant) for s, dominant, _ in review] == [("Gem", "11x.ai")]
         # Gem's 11x.ai jobs (12) are under the 20-job floor; TJX's entity-coded name never qualifies.
         assert [(s.name, name, n) for s, name, n in candidates] == [("TJX", "Marshalls of MA", 25)]
+
+    def test_curation_only_auto_applies_page_names_the_board_address_confirms(self, scan_db, make_source, make_url):
+        from one_off.curate_source_names import curate
+
+        honda, l3harris, jpmc, spaced = (make_source() for _ in range(4))
+        honda.name, honda.board_url = "careers.honda.com", "https://careers.honda.com"
+        l3harris.name, l3harris.board_url = "jobs.l3harris.com", "https://jobs.l3harris.com"
+        jpmc.name, jpmc.board_url = "jpmc.fa.oraclecloud.com", "https://jpmc.fa.oraclecloud.com/hcmUI"
+        spaced.name = "Summit Health / CityMD"  # a real name with a spaced slash, not a board slug
+        scan_db.commit()
+        self._jobs(scan_db, make_url, honda, "American Honda Motor Company", 5)
+        self._jobs(scan_db, make_url, l3harris, "L3HHCM20", 5)
+        self._jobs(scan_db, make_url, jpmc, "Business Systems, Data & AI (Wealth Management)", 5)
+        self._jobs(scan_db, make_url, spaced, "Summit Health Management, LLC", 5)
+
+        auto_fixes, review, _ = curate(scan_db)
+
+        assert {s.name: new for s, new in auto_fixes.items()} == {"careers.honda.com": "American Honda Motor Company"}
+        assert sorted((s.name, proposal) for s, proposal, _ in review) == [
+            ("jobs.l3harris.com", "L3HHCM20"),
+            ("jpmc.fa.oraclecloud.com", "Business Systems, Data & AI (Wealth Management)"),
+        ]
+
+    def test_curation_falls_back_to_a_page_title_name_the_board_address_confirms(self, scan_db, make_source, make_url):
+        from one_off.curate_source_names import curate
+
+        l3harris = make_source()
+        l3harris.name, l3harris.board_url = "jobs.l3harris.com", "https://jobs.l3harris.com"
+        scan_db.commit()
+        self._jobs(scan_db, make_url, l3harris, "L3HHCM20", 5, page_title="Systems Engineer | L3Harris Technologies")
+
+        auto_fixes, review, _ = curate(scan_db)
+
+        assert {s.name: new for s, new in auto_fixes.items()} == {"jobs.l3harris.com": "L3Harris Technologies"}
+        assert review == []
 
     def test_recent_backfill_renames_only_the_last_days_jobs_and_keeps_their_page_name(self, scan_db, make_source, make_url, monkeypatch):
         from datetime import timedelta

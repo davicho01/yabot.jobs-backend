@@ -198,6 +198,10 @@ def prefers_source_brand(name: str | None) -> bool:
 # A trailing "(…)" note on a crawl source's admin label ("CenterWell (Humana
 # primary care / home health)").
 _SOURCE_NOTE_RE = re.compile(r"\s*\([^)]*\)\s*$")
+# A board slug standing in for a name: "lever/aledade",
+# "oracle_fusion/eeho.fa.us2.oraclecloud.com/jobsearch" — no spaces. A name
+# with a spaced slash ("Summit Health / CityMD") is a real name.
+_SOURCE_SLUG_RE = re.compile(r"^\S+/\S+$")
 
 
 def brand_from_source_name(name: str | None) -> str | None:
@@ -207,7 +211,7 @@ def brand_from_source_name(name: str | None) -> str | None:
     if not name:
         return None
     bare = _SOURCE_NOTE_RE.sub("", name).strip()
-    if not bare or "/" in bare:
+    if not bare or _SOURCE_SLUG_RE.match(bare):
         return None
     return clean_company_name(bare)
 
