@@ -72,26 +72,26 @@ f18e151c-e3c1-4a06-a9da-fc9362ee6c0c,"ES88 Enterprise Solutions Consultoría y A
 d5c27076-86d6-488a-8f70-a1ce944eb0b7,Ether.fi,ether.fi,,ether.fi: homepage HTTP 429 for fetch; render found no logo; web search found no official asset,not_found
 fbb254c8-e880-4f56-a675-80cfda762e39,European Dynamics,eurodyn.com,,eurodyn.com: homepage HTTP 202 for fetch; render failed on navigation; web search found no logo file,not_found
 32d65f15-c03b-43ca-b46e-6678346d183e,Everfield,everfield.com,logos/everfield-95728606.png,https://everfield.com/hubfs/Everfield%20Favicon.png,found
-6251f649-ec63-4326-8176-e1ef4342afad,Evolent Health International Private Limited,evolent-health.com,,,
-8f11421d-89a2-4b25-bd3b-8e9797c7a11d,Evolent Health LLC,evolent-health.com,,,
-67b58172-fada-44bd-9d58-633f63fbbc75,"Evolent Specialty Services, Inc",evolent-health.com,,,
-b8651f69-7a10-4dbe-a2dd-1d57d8a34395,Expedia Group,expediagroupinc.com,,,
-2f5e0f8b-f87d-4908-b146-8b32cfa0f516,Fair Haven Community Health Care,fhchc.org,,,
-cdb9bef9-1c66-4e6c-a3dc-dab35f08202b,First Hawaiian Bank,fhb.com,,,
-8628ad64-84cf-4c77-a407-2e42854ed172,FIRST STUDENT MANAGEMENT LLC,firststudentmanagement.com,,,
-b3bafdfa-d7e7-4e60-99de-2606be2ce5df,Flatiron Health,flatiron.com,,,
-cc3a7455-8ea2-48f2-8f16-4a89963d101b,"FORWARD, INC.",forwardinc.net,,,
-62ff3ab6-c0bb-4283-8d7e-bf0a0d684812,Frost Bank,frost-bank.live,,,
-5430e3ca-0617-4ff3-8d49-e4855e895bad,GBA5 EntServ UK Limited,dxc.com,,,
-dda72c91-d537-4868-a32f-54528b8d0eb9,Generate,generatecapital.com,,,
-c306ce4a-31f7-43ae-87b7-cec76c8ba16d,Geneva Rock Products,clydeinc.com,,,
-ae000a59-2db6-456e-942a-6b11d83f9e2c,GiveCampus,givecampus.co,,,
-97649f71-53b9-4ce2-ac44-d5dac8c0a495,Glean,glean.ai,,,
-6a9080c8-5d18-4e61-952a-a6a6fd89be75,GM Financial United States,gmfinancial.com,,,
-46484f5f-448a-4242-a6c2-c76940a949f6,Golden Pet Brands,goldenpetbrands.com,,,
-a91dd507-a765-4394-88d3-86f7b42f2121,GovWell,govwell.com,,,
-c448538a-1614-4175-8e18-38ecd04e72a4,Hayes Locums,hayeslocums.com,,,
-d55f7fca-5c2a-400b-814d-b78fd289a65a,"HBK Engineering, LLC",hbkengineering.com,,,
+6251f649-ec63-4326-8176-e1ef4342afad,Evolent Health International Private Limited,evolent-health.com,,evolent-health.com doesn't resolve; evolent.com has only a 16px favicon (upscale is a blank dark square) and wide header logos; search found only third-party logo aggregators,not_found
+8f11421d-89a2-4b25-bd3b-8e9797c7a11d,Evolent Health LLC,evolent-health.com,,evolent-health.com doesn't resolve; evolent.com has only a 16px favicon (upscale is a blank dark square) and wide header logos; search found only third-party logo aggregators,not_found
+67b58172-fada-44bd-9d58-633f63fbbc75,"Evolent Specialty Services, Inc",evolent-health.com,,evolent-health.com doesn't resolve; evolent.com has only a 16px favicon (upscale is a blank dark square) and wide header logos; search found only third-party logo aggregators,not_found
+b8651f69-7a10-4dbe-a2dd-1d57d8a34395,Expedia Group,expediagroupinc.com,logos/expedia-group-ffb09c2f.png,https://www.expediagroup.com/content/experience-fragments/expediagroup/live-copies/en-us/header/master/_jcr_content/root/header/logo.coreimg.svg/1779134972973/expedia-group-logo-24.svg,found
+2f5e0f8b-f87d-4908-b146-8b32cfa0f516,Fair Haven Community Health Care,fhchc.org,logos/fair-haven-community-health-care-1f3e2acf.png,https://irp.cdn-website.com/97eee729/dms3rep/multi/FHCHC-Favicon--281-29.png,found
+cdb9bef9-1c66-4e6c-a3dc-dab35f08202b,First Hawaiian Bank,fhb.com,,"fhb.com: favicon only 48x24 / 128x64 (not square), no apple-touch-icon, header logo is a wide wordmark; google favicon 48x24; search found only third-party aggregators",not_found
+8628ad64-84cf-4c77-a407-2e42854ed172,FIRST STUDENT MANAGEMENT LLC,firststudentmanagement.com,logos/first-student-management-llc-a5556f36.png,https://firststudentinc.com/wp-content/uploads/cropped-android-chrome-256x256-1-180x180.png,found
+b3bafdfa-d7e7-4e60-99de-2606be2ce5df,Flatiron Health,flatiron.com,logos/flatiron-health-983ff990.png,rendered inline SVG on https://flatiron.com,found
+cc3a7455-8ea2-48f2-8f16-4a89963d101b,"FORWARD, INC.",forwardinc.net,,"forwardinc.net doesn't resolve (DNS), forwardinc.com connection reset, google favicon 404; web search found no official logo",not_found
+62ff3ab6-c0bb-4283-8d7e-bf0a0d684812,Frost Bank,frost-bank.live,logos/frost-bank-158701b3.png,https://www.frostbank.com/web-app-manifest-512x512.png,found
+5430e3ca-0617-4ff3-8d49-e4855e895bad,GBA5 EntServ UK Limited,dxc.com,,"dxc.com: favicons are wide strips (180x30), rendered header crop gave a wrong 'T' fragment, no apple-touch-icon; search found only third-party aggregators",not_found
+dda72c91-d537-4868-a32f-54528b8d0eb9,Generate,generatecapital.com,logos/generate-6fbf8cd5.png,https://generatecapital.com/wp-content/uploads/2026/08/cropped-favicon2-180x180.png,found
+c306ce4a-31f7-43ae-87b7-cec76c8ba16d,Geneva Rock Products,clydeinc.com,logos/geneva-rock-products-8d10382c.png,https://www.clydeinc.com/wp-content/smush-webp/cropped-favicon-180x180.png.webp,found
+ae000a59-2db6-456e-942a-6b11d83f9e2c,GiveCampus,givecampus.co,logos/givecampus-caa48663.png,"https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://givecampus.com&size=256",found
+97649f71-53b9-4ce2-ac44-d5dac8c0a495,Glean,glean.ai,logos/glean-f31b6025.png,https://cdn.prod.website-files.com/6204d0de7d994c00ea687da6/62dad22d43c2768536fe0cae_WebclipImage.png,found
+6a9080c8-5d18-4e61-952a-a6a6fd89be75,GM Financial United States,gmfinancial.com,logos/gm-financial-united-states-5be0ba99.png,https://www.gmfinancial.com/content/dam/gmf/icons/favicon.ico,found
+46484f5f-448a-4242-a6c2-c76940a949f6,Golden Pet Brands,goldenpetbrands.com,logos/golden-pet-brands-49ffbe56.png,https://goldenpetbrands.com/assets/apple-touch-icon.png,found
+a91dd507-a765-4394-88d3-86f7b42f2121,GovWell,govwell.com,logos/govwell-8e57154a.png,https://cdn.prod.website-files.com/697732d0a9e7ed6e5a43811f/698f56cdef10bc5513ab554a_Webclip.png,found
+c448538a-1614-4175-8e18-38ecd04e72a4,Hayes Locums,hayeslocums.com,logos/hayes-locums-44de636c.png,https://www.hayeslocums.com/wp-content/uploads/2024/12/HayesLocums_300x300_Logo.png,found
+d55f7fca-5c2a-400b-814d-b78fd289a65a,"HBK Engineering, LLC",hbkengineering.com,,"hbkengineering.com: favicon 32x20 only (not square), rendered result was LinkedIn's icon, google favicon 32x20",not_found
 8971b5b2-e6da-4a02-b5c2-00c68a8feaa5,Hendricks Community Hospital,hendrickshospital.org,,,
 8ea87c87-2945-44af-a23e-80091cd4db5c,Highgate Hotels Corporate Office - NY,highgate.com,,,
 9316cf13-4667-4b0d-ad0d-7d95e418907f,Hollywood Casino Morgantown,pennentertainment.com,,,
