@@ -22,16 +22,16 @@ b6c8e65f-ded1-4986-8cb0-7f830ad6d875,"Bellagio, LLC",hc-bellagio.com,,hc-bellagi
 5fb00db4-ae12-4c9e-b26d-f5a9a887e7f2,BGEU DXC Bulgaria EOOD,dxc.com,,dxc.com icons are wide strips; render cropped a bare T (wrong); web search found no square icon,not_found
 e9d425fd-b2d8-4fdf-bbca-9b9a593689ec,"Big Heart Pet Brands, Inc.",bigheartpet.com,,bigheartpet.com refuses connections; no Google favicon,not_found
 4946e85c-112c-4c70-a086-ffcbfebb3100,BlackSky,blacksky.com,logos/blacksky-92930b70.png,https://blacksky.com/wp-content/uploads/2025/01/cropped-blacksky-favicon-1-180x180.png,found
-c37a3e25-5c69-456c-a85a-f285e5ac25f7,BNY,bnyphoto.com,,,
-29c67f32-43a3-4ba5-b891-1db3ac162d6d,BR50 Enterprise Services Brasil Servicos,dxc.com,,,
-af8cd689-46cf-4922-8ba7-c41468f08901,BRANDAD Group AG,brandad-systems.de,,,
-92a5452e-9ca3-479f-a55b-55597202bf42,"Burlington Coat Factory of TX, Inc.",burlington.ca,,,
-042933f5-d3a4-473d-a27b-acffc0cb12b3,CAES DXC Technology Canada Co.,dxc.com,,,
-be65ab08-eb82-4b62-a5c0-d1b89309ea6b,"Canacre USA, LLC",canacre.com,,,
-5460ef2e-d4cd-414d-925c-0e0ec7f060a1,Candu Energy Inc.,canduenergy.ca,,,
-8926e936-b932-45ab-9548-1cc6004621c6,Canyons School District,canyonsdistrict.org,,,
-991be0db-177a-4e63-96f0-57a4c5cf8460,CBA NZ Holdings Limited,commbank.com.vn,,,
-cb337649-7ff0-47de-add0-5ccde4d7af7a,CBA Services Private Limited,commbank.com.vn,,,
+c37a3e25-5c69-456c-a85a-f285e5ac25f7,BNY,bnyphoto.com,logos/bny-cec5b1f0.png,https://www.bny.com/content/dam/bnymellon/web/favicons/favicon-152.png,found
+29c67f32-43a3-4ba5-b891-1db3ac162d6d,BR50 Enterprise Services Brasil Servicos,dxc.com,,"dxc.com: favicons are 180x30 wordmarks, no apple-touch-icon, header crop gave a stray 'T' from the wordmark; no square icon found via search",not_found
+af8cd689-46cf-4922-8ba7-c41468f08901,BRANDAD Group AG,brandad-systems.de,,"only icon found is a blank yellow rounded square (apple-touch-icon/google favicon), not a recognizable mark; render found only wide wordmarks",not_found
+92a5452e-9ca3-479f-a55b-55597202bf42,"Burlington Coat Factory of TX, Inc.",burlington.ca,logos/burlington-coat-factory-of-tx-inc-f94f2c59.png,https://www.burlington.com/apple-icon.png?apple-icon.42q8ww2fgirae.png,found
+042933f5-d3a4-473d-a27b-acffc0cb12b3,CAES DXC Technology Canada Co.,dxc.com,,"dxc.com: favicons are 180x30 wordmarks, no apple-touch-icon, header crop gave a stray 'T' from the wordmark; no square icon found via search",not_found
+be65ab08-eb82-4b62-a5c0-d1b89309ea6b,"Canacre USA, LLC",canacre.com,logos/canacre-usa-llc-dedcf6e1.png,https://images.squarespace-cdn.com/content/v1/5f3bcbcd66c85c78d1206ecc/1597760954725-IHOMUWUPZCA5R2WB1S26/favicon.ico?format=100w,found
+5460ef2e-d4cd-414d-925c-0e0ec7f060a1,Candu Energy Inc.,canduenergy.ca,,canduenergy.ca and candu.com unreachable; atkinsrealis.com (parent) has only a 32px/transparent favicon; search found no icon,not_found
+8926e936-b932-45ab-9548-1cc6004621c6,Canyons School District,canyonsdistrict.org,logos/canyons-school-district-9f014423.png,https://www.canyonsdistrict.org/wp-content/uploads/2020/05/cropped-canyons-district-logo-icon-180x180.png,found
+991be0db-177a-4e63-96f0-57a4c5cf8460,CBA NZ Holdings Limited,commbank.com.vn,logos/cba-nz-holdings-limited-dde7d3de.png,https://www.commbank.com.au/content/dam/commbank/commBank-logo.svg,found
+cb337649-7ff0-47de-add0-5ccde4d7af7a,CBA Services Private Limited,commbank.com.vn,logos/cba-services-private-limited-dde7d3de.png,https://www.commbank.com.au/content/dam/commbank/commBank-logo.svg,found
 f8fd0d37-060a-495d-9be6-93064e93c8e1,Cencosud Brasil,cencosud.com.br,,,
 53350253-959a-456b-8fe8-aca6b946d0c8,Chai Discovery,chaidiscovery.com,,,
 edb8e236-47a5-419a-b0f3-7ede2352dca1,Chubb External,chubb.com,,,
