@@ -2,16 +2,16 @@ id,company_name,company_domain,logo_key,logo_source_url,logo_status
 818c0f58-78f5-4f31-b877-c26ff4f80ea2,21 Marvell Asia Pte. Ltd.,marvell.com,logos/21-marvell-asia-pte-ltd-3b97f934.png,https://www.marvell.com/etc.clientlibs/marvell-com/clientlibs/clientlib-site/resources/icon-192x192.png,found
 cd2fb42f-1583-425f-ac76-a410e81f0391,34 Columbia Gas of Ohio Inc,nisource.com,logos/34-columbia-gas-of-ohio-inc-32ee674c.png,https://www.columbiagasohio.com/columbiagas.ico,found
 2c50058d-3b30-42a1-8765-a0fc3be3a259,38 Columbia Gas of Virginia Inc,nisource.com,logos/38-columbia-gas-of-virginia-inc-32ee674c.png,https://www.columbiagasva.com/columbiagas.ico,found
-46606ff3-2ada-47df-b8af-48608cded3bc,"60 Insperity Services, L.P.",insperity.com,,,
-9f9dc031-59d1-46e7-8528-d7531f3ada40,"65 Insperity Support Services, L.P.",insperity.com,,,
-656b8f24-52bd-4bd5-b3a7-59ea4001bee2,A01 Nationwide Mutual Insurance Co.,nationwide.com,,,
-4eb00ce0-7c59-419e-8acf-8658a9e0bf2c,"Access Education Services, LLC",wgu.org,,,
-4347c525-6338-4688-a0d5-5c0113b59f2c,AFP Cuprum,principal.com,,,
-417640a7-3c8e-4e28-b7dc-5fce5ac9ae5d,Allstate Insurance Company of Canada - Permanent,allstateinvestors.com,,,
-4e3d0345-de5c-4bc4-845e-e9769b8c06ca,Almaviva website,almavivadebelgique.be,,,
-d5300302-f419-4a41-b101-5f9a135232b5,American Honda Motor Company,honda.com,,,
-327f2447-a70e-4f91-899a-099691a1ff66,"AMERILIFE US, LLC",amerilife.com,,,
-cadd9569-5ed2-46a0-8627-97ff3e8c0a4d,Appalachian Power Company,appalachianpower.com,,,
+46606ff3-2ada-47df-b8af-48608cded3bc,"60 Insperity Services, L.P.",insperity.com,logos/60-insperity-services-l-p-750ccb81.png,"https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://insperity.com&size=256",found
+9f9dc031-59d1-46e7-8528-d7531f3ada40,"65 Insperity Support Services, L.P.",insperity.com,logos/65-insperity-support-services-l-p-750ccb81.png,"https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://insperity.com&size=256",found
+656b8f24-52bd-4bd5-b3a7-59ea4001bee2,A01 Nationwide Mutual Insurance Co.,nationwide.com,logos/a01-nationwide-mutual-insurance-co-9eb6b51f.png,https://www.nationwide.com/favicon.ico,found
+4eb00ce0-7c59-419e-8acf-8658a9e0bf2c,"Access Education Services, LLC",wgu.org,logos/access-education-services-llc-27725228.png,https://www.wgu.edu/etc.clientlibs/wgu/clientlibs/clientlib-site/resources/images/favicons/web-app-manifest-512x512.png,found
+4347c525-6338-4688-a0d5-5c0113b59f2c,AFP Cuprum,principal.com,logos/afp-cuprum-a5adb483.png,"https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://principal.com&size=256",found
+417640a7-3c8e-4e28-b7dc-5fce5ac9ae5d,Allstate Insurance Company of Canada - Permanent,allstateinvestors.com,logos/allstate-insurance-company-of-canada-permanent-c146b6c1.png,https://www.allstate.ca/favicon.ico,found
+4e3d0345-de5c-4bc4-845e-e9769b8c06ca,Almaviva website,almavivadebelgique.be,,"almavivadebelgique.be returns 403; only a blurry low-res Google favicon available, not crisp or clearly the brand",not_found
+d5300302-f419-4a41-b101-5f9a135232b5,American Honda Motor Company,honda.com,,honda.com blocks scraping (403); Google favicon is only the wide red HONDA wordmark; no square H icon found,not_found
+327f2447-a70e-4f91-899a-099691a1ff66,"AMERILIFE US, LLC",amerilife.com,logos/amerilife-us-llc-c9e6d854.png,https://amerilife.com/apple-icon.png?apple-icon.5189ac28.png,found
+cadd9569-5ed2-46a0-8627-97ff3e8c0a4d,Appalachian Power Company,appalachianpower.com,,favicon is 16x10 / 128x80 non-square; no apple-touch-icon; Google favicon too small and non-square,not_found
 eabad704-a225-40ad-a951-97c3195bd113,"ARES Enterprise Services Argentina, S.R.L. *",dxc.com,,,
 d6173be7-96a7-4e27-8980-7835dc7eaecb,Arthouse Hotel New York City,highgate.com,,,
 a8a761d8-d94f-4546-bb53-534d866cb1c6,Arthur J. Gallagher and Co.,ajg.com,,,
