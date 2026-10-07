@@ -1,5 +1,6 @@
 import re
 from urllib.parse import urlsplit
+from xml.etree import ElementTree
 
 import httpx
 
@@ -9,6 +10,7 @@ from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsA
 _PARADOX_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _PARADOX_SIGNATURE = "paradox.ai"
 _JOB_HREF_RE = re.compile(r'href="(/[^"]+/job/[^"]+)"')
+_SITEMAP_NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 
 
 def _detect_embedded(url: str) -> str | None:
@@ -43,7 +45,39 @@ def _fetch_jobs(host: str) -> list[str]:
             break
         urls.extend(f"https://{host}{path}" for path in paths)
         page += 1
+    if not urls:
+        urls = _sitemap_job_urls(host)
     return urls[:_PARADOX_MAX_JOBS]
+
+
+def _sitemap_job_urls(host: str) -> list[str]:
+    # The newer Paradox site template (verified live: jobs.olivegarden.com,
+    # jobs.longhornsteakhouse.com — Darden) has no /jobs/page/{n} listing at
+    # all: /jobs/page/1 renders a search form, and postings live at
+    # /search/jobdetails/{slug}/{guid}, listed only in a jobs sitemap
+    # (sitemap.xml is an index of career-site.xml + jobs-site.xml). Every
+    # entry carries a <lastmod>, so newest-first means the shared cap keeps
+    # the freshest postings rather than an arbitrary slice of a 7k+ list.
+    index = get_with_retry(f"https://{host}/sitemap.xml", timeout=TIMEOUT)
+    index.raise_for_status()
+    root = ElementTree.fromstring(index.content)
+    sitemaps = [
+        loc.text
+        for loc in root.findall("sm:sitemap/sm:loc", _SITEMAP_NS)
+        if loc.text and "job" in urlsplit(loc.text).path
+    ]
+    entries = root.findall("sm:url", _SITEMAP_NS)
+    for sitemap_url in sitemaps:
+        response = get_with_retry(sitemap_url, timeout=TIMEOUT)
+        response.raise_for_status()
+        entries.extend(ElementTree.fromstring(response.content).findall("sm:url", _SITEMAP_NS))
+    jobs = [
+        (entry.findtext("sm:loc", "", _SITEMAP_NS), entry.findtext("sm:lastmod", "", _SITEMAP_NS))
+        for entry in entries
+    ]
+    jobs = [(loc, lastmod) for loc, lastmod in jobs if "/jobdetails/" in loc]
+    jobs.sort(key=lambda job: job[1], reverse=True)
+    return list(dict.fromkeys(loc for loc, _ in jobs))
 
 
 # White-label onto each tenant's own domain, like Attrax/Clinch/Oracle
