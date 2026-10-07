@@ -672,6 +672,54 @@ gcloud scheduler jobs create http generate-static-job-pages-30min \
   --oidc-token-audience="$GENERATE_STATIC_JOB_PAGES_FUNCTION_URL"
 
 # ---------------------------------------------------------------------------
+# 11. find-official-sites — Cloud Function (2nd gen), triggered daily by
+#     Scheduler. Deploys from source (this repo), entry point is dispatch()
+#     in find_official_sites.py — same shape as follow-up-reminders above.
+#     Looks for the official careers site of companies whose jobs were only
+#     found elsewhere (see app.services.official_sites): a small batch per
+#     run, so a 4am America/New_York daily run is plenty and stays clear of
+#     the 1pm/9pm crawl dispatch. Uses logo.dev's brand search for a
+#     company's domain, hence its key. Review a dry run first
+#     (python find_official_sites.py --dry-run on the one-off job) before
+#     creating the Scheduler job.
+# ---------------------------------------------------------------------------
+
+gcloud functions deploy find-official-sites \
+  --gen2 \
+  --region="$REGION" \
+  --runtime=python313 \
+  --source=. \
+  --entry-point=dispatch \
+  --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=find_official_sites.py \
+  --trigger-http \
+  --no-allow-unauthenticated \
+  --set-env-vars="$COMMON_ENV" \
+  --set-secrets="$COMMON_SECRETS,LOGO_DEV_SECRET_KEY=logo-dev-secret-key:latest" \
+  --memory=512Mi \
+  --timeout=540s \
+  --update-labels=function=find-official-sites
+
+gcloud run services update find-official-sites \
+  --region="$REGION" \
+  --add-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION"
+
+FIND_OFFICIAL_SITES_FUNCTION_URL="$(gcloud functions describe find-official-sites --gen2 --region="$REGION" --format='value(serviceConfig.uri)')"
+
+gcloud functions add-invoker-policy-binding find-official-sites \
+  --gen2 \
+  --region="$REGION" \
+  --member="serviceAccount:${PROJECT_ID}@appspot.gserviceaccount.com"
+
+gcloud scheduler jobs create http find-official-sites-daily \
+  --location="$REGION" \
+  --schedule="0 4 * * *" \
+  --time-zone="America/New_York" \
+  --uri="$FIND_OFFICIAL_SITES_FUNCTION_URL" \
+  --http-method=POST \
+  --oidc-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com" \
+  --oidc-token-audience="$FIND_OFFICIAL_SITES_FUNCTION_URL"
+
+# ---------------------------------------------------------------------------
 # Redeploys after this point (new image/source, no infra changes) — this is
 # also exactly what .github/workflows/deploy.yml runs on every push to main:
 #   gcloud builds submit --tag "${IMAGE}:$(git rev-parse --short HEAD)" --project="$PROJECT_ID" .

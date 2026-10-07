@@ -49,5 +49,11 @@ class Company(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     logo_origin: Mapped[str | None] = mapped_column(String(20))
     logo_etag: Mapped[str | None] = mapped_column(String(200))
 
+    # The last look for this company's own careers site (see
+    # app.services.official_sites), for a company whose jobs we only found
+    # somewhere else: when, and what it found ("found" / "none" / "error").
+    official_site_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    official_site_result: Mapped[str | None] = mapped_column(String(20))
+
     def __repr__(self) -> str:
         return f"<Company key={self.company_key!r} domain={self.domain!r}>"
