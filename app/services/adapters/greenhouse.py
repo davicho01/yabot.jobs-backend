@@ -296,7 +296,11 @@ def scan_job_url(url: str) -> ScanResult | None:
             expired=True,
         )
 
-    fields = extract(final_url, html)
+    # Some sites redirect the gh_jid link to a path that drops it (verified:
+    # zoominfo.com/careers?gh_jid=N -> /careers/N), so read the posting by
+    # the submitted URL's gh_jid in that case.
+    redirect_dropped_gh_jid = _GH_EMBED_JOB_ID_RE.search(url) and not _GH_EMBED_JOB_ID_RE.search(final_url)
+    fields = extract(url if redirect_dropped_gh_jid else final_url, html)
     description = (
         (fields.description if fields else None) or base.fallback_description(html) or base.og_description(html)
     )
