@@ -230,6 +230,20 @@ class TestAdminUpdate:
         update_crawl_source(source.id, CrawlSourceUpdate(max_concurrent_scans=2), scan_db)
         assert scan_db.get(CrawlSource, source.id).name_source == AUTO
 
+    def test_rejecting_a_source_records_why(self, scan_db, make_source):
+        from app.api.routes.crawl_sources import update_crawl_source
+        from app.schemas.crawl_source import CrawlSourceRead, CrawlSourceUpdate
+
+        source = make_source()
+        source.name_source = AUTO
+        scan_db.commit()
+        updated = update_crawl_source(
+            source.id, CrawlSourceUpdate(status="rejected", notes="robots.txt: User-agent: * / Disallow: /"), scan_db
+        )
+        read = CrawlSourceRead.model_validate(updated)
+        assert (read.status, read.notes) == ("rejected", "robots.txt: User-agent: * / Disallow: /")
+        assert read.name_source == AUTO  # a note isn't a rename
+
 class TestOneOffs:
     def _jobs(self, scan_db, make_url, source, page_name, n, page_title=None):
         raw = {"html_excerpt": f"<html><head><title>{page_title}</title></head></html>"} if page_title else None

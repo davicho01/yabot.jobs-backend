@@ -40,6 +40,9 @@ class CrawlSourceUpdate(BaseModel):
     # How many of this board's job pages may be fetched at once — lower it
     # for a site that's sensitive to load.
     max_concurrent_scans: int | None = Field(default=None, ge=MIN_CONCURRENT_SCANS, le=MAX_CONCURRENT_SCANS)
+    # Why the row is in its status — required practice for "rejected" and
+    # "delete" (the evidence, not just a verdict). null clears it.
+    notes: str | None = None
 
     @field_validator("status")
     @classmethod
@@ -87,6 +90,7 @@ class CrawlSourceRead(BaseModel):
     max_concurrent_scans: int
     last_crawled_at: datetime | None
     last_error: str | None
+    notes: str | None
     # System-managed coverage monitoring (see app.services.coverage_monitor)
     # — not settable via CrawlSourceUpdate.
     coverage_last_count: int | None

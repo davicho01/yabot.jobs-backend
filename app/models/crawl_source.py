@@ -71,6 +71,11 @@ class CrawlSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(20), default=CrawlSourceStatus.ACTIVE, nullable=False)
     last_crawled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
+    # Why the row is in its status, written by whoever set it (admin or
+    # agent) — above all for "rejected" and "delete": the evidence (robots.txt
+    # line, bot wall, duplicate of which row), so nobody has to re-investigate.
+    # Nothing automatic writes it, unlike last_error.
+    notes: Mapped[str | None] = mapped_column(Text)
     # Set by crawl_dispatcher.py right before publishing this source's
     # wake-up, cleared by crawl_worker.py once that crawl finishes (success
     # or a handled failure) — so a source with an outstanding, not-yet-
