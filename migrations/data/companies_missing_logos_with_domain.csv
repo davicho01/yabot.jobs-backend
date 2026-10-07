@@ -52,26 +52,26 @@ ca44c31d-e358-4f2e-b16f-86ed8fb2c4ff,Commonwealth Bank of Australia,commbank.com
 f048c5af-74eb-4950-a497-f5839058d64b,Concora Credit Inc.,concoracredit.com,,concoracredit.com homepage answered HTTP 425 (with and without www); Google favicon 404,not_found
 040c8291-b1b7-4437-9eb5-37d4aefee723,"Corporate J. Crew Group, LLC",jcrew.com,logos/corporate-j-crew-group-llc-2c931e3f.png,https://www.jcrew.com/next-static/images/apple-touch-icon-jcrew.png,found
 6124869f-5534-4bbc-bb03-43fa538b3c05,Cowboy Space Corp.,cowboyspace.com,logos/cowboy-space-corp-ef75c461.png,https://framerusercontent.com/images/sWnMj5M5KoHlX2ldG4opPYLWE4.png,found
-21f30233-3702-4232-9902-4d79e143f6f7,"CRES EntServ Costa Rica, Limitada",dxc.com,,,
-bdf181c0-ee03-422c-b89d-da2ef760ff4f,Customer Operations,spectrum.com,,,
-44205afa-0024-4c0f-bfd6-8af59914bccb,DEUNA,deuna.com,,,
-c693f4d2-7a43-4971-b746-05a6540e9811,"Dick's Merch & Supply Chain, Inc",dickssportinggoods.com,,,
-d01676ec-9f06-40a5-9614-0c0f050831a5,DigitalOcean,digitalocean.com,,,
-19d5aa78-bcae-4860-810b-6eb2db44a256,Domain Holdings Australia Pty Limited,process-pay.com,,,
-957d69d4-8417-4635-95e8-7da7403b6cb4,doTERRA,conthhato.site,,,
-fd242a3f-5c34-4d75-9e02-6ef3b213928b,DXC Technology,dxc.com,,,
-0d62ead3-7e99-43c5-a6a4-700fbb507f23,E11EVEN Club Hotel & Residences,highgate.com,,,
-1a659725-e42b-4a28-a234-9a4620cddf94,Eastman,eastman.com,,,
-73d05b0b-90ff-49fb-bbd7-f35b7d22bef6,EC Source,mastec.com,,,
-716a4b60-1112-4b5a-91a1-1b197acce094,EG45 Electronic Data Systems (Egypt) SAE,dxc.com,,,
-699d9a01-a649-4b7e-a458-5c5c4fea8043,EL Costa Rica S.R.L.,edwards.com,,,
-a477fdfc-3936-44a9-901c-9b01a68224eb,Emergent Holdings,emergentholdingsinc.com,,,
-c5cfafb4-acaf-4eac-bb81-dc446096f10e,Eneba,eneba.com,,,
-bc803016-58a8-47fb-ae19-a477833f9137,"ES87 Enterprise Solutions Outsourcing España, S.L.U.",dxc.com,,,
-f18e151c-e3c1-4a06-a9da-fc9362ee6c0c,"ES88 Enterprise Solutions Consultoría y Aplicaciones España, S.L.U.",dxc.com,,,
-d5c27076-86d6-488a-8f70-a1ce944eb0b7,Ether.fi,ether.fi,,,
-fbb254c8-e880-4f56-a675-80cfda762e39,European Dynamics,eurodyn.com,,,
-32d65f15-c03b-43ca-b46e-6678346d183e,Everfield,everfield.com,,,
+21f30233-3702-4232-9902-4d79e143f6f7,"CRES EntServ Costa Rica, Limitada",dxc.com,,dxc.com: only wide wordmarks/16px favicons; render crop gave a bare 'T' fragment; Wikimedia logo too wide,not_found
+bdf181c0-ee03-422c-b89d-da2ef760ff4f,Customer Operations,spectrum.com,,spectrum.com: homepage timed out (fetch and render); google favicon 20x30; Wikimedia 429,not_found
+44205afa-0024-4c0f-bfd6-8af59914bccb,DEUNA,deuna.com,logos/deuna-fe8e2f9e.png,https://cdn.prod.website-files.com/66269d6696cb4969aa25e070/663ac650777d6c76690e337f_WEBCLIP.webp,found
+c693f4d2-7a43-4971-b746-05a6540e9811,"Dick's Merch & Supply Chain, Inc",dickssportinggoods.com,,dickssportinggoods.com: site blocks fetch/render (403/reset); google favicon 16px; Wikipedia logo too wide,not_found
+d01676ec-9f06-40a5-9614-0c0f050831a5,DigitalOcean,digitalocean.com,logos/digitalocean-0c982ea3.png,https://www.digitalocean.com/_do-www-marketing/a8a9a0b5/_next/static/media/apple-touch-icon.9537f22a.png,found
+19d5aa78-bcae-4860-810b-6eb2db44a256,Domain Holdings Australia Pty Limited,process-pay.com,,"process-pay.com does not resolve (DNS), domain looks wrong for Domain Holdings Australia; no brand to verify",not_found
+957d69d4-8417-4635-95e8-7da7403b6cb4,doTERRA,conthhato.site,logos/doterra-6afe63a1.png,https://www.doterra.com/_ui/desktop/common/images/apple-touch-icon-200x200.png,found
+fd242a3f-5c34-4d75-9e02-6ef3b213928b,DXC Technology,dxc.com,,dxc.com: only wide wordmarks/16px favicons; render crop gave a bare 'T' fragment; Wikimedia logo too wide,not_found
+0d62ead3-7e99-43c5-a6a4-700fbb507f23,E11EVEN Club Hotel & Residences,highgate.com,logos/e11even-club-hotel-residences-aafa68f0.png,https://www.highgate.com/app/themes/highgate-corporate/dist/images/favicon/apple-touch-icon.png,found
+1a659725-e42b-4a28-a234-9a4620cddf94,Eastman,eastman.com,,eastman.com: favicon 41x48; header render returned a Facebook icon (wrong); no apple-touch-icon,not_found
+73d05b0b-90ff-49fb-bbd7-f35b7d22bef6,EC Source,mastec.com,,"mastec.com (parent): 16px favicon only, header logo 293x84 wide, no square icon found",not_found
+716a4b60-1112-4b5a-91a1-1b197acce094,EG45 Electronic Data Systems (Egypt) SAE,dxc.com,,dxc.com: only wide wordmarks/16px favicons; render crop gave a bare 'T' fragment; Wikimedia logo too wide,not_found
+699d9a01-a649-4b7e-a458-5c5c4fea8043,EL Costa Rica S.R.L.,edwards.com,logos/el-costa-rica-s-r-l-c3134fcf.png,https://assets-us-01.kc-usercontent.com/6239a81e-8f0f-0040-a1df-b4932a10f6ae/261e0bb6-68dd-4f07-8798-cce9b0c42cc3/logo.svg?q=75&w=96&auto=format&fm=webp&lossless=true,found
+a477fdfc-3936-44a9-901c-9b01a68224eb,Emergent Holdings,emergentholdingsinc.com,logos/emergent-holdings-6b8972c2.png,https://emergentholdingsinc.com/wp-content/uploads/2026/07/EH_clr_mrk.png,found
+c5cfafb4-acaf-4eac-bb81-dc446096f10e,Eneba,eneba.com,logos/eneba-86d91cd2.png,https://static.eneba.games/icon_512x512.1116fbe57fb071d8348e986b108fd268.png,found
+bc803016-58a8-47fb-ae19-a477833f9137,"ES87 Enterprise Solutions Outsourcing España, S.L.U.",dxc.com,,dxc.com: only wide wordmarks/16px favicons; render crop gave a bare 'T' fragment; Wikimedia logo too wide,not_found
+f18e151c-e3c1-4a06-a9da-fc9362ee6c0c,"ES88 Enterprise Solutions Consultoría y Aplicaciones España, S.L.U.",dxc.com,,dxc.com: only wide wordmarks/16px favicons; render crop gave a bare 'T' fragment; Wikimedia logo too wide,not_found
+d5c27076-86d6-488a-8f70-a1ce944eb0b7,Ether.fi,ether.fi,,ether.fi: homepage HTTP 429 for fetch; render found no logo; web search found no official asset,not_found
+fbb254c8-e880-4f56-a675-80cfda762e39,European Dynamics,eurodyn.com,,eurodyn.com: homepage HTTP 202 for fetch; render failed on navigation; web search found no logo file,not_found
+32d65f15-c03b-43ca-b46e-6678346d183e,Everfield,everfield.com,logos/everfield-95728606.png,https://everfield.com/hubfs/Everfield%20Favicon.png,found
 6251f649-ec63-4326-8176-e1ef4342afad,Evolent Health International Private Limited,evolent-health.com,,,
 8f11421d-89a2-4b25-bd3b-8e9797c7a11d,Evolent Health LLC,evolent-health.com,,,
 67b58172-fada-44bd-9d58-633f63fbbc75,"Evolent Specialty Services, Inc",evolent-health.com,,,
