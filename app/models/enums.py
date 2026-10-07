@@ -220,6 +220,11 @@ class AtsType(StrEnum):
     # are SSO-gated, but individual job postings and /latest-jobs are
     # genuinely public (see adapters/selectminds.py).
     SELECTMINDS = "selectminds"
+    # SmartRecruiters — a multi-tenant ATS at careers.smartrecruiters.com/
+    # {company}. Its public JSON API's robots.txt bars crawlers, so listing
+    # uses the career site's own paging and scanning the job pages'
+    # microdata (see adapters/smartrecruiters.py).
+    SMARTRECRUITERS = "smartrecruiters"
     # Sportsman's Warehouse (careers.sportsmans.com) — a custom career
     # module on their own SAP Hybris storefront, not any shared ATS
     # platform (see adapters/sportsmans_warehouse.py).
