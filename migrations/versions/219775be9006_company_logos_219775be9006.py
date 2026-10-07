@@ -26,10 +26,10 @@ depends_on: Union[str, Sequence[str], None] = None
 LOGOS = {
     "46606ff3-2ada-47df-b8af-48608cded3bc": ("logos/60-insperity-services-l-p-750ccb81.png", "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://insperity.com&size=256"),
     "9f9dc031-59d1-46e7-8528-d7531f3ada40": ("logos/65-insperity-support-services-l-p-750ccb81.png", "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://insperity.com&size=256"),
-    "656b8f24-52bd-4bd5-b3a7-59ea4001bee2": ("logos/a01-nationwide-mutual-insurance-co-9eb6b51f.png", "https://www.nationwide.com/favicon.ico"),
+    "656b8f24-52bd-4bd5-b3a7-59ea4001bee2": ("logos/a01-nationwide-mutual-insurance-co-1d0d8e00.png", "https://media.nationwide.com/bolt/versions/7.6.0/bolt-logo-nw-horizontal-full.svg"),
     "4eb00ce0-7c59-419e-8acf-8658a9e0bf2c": ("logos/access-education-services-llc-27725228.png", "https://www.wgu.edu/etc.clientlibs/wgu/clientlibs/clientlib-site/resources/images/favicons/web-app-manifest-512x512.png"),
-    "4347c525-6338-4688-a0d5-5c0113b59f2c": ("logos/afp-cuprum-a5adb483.png", "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://principal.com&size=256"),
-    "417640a7-3c8e-4e28-b7dc-5fce5ac9ae5d": ("logos/allstate-insurance-company-of-canada-permanent-c146b6c1.png", "https://www.allstate.ca/favicon.ico"),
+    "4347c525-6338-4688-a0d5-5c0113b59f2c": ("logos/afp-cuprum-e48804db.png", "https://cdn.cookielaw.org/logos/0f4a7e60-69a8-4cc0-a742-2263344f328c/01915bf2-8837-7e34-9c9b-8c6fb9b0d2a1/4fde8dc2-2dd5-4e72-9bb3-2d0bf64e0cb3/principal_full_(1).png"),
+    "417640a7-3c8e-4e28-b7dc-5fce5ac9ae5d": ("logos/allstate-insurance-company-of-canada-permanent-6f304ac7.png", "https://www.allstate.ca/-/media/project/allstate/allstateca/header/logohands.svg"),
     "327f2447-a70e-4f91-899a-099691a1ff66": ("logos/amerilife-us-llc-c9e6d854.png", "https://amerilife.com/apple-icon.png?apple-icon.5189ac28.png"),
 }
 
