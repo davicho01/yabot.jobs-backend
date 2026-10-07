@@ -99,6 +99,98 @@ class TestUpsertAndPromotion:
         assert scan_db.get(CrawlSource, source.id).name == "J&J"
 
 
+class TestOfficialVsElsewhere:
+    """Phase B: only a crawled company site is official; jobs found anywhere
+    else take an official name they match exactly, and lose dedup to the
+    official copy."""
+
+    def _scan(self, scan_db, url_row, page_name, title="Engineer", location="Austin, TX"):
+        posting = jobs._upsert_posting(
+            scan_db, url_row, ScanResult(success=True, title=title, company_name=page_name, location=location), NOW
+        )
+        scan_db.commit()
+        return posting
+
+    def _board(self, scan_db, make_source, *, name="linkedin.com", status="pending", is_official=False):
+        board = make_source()
+        board.name, board.name_source, board.status, board.is_official = name, PLACEHOLDER, status, is_official
+        scan_db.commit()
+        return board
+
+    def test_only_an_active_non_job_board_source_is_official(self):
+        from app.services.company_names import is_official_source
+
+        assert is_official_source(CrawlSource(name="Acme", is_official=True, status="active"))
+        assert not is_official_source(CrawlSource(name="Acme", is_official=True, status="pending"))
+        assert not is_official_source(CrawlSource(name="linkedin.com", is_official=False, status="active"))
+        assert not is_official_source(None)
+
+    def test_a_job_board_or_uncrawlable_placeholder_is_never_renamed_after_a_job(self, scan_db, make_source, make_url):
+        linkedin = self._board(scan_db, make_source)
+        uncrawlable = self._board(scan_db, make_source, name="acme-careers.com", is_official=True)
+
+        self._scan(scan_db, make_url(linkedin), "Acme Corp")
+        self._scan(scan_db, make_url(uncrawlable), "Acme Corp")
+
+        for source in (linkedin, uncrawlable):
+            assert scan_db.get(CrawlSource, source.id).name_source == PLACEHOLDER
+
+    def test_a_job_from_elsewhere_takes_an_official_name_it_matches_exactly(self, scan_db, make_source, make_url):
+        lowes, walmart = make_source(), make_source()
+        lowes.name = "Lowe's"
+        walmart.name, walmart.sub_brands = "Walmart", ["Sam's Club"]
+        scan_db.commit()
+        linkedin = self._board(scan_db, make_source)
+
+        assert self._scan(scan_db, make_url(linkedin), "Lowe's, Inc.").company_name == "Lowe's"
+        assert self._scan(scan_db, make_url(linkedin), "Sam's Club").company_name == "Sam's Club"
+        # A sub-brand merely contained in another company's name isn't a match.
+        assert self._scan(scan_db, make_url(linkedin), "Sam's Club Pharmacy Partners").company_name == "Sam's Club Pharmacy Partners"
+        assert self._scan(scan_db, make_url(None), "Careers at Initech").company_name == "Initech"
+
+    def test_the_official_copy_takes_over_a_job_found_first_elsewhere(self, scan_db, make_source, make_url):
+        acme = make_source()
+        acme.name = "Acme"
+        scan_db.commit()
+        linkedin = self._board(scan_db, make_source)
+
+        first = self._scan(scan_db, make_url(linkedin), "Acme")
+        echo = self._scan(scan_db, make_url(None), "Acme")  # another copy, grouped under the first
+        assert first.primary_posting_id is None and echo.primary_posting_id == first.id
+
+        official = self._scan(scan_db, make_url(acme), "Acme Inc")
+        scan_db.expire_all()
+
+        assert scan_db.get(JobPosting, official.id).primary_posting_id is None
+        assert scan_db.get(JobPosting, first.id).primary_posting_id == official.id
+        assert scan_db.get(JobPosting, echo.id).primary_posting_id == official.id
+
+        # Rescanning the job board's copy keeps it a duplicate of the official one.
+        rescanned = self._scan(scan_db, scan_db.get(JobPosting, first.id).url, "Acme")
+        assert rescanned.primary_posting_id == official.id
+
+    def test_an_official_copy_found_first_stays_primary(self, scan_db, make_source, make_url):
+        acme = make_source()
+        acme.name = "Acme"
+        scan_db.commit()
+        linkedin = self._board(scan_db, make_source)
+
+        official = self._scan(scan_db, make_url(acme), "Acme")
+        board_copy = self._scan(scan_db, make_url(linkedin), "Acme")
+
+        assert official.primary_posting_id is None
+        assert board_copy.primary_posting_id == official.id
+
+    def test_registering_a_job_board_url_makes_a_non_official_source(self, scan_db):
+        from app.services.crawl_sources import register_discovered_board
+
+        board = register_discovered_board(scan_db, "https://www.linkedin.com/jobs/view/123")
+        company = register_discovered_board(scan_db, "https://boards.greenhouse.io/acme/jobs/1")
+
+        assert board is not None and board.is_official is False
+        assert company is not None and company.is_official is True
+
+
 class TestAdminUpdate:
     def test_renaming_a_source_confirms_the_name_for_future_jobs_only(self, scan_db, make_source, make_url, monkeypatch):
         from app.api.routes.crawl_sources import update_crawl_source

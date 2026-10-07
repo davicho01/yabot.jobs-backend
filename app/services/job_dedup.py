@@ -22,7 +22,7 @@ import re
 import uuid
 from difflib import SequenceMatcher
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from app.models.job_posting import JobPosting
@@ -294,3 +294,21 @@ def find_duplicate_primary(db: Session, posting: JobPosting) -> uuid.UUID | None
         if similarity >= _TITLE_SIMILARITY_THRESHOLD:
             return candidate_id
     return None
+
+
+def claim_primary(db: Session, posting: JobPosting, primary_id: uuid.UUID) -> None:
+    """Make `posting` the canonical row of the group `primary_id` heads: the
+    company's official site is the authority on its jobs, so its copy wins
+    over one found first somewhere else (a job board). The old primary and
+    every duplicate pointing at it re-point to `posting` — one level, as
+    groups never chain."""
+    db.execute(
+        update(JobPosting)
+        .where(
+            or_(JobPosting.id == primary_id, JobPosting.primary_posting_id == primary_id),
+            JobPosting.id != posting.id,
+        )
+        .values(primary_posting_id=posting.id)
+        .execution_options(synchronize_session=False)
+    )
+    posting.primary_posting_id = None

@@ -130,3 +130,13 @@ def test_sources_with_pending_scans_reports_lane_count(now, scan_db, make_source
     make_url(None)  # user-submitted: no source, must not show up
 
     assert sources_with_pending_scans(scan_db) == [(pending.id, 4)]
+
+
+def test_sources_with_pending_scans_lists_official_sources_first(now, scan_db, make_source, make_url):
+    board, official = make_source(), make_source()
+    board.is_official = False
+    scan_db.commit()
+    make_url(board)
+    make_url(official)
+
+    assert [source_id for source_id, _ in sources_with_pending_scans(scan_db)] == [official.id, board.id]

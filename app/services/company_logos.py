@@ -82,10 +82,23 @@ PINNED_ORIGINS = (ORIGIN_URL, ORIGIN_UPLOAD)
 # or job board not on PLATFORM_DOMAINS), not this company's own site.
 SHARED_DOMAIN_COMPANY_LIMIT = 2
 
+# Job boards / aggregators users submit links from: other companies' jobs,
+# re-listed. A crawl source on one is never a company's official site (see
+# app.services.company_names.is_official_source).
+JOB_BOARD_DOMAINS = frozenset(
+    {
+        "linkedin.com", "indeed.com", "glassdoor.com", "ziprecruiter.com", "monster.com",
+        "simplyhired.com", "wellfound.com", "builtin.com", "dice.com", "careerbuilder.com",
+        "ycombinator.com", "workatastartup.com", "otta.com", "welcometothejungle.com",
+        "usajobs.gov", "nlx.org", "dejobs.org", "jobsyn.org", "echojobs.io", "remoteok.com",
+        "weworkremotely.com", "handshake.com", "joinhandshake.com",
+    }
+)
+
 # Registrable domains that host many companies' postings: ATS platforms (from
 # the URL shapes in app.services.adapters), job boards/aggregators users
 # submit links from, and our own site. Never a company's logo domain.
-PLATFORM_DOMAINS = frozenset(
+PLATFORM_DOMAINS = JOB_BOARD_DOMAINS | frozenset(
     {
         # ATS platforms
         "adp.com", "applicantpro.com", "applytojob.com", "ashbyhq.com", "avature.net", "bamboohr.com",
@@ -98,12 +111,6 @@ PLATFORM_DOMAINS = frozenset(
         "selectminds.com", "smartrecruiters.com", "successfactors.com", "successfactors.eu",
         "taleo.net", "talentbrew.com", "talentreef.com", "ultipro.com", "ukg.com", "workable.com",
         "zenats.com", "governmentjobs.com", "schooljobs.com", "service-now.com",
-        # Job boards / aggregators
-        "linkedin.com", "indeed.com", "glassdoor.com", "ziprecruiter.com", "monster.com",
-        "simplyhired.com", "wellfound.com", "builtin.com", "dice.com", "careerbuilder.com",
-        "ycombinator.com", "workatastartup.com", "otta.com", "welcometothejungle.com",
-        "usajobs.gov", "nlx.org", "dejobs.org", "jobsyn.org", "echojobs.io", "remoteok.com",
-        "weworkremotely.com", "handshake.com", "joinhandshake.com",
         # Generic hosts that show up in hiringOrganization.sameAs
         "facebook.com", "twitter.com", "x.com", "instagram.com", "youtube.com", "schema.org",
         "wikipedia.org", "crunchbase.com",

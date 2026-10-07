@@ -128,12 +128,14 @@ def sources_with_pending_scans(db: Session) -> list[tuple[uuid.UUID, int]]:
     """(source_id, max_concurrent_scans) for every source that has at least
     one PENDING URL — the dispatcher's safety-net sweep publishes wake-ups
     for each (lost wake-ups, lanes that died, rows stranded by the
-    pre-throttling per-URL queue)."""
+    pre-throttling per-URL queue). Official sources come first, so under a
+    backlog their scans are woken (and so run) before anything else's."""
     rows = db.execute(
-        select(JobPostingUrl.crawl_source_id, CrawlSource.max_concurrent_scans)
+        select(JobPostingUrl.crawl_source_id, CrawlSource.max_concurrent_scans, CrawlSource.is_official)
         .join(CrawlSource, CrawlSource.id == JobPostingUrl.crawl_source_id)
         .where(JobPostingUrl.scan_status == ScanStatus.PENDING)
         .distinct()
+        .order_by(CrawlSource.is_official.desc())
     ).all()
     db.rollback()
-    return [(source_id, lanes) for source_id, lanes in rows]
+    return [(source_id, lanes) for source_id, lanes, _ in rows]

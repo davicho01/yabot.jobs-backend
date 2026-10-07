@@ -18,9 +18,15 @@ from app.models.job_application import UserJobApplication
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
 from app.services.company_logos import resolve_company
-from app.services.company_names import PLACEHOLDER, company_for, promote_placeholder
+from app.services.company_names import (
+    PLACEHOLDER,
+    company_for,
+    is_official_source,
+    official_company_for,
+    promote_placeholder,
+)
 from app.services.crawl_sources import register_discovered_board
-from app.services.job_dedup import find_duplicate_primary, normalize_company_name, normalize_title
+from app.services.job_dedup import claim_primary, find_duplicate_primary, normalize_company_name, normalize_title
 from app.services.job_llm_extractor import LlmExtraction, extract_with_llm, html_to_text
 from app.services import geo
 from app.services.geo import resolve_area_codes, resolve_country_for_locations, resolve_places
@@ -1000,9 +1006,13 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
     page_company_name = _fit(decode_entities(fields["company_name"]), _COMPANY_NAME_MAX)
     posting.page_company_name = page_company_name
     source = db.get(CrawlSource, url_row.crawl_source_id) if url_row.crawl_source_id else None
-    if source is not None and source.name_source == PLACEHOLDER:
+    official = is_official_source(source)
+    if official and source.name_source == PLACEHOLDER:
         promote_placeholder(db, source, page_company_name)
-    posting.company_name = _fit(company_for(source, page_company_name), _COMPANY_NAME_MAX)
+    # A job found anywhere else (a job board, a site we can't crawl, no
+    # source) takes the official company's name when its page names one.
+    company = company_for(source, page_company_name) if official else official_company_for(db, page_company_name)
+    posting.company_name = _fit(company, _COMPANY_NAME_MAX)
     posting.location = _fit(location, _LOCATION_MAX)
     # From the full string, not the 255-char display value above, so a long
     # list of locations isn't cut off partway for sources that don't
@@ -1042,6 +1052,10 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
         posting.company_key = normalize_company_name(posting.company_name)
         posting.title_key = normalize_title(posting.title)
         posting.primary_posting_id = find_duplicate_primary(db, posting)
+        # The official site's copy of a job wins over one found first
+        # elsewhere: it becomes the canonical row, the other its duplicate.
+        if official and posting.primary_posting_id and not _posting_is_official(db, posting.primary_posting_id):
+            claim_primary(db, posting, posting.primary_posting_id)
         # The company's logo domain (see app.services.company_logos) — every
         # scan/rescan may bring a better signal than the last one had.
         resolve_company(
@@ -1052,6 +1066,16 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
             site_urls=[url_row.url, _crawl_source_board_url(db, url_row.crawl_source_id)],
         )
     return posting
+
+
+def _posting_is_official(db: Session, posting_id: uuid.UUID) -> bool:
+    source = db.scalar(
+        select(CrawlSource)
+        .join(JobPostingUrl, JobPostingUrl.crawl_source_id == CrawlSource.id)
+        .join(JobPosting, JobPosting.url_id == JobPostingUrl.id)
+        .where(JobPosting.id == posting_id)
+    )
+    return is_official_source(source)
 
 
 def _crawl_source_board_url(db: Session, crawl_source_id: uuid.UUID | None) -> str | None:

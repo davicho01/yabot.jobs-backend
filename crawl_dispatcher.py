@@ -59,9 +59,13 @@ def main() -> None:
 
     db = SessionLocal()
     try:
+        # Only companies' own sites are crawled: a job board (is_official
+        # false) re-lists other companies' jobs, which their official sites
+        # already give us first-hand (see app.services.company_names).
         sources = db.scalars(
             select(CrawlSource).where(
                 CrawlSource.status == CrawlSourceStatus.ACTIVE,
+                CrawlSource.is_official.is_(True),
                 or_(CrawlSource.crawl_claimed_at.is_(None), CrawlSource.crawl_claimed_at <= cutoff),
             )
         ).all()

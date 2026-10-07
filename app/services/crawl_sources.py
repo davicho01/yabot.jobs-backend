@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.models.crawl_source import CrawlSource
 from app.models.enums import AtsType, CrawlSourceStatus
 from app.services.ats_adapters import board_key_for, board_url_for_key, detect_ats_source, detect_embedded_ats_source
+from app.services.company_logos import JOB_BOARD_DOMAINS, registrable_domain
 from app.services.job_scanner import domain_of, normalize_url
 
 # ADP's board_key ("cid/ccId") is a pair of opaque client ids, not a
@@ -88,8 +89,17 @@ def _upsert(
 
     # A discovered board's name is a generated label (a humanized slug or a
     # hostname), not a confirmed company name: the first scan whose page
-    # names the company replaces it (see app.services.company_names).
-    source = CrawlSource(name=name, ats_type=ats_type, board_url=board_url, status=status, name_source="placeholder")
+    # names the company replaces it (see app.services.company_names). A job
+    # board's (linkedin.com, indeed.com) re-lists other companies' jobs, so
+    # it's never official: never renamed after a job, never the owner.
+    source = CrawlSource(
+        name=name,
+        ats_type=ats_type,
+        board_url=board_url,
+        status=status,
+        name_source="placeholder",
+        is_official=registrable_domain(board_url) not in JOB_BOARD_DOMAINS,
+    )
     try:
         with db.begin_nested():
             db.add(source)

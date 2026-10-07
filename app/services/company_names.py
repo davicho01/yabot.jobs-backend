@@ -20,8 +20,10 @@ scanned with until their next rescan. The only exception is a small,
 deliberate validation run over the last few days' jobs
 (one_off/backfill_recent_company_names.py).
 
-Jobs with no crawl source, or from a source that isn't a company's own site
-(a job board), keep the cleaned page name.
+Jobs with no crawl source, or from a source that isn't an official one (a
+job board, or a site we can't crawl yet — see is_official_source), get the
+cleaned page name, matched to an official company when it names one exactly
+(official_company_for).
 """
 
 from __future__ import annotations
@@ -29,14 +31,16 @@ from __future__ import annotations
 import logging
 import re
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models.crawl_source import CrawlSource
+from app.models.enums import CrawlSourceStatus
 from app.services.job_dedup import (
     brand_from_source_name,
     clean_company_name,
     has_entity_code,
+    normalize_company_name,
     prefers_source_brand,
 )
 
@@ -80,6 +84,43 @@ def cleaned_page_company(page_name: str | None, source_name: str | None = None) 
     return cleaned or brand or page_name or source_name
 
 
+def is_official_source(source: CrawlSource | None) -> bool:
+    """Whether a job from this source comes from the company's own careers
+    site: a source that isn't a job board (is_official) and that we crawl
+    (active). A pending source is a site we can't crawl yet — nothing vouches
+    for who it belongs to — and a job board re-lists other companies' jobs."""
+    return source is not None and source.is_official and source.status == CrawlSourceStatus.ACTIVE
+
+
+def official_company_for(db: Session, page_name: str | None) -> str | None:
+    """The company a job from a non-official place (a job board, a site we
+    can't crawl yet, no source at all) shows: the cleaned page name, or the
+    official name it exactly matches — an official source's ("Lowe's" for a
+    LinkedIn job from "Lowe's, Inc.") or one of their sub-brands' ("Sam's
+    Club"). Exact company keys only: a sub-brand merely contained in the name
+    ("Sierra" in "Sierra Nevada Corp") is a different company."""
+    cleaned = cleaned_page_company(page_name)
+    key = normalize_company_name(cleaned)
+    if not key:
+        return cleaned
+    rows = db.execute(
+        select(CrawlSource.name, CrawlSource.sub_brands).where(
+            CrawlSource.status == CrawlSourceStatus.ACTIVE,
+            CrawlSource.is_official.is_(True),
+            CrawlSource.name_source != PLACEHOLDER,
+        )
+    ).all()
+    for name, _ in rows:
+        brand = brand_from_source_name(name)
+        if brand and normalize_company_name(brand) == key:
+            return brand
+    for _, sub_brands in rows:
+        for brand in sub_brands or []:
+            if normalize_company_name(brand) == key:
+                return brand
+    return cleaned
+
+
 def company_for(source: CrawlSource | None, page_name: str | None) -> str | None:
     """The company name a job shows, from its crawl source and its page."""
     if source is None or not source.is_official:
@@ -112,7 +153,9 @@ def promote_placeholder(db: Session, source: CrawlSource, page_name: str | None)
     change, it applies to jobs scanned from now on — earlier jobs keep their
     name until rescanned."""
     name = promotable_name(page_name)
-    if source.name_source != PLACEHOLDER or not name:
+    # Only an official site is named after its jobs: a job board's or an
+    # uncrawlable site's first job says nothing about who the source is.
+    if source.name_source != PLACEHOLDER or not name or not is_official_source(source):
         return False
     result = db.execute(
         update(CrawlSource)

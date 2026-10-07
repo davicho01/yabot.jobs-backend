@@ -41,7 +41,7 @@ def session_factory(monkeypatch):
 _counter = itertools.count()
 
 
-def _make_source(session_factory, *, status=CrawlSourceStatus.ACTIVE, crawl_claimed_at=None) -> str:
+def _make_source(session_factory, *, status=CrawlSourceStatus.ACTIVE, crawl_claimed_at=None, is_official=True) -> str:
     n = next(_counter)
     db = session_factory()
     source = m.CrawlSource(
@@ -50,6 +50,7 @@ def _make_source(session_factory, *, status=CrawlSourceStatus.ACTIVE, crawl_clai
         board_url=f"https://boards.greenhouse.io/source-{n}",
         status=status,
         crawl_claimed_at=crawl_claimed_at,
+        is_official=is_official,
     )
     db.add(source)
     db.commit()
@@ -96,6 +97,17 @@ def test_expired_claim_is_dispatched_again(session_factory, monkeypatch):
     crawl_dispatcher.main()
 
     assert enqueued == [source_id]
+
+
+def test_a_job_board_source_is_never_dispatched(session_factory, monkeypatch):
+    official = _make_source(session_factory)
+    _make_source(session_factory, is_official=False)
+    enqueued = []
+    monkeypatch.setattr(crawl_dispatcher, "enqueue_crawl", lambda sid: enqueued.append(sid))
+
+    crawl_dispatcher.main()
+
+    assert enqueued == [official]
 
 
 def test_inactive_sources_are_never_dispatched(session_factory, monkeypatch):
