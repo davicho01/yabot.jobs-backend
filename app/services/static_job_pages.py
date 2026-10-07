@@ -449,6 +449,10 @@ class JobPage:
     description: str | None
     posted_at: date | None
     found_at: datetime
+    # Set once, the first time the posting was ever scanned, then never
+    # updated again (app.services.jobs._mark_scanned) — None for a posting
+    # that's never completed a scan.
+    first_scanned_at: datetime | None = None
     salary_min: int | None = None
     salary_max: int | None = None
     salary_currency: str | None = None
@@ -521,7 +525,8 @@ def load_job_pages(db: Session, url_ids: Iterable[str]) -> dict[str, JobPage]:
             JobPostingUrl.id, JobPostingUrl.domain, JobPostingUrl.created_at,
             JobPosting.title, JobPosting.company_name, JobPosting.location, JobPosting.locations,
             JobPosting.workplace_type, JobPosting.employment_type, JobPosting.sector, JobPosting.description,
-            JobPosting.posted_at, JobPosting.salary_min, JobPosting.salary_max, JobPosting.salary_currency,
+            JobPosting.posted_at, JobPosting.first_scanned_at,
+            JobPosting.salary_min, JobPosting.salary_max, JobPosting.salary_currency,
             JobPosting.extracted_fields["validThrough"].as_string().label("valid_through"),
             JobPosting.company_domain, JobPosting.company_key, JobPosting.company_logo_key,
         )
@@ -546,6 +551,7 @@ def load_job_pages(db: Session, url_ids: Iterable[str]) -> dict[str, JobPage]:
             description=row.description,
             posted_at=row.posted_at,
             found_at=row.created_at,
+            first_scanned_at=row.first_scanned_at,
             salary_min=row.salary_min,
             salary_max=row.salary_max,
             salary_currency=row.salary_currency,
@@ -564,6 +570,7 @@ def content_hash(job: JobPage) -> str:
     fields = [
         job.title, job.company_name, job.domain, job.location, list(job.locations), job.workplace_type,
         job.employment_type, job.sector, job.description, job.posted_at.isoformat() if job.posted_at else None,
+        job.first_scanned_at.isoformat() if job.first_scanned_at else None,
         job.salary_min, job.salary_max, job.salary_currency, job.valid_through, job.company_domain,
         job.company_key,
     ]
@@ -797,6 +804,7 @@ def _glance(job: JobPage) -> list[tuple[str, str]]:
         ("Employment", _EMPLOYMENT_LABELS.get(job.employment_type)),
         ("Sector", (_sector_link(job.sector) or (None, None))[1]),
         ("Posted", job.date_posted.strftime("%B %-d, %Y")),
+        ("First scanned", job.first_scanned_at.strftime("%B %-d, %Y") if job.first_scanned_at else None),
         ("Apply by", job.expires.strftime("%B %-d, %Y") if _parse_date(job.valid_through) else None),
     ]
     return [(label, value) for label, value in rows if value]

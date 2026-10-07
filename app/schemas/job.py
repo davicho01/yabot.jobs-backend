@@ -54,6 +54,9 @@ class JobPostingRead(BaseModel):
     extracted_fields: dict[str, Any] | None
     posted_at: date | None
     scanned_at: datetime | None
+    # Set once, the first time scanned_at itself is; never updated after
+    # that — unlike scanned_at, which every rescan moves forward.
+    first_scanned_at: datetime | None
     extraction_status: str
     # How many other JobPostingUrls this same job was also found at (see
     # app.services.job_dedup) — 0 for most postings. Only meaningful on a

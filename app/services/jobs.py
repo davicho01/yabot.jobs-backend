@@ -628,6 +628,16 @@ def _backoff_seconds(attempts: int) -> float:
     )
 
 
+def _mark_scanned(posting: JobPosting, now: datetime) -> None:
+    """Bump scanned_at to `now` (every scan attempt, success or failure —
+    see call sites) and, only the first time this ever runs for a posting,
+    set first_scanned_at too. first_scanned_at then never moves again,
+    unlike scanned_at."""
+    posting.scanned_at = now
+    if posting.first_scanned_at is None:
+        posting.first_scanned_at = now
+
+
 def _apply_scan_result(db: Session, url_row: JobPostingUrl, result: ScanResult) -> None:
     now = datetime.now(timezone.utc)
     url_row.scan_error = _strip_nul(result.error)
@@ -670,7 +680,7 @@ def _apply_scan_result(db: Session, url_row: JobPostingUrl, result: ScanResult) 
         posting = db.scalar(select(JobPosting).where(JobPosting.url_id == url_row.id))
         if posting is not None and posting.extraction_status != ScanStatus.SUCCESS:
             posting.extraction_status = url_row.scan_status
-            posting.scanned_at = now
+            _mark_scanned(posting, now)
     db.flush()
 
 
@@ -839,7 +849,7 @@ def _mark_store_failed(db: Session, url_id: uuid.UUID, exc: Exception) -> None:
     posting = db.scalar(select(JobPosting).where(JobPosting.url_id == url_id))
     if posting is not None and posting.extraction_status != ScanStatus.SUCCESS:
         posting.extraction_status = url_row.scan_status
-        posting.scanned_at = now
+        _mark_scanned(posting, now)
     db.commit()
 
 
@@ -1041,7 +1051,7 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
         {"html_excerpt": _strip_nul(result.raw_html_excerpt)} if result.raw_html_excerpt else None
     )
     posting.posted_at = fields["posted_at"]
-    posting.scanned_at = now
+    _mark_scanned(posting, now)
     posting.extraction_status = ScanStatus.SUCCESS if result.success else ScanStatus.FAILED
 
     # Cross-source dedup (see app.services.job_dedup): recomputed on every

@@ -118,6 +118,11 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
     # up front (see get_or_create_job_posting) so job_posting_id exists
     # immediately, before there's anything to scan.
     scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set once, the first time scanned_at itself is set, then never touched
+    # again (see _mark_scanned in app.services.jobs) — unlike scanned_at,
+    # which a rescan keeps moving forward, this is "when we first saw this
+    # posting's data" and stays put.
+    first_scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     extraction_status: Mapped[str] = mapped_column(
         String(20), default=ScanStatus.PENDING, nullable=False
     )
