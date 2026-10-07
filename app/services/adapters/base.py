@@ -380,8 +380,11 @@ _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 _META_DESC_RE = re.compile(
     r'<meta[^>]+name=["\']description["\'][^>]+content=(["\'])(.*?)\1', re.IGNORECASE | re.DOTALL
 )
+# The "+" is sometimes HTML-escaped in the attribute (verified live:
+# careers.cognizant.com writes type="application/ld&#x2B;json").
 _JSON_LD_RE = re.compile(
-    r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', re.IGNORECASE | re.DOTALL
+    r'<script[^>]+type=["\']application/ld(?:\+|&#x2B;|&#43;|&plus;)json["\'][^>]*>(.*?)</script>',
+    re.IGNORECASE | re.DOTALL,
 )
 # Open Graph fallback for pages with no JobPosting JSON-LD and no standard
 # meta description (e.g. Greenhouse's application-form pages) — og:title is
@@ -785,6 +788,39 @@ def job_ld_is_expired(job_ld: dict[str, Any]) -> bool:
     if valid_through is None:
         return False
     return valid_through < datetime.now(timezone.utc).date()
+
+
+def scan_result_from_job_ld(job_ld: dict[str, Any], html: str) -> ScanResult:
+    """A ScanResult straight from one JobPosting JSON-LD block, for adapters
+    whose page fetch is too costly to repeat by handing off to the generic
+    scanner (a browser render), or that fetch a different URL than the one
+    scanned (Paycom's legacy links). Some sites split the text across
+    description/responsibilities/qualifications; all three are kept."""
+    if job_ld_is_expired(job_ld):
+        return ScanResult(
+            success=False, error=f"Job posting has expired (validThrough {job_ld['validThrough']}).", expired=True
+        )
+    description = "\n\n".join(
+        text
+        for key in ("description", "responsibilities", "qualifications")
+        if isinstance(job_ld.get(key), str) and (text := html_to_formatted_text(job_ld[key]))
+    )
+    hiring_org = job_ld.get("hiringOrganization")
+    salary_min, salary_max, salary_currency = job_ld_salary(job_ld)
+    return ScanResult(
+        success=True,
+        title=clean_text(job_ld.get("title")) or None,
+        description=description or None,
+        company_name=clean_text(hiring_org.get("name")) or None if isinstance(hiring_org, dict) else None,
+        location=job_ld_location(job_ld),
+        workplace_type=job_ld_workplace_type(job_ld),
+        employment_type=job_ld_employment_type(job_ld),
+        salary_min=salary_min,
+        salary_max=salary_max,
+        salary_currency=salary_currency,
+        posted_at=job_ld_posted_at(job_ld),
+        raw_html_excerpt=html[:20_000],
+    )
 
 
 # $ is ambiguous (USD/CAD/AUD/...) so we default it to USD, which is right

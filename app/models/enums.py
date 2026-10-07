@@ -135,6 +135,12 @@ class AtsType(StrEnum):
     HOMERUN = "homerun"
     # JobAps (government): www.jobapscloud.com/{agency}/ or /oec/{agency}/.
     JOBAPS = "jobaps"
+    # Scan-only, like Stripe: Paycom job URLs are scanned when submitted or
+    # found elsewhere, but its robots.txt disallows every way to list a
+    # customer's jobs — see app.services.adapters.paycom.
+    PAYCOM = "paycom"
+    # Single-company: Cognizant's own careers.cognizant.com.
+    COGNIZANT = "cognizant"
     # Scan-only: job URLs are only ever submitted directly, never discovered
     # by crawling a board (no ADAPTER.fetch_jobs) — see
     # app.services.adapters.stripe.
