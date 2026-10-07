@@ -32,6 +32,40 @@ def test_fetch_html_raises_when_empty_body_and_render_fallback_fails(monkeypatch
         base.fetch_html(URL)
 
 
+def _raise_status(status):
+    def fetch(url):
+        request = httpx.Request("GET", url)
+        raise httpx.HTTPStatusError("err", request=request, response=httpx.Response(status, request=request))
+    return fetch
+
+
+@pytest.mark.parametrize("status", [404, 410])
+def test_a_removed_posting_is_gone_without_a_browser_render(monkeypatch, status):
+    monkeypatch.setattr(base, "_fetch_direct", _raise_status(status))
+    monkeypatch.setattr(base, "fetch_rendered_page", lambda *_a, **_kw: pytest.fail("a 404 page isn't worth rendering"))
+
+    with pytest.raises(base.PostingGone) as raised:
+        base.fetch_html(URL)
+
+    assert str(raised.value).startswith(base.GONE_ERROR_PREFIX)
+
+
+def test_a_bot_wall_still_falls_back_to_a_browser_render(monkeypatch):
+    monkeypatch.setattr(base, "_fetch_direct", _raise_status(403))
+    monkeypatch.setattr(base, "fetch_rendered_page", lambda _url, **_kw: RenderedPage(html="<html>job</html>", url=URL))
+
+    assert base.fetch_html(URL).text == "<html>job</html>"
+
+
+def test_a_gone_failure_from_any_adapter_is_reported_expired(monkeypatch):
+    from app.services import job_scanner
+
+    monkeypatch.setattr(base, "_fetch_direct", _raise_status(404))
+    result = job_scanner.scan_job_url("https://jobs.lever.co/acme/1afd1c21-cfe7-4a0a-8288-963cc806a1a5")
+
+    assert not result.success and result.expired
+
+
 def test_fetch_html_uses_direct_response_when_body_present(monkeypatch):
     monkeypatch.setattr(base, "_fetch_direct", lambda _url: FakeResponse(text="<html>ok</html>", url=URL))
     monkeypatch.setattr(

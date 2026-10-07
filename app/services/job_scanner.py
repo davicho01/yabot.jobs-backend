@@ -58,8 +58,17 @@ def scan_job_url(url: str) -> ScanResult:
             continue
         result = adapter.scan_job_url(url)
         if result is not None:
-            return result
-    return _default_scan_job_url(url)
+            return _mark_gone(result)
+    return _mark_gone(_default_scan_job_url(url))
+
+
+def _mark_gone(result: ScanResult) -> ScanResult:
+    # Every adapter reports a fetch failure as str(exc); a base.PostingGone
+    # (the job page answered 404/410) means the posting was removed —
+    # expired, so it's closed rather than retried into needs_review.
+    if not result.success and not result.expired and (result.error or "").startswith(base.GONE_ERROR_PREFIX):
+        result.expired = True
+    return result
 
 
 def _default_scan_job_url(url: str) -> ScanResult:

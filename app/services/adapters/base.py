@@ -327,6 +327,22 @@ class FetchedPage:
     url: str
 
 
+# The start of a PostingGone's message, which job_scanner.scan_job_url reads
+# off any adapter's failed ScanResult (they all report str(exc)) to mark the
+# posting expired — see PostingGone.
+GONE_ERROR_PREFIX = "Job page is gone"
+
+
+class PostingGone(httpx.HTTPError):
+    """The job page answered 404/410: the posting has been removed, not
+    blocked. Without this a removed job looked like any failed fetch —
+    retried until its attempts ran out and left in needs_review instead of
+    closed."""
+
+    def __init__(self, url: str, status: int):
+        super().__init__(f"{GONE_ERROR_PREFIX} (HTTP {status}): {url}")
+
+
 def fetch_html(url: str) -> FetchedPage:
     """Fetch a page, falling back to a real headless-browser render (via
     browser_fetch_service, already deployed as yabot-jobs-browser on Cloud
@@ -353,6 +369,15 @@ def fetch_html(url: str) -> FetchedPage:
             "Direct fetch of %s returned an empty body or a bot-challenge page; retrying via browser_fetch_service.",
             url,
         )
+    except httpx.HTTPStatusError as exc:
+        # A removed posting, not a block: bot walls answer 403/202/429
+        # (verified across a sample of 300 stuck URLs, 2026-10-06), while a
+        # 404/410 came from boards that had taken the job down (Lever,
+        # Greenhouse, Recruitee, Walgreens). A browser render would only
+        # render the error page — which has no status to tell it apart.
+        if exc.response.status_code in (404, 410):
+            raise PostingGone(url, exc.response.status_code) from exc
+        logger.info("Direct fetch of %s failed (%s); retrying via browser_fetch_service.", url, exc)
     except httpx.HTTPError as exc:
         logger.info("Direct fetch of %s failed (%s); retrying via browser_fetch_service.", url, exc)
 
