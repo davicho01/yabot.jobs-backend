@@ -1,0 +1,21 @@
+[
+{"id": "8300d271-4abb-4d37-b41d-18a2209cee17", "old": "app.eightfold.ai", "new": "Eightfold AI", "name_source": "manual"},
+{"id": "1dd9c9bd-e050-483e-ba42-5e7cd36b3759", "old": "Archwellessentials", "new": "Freedom Mortgage", "name_source": "manual"},
+{"id": "f79dcbd6-1715-4a9d-a7ef-7f36dbc54449", "old": "Baptist Health System", "new": "Tenet Healthcare", "name_source": "manual"},
+{"id": "72a277fa-49f6-4c26-9ebb-c07d8672e1c3", "old": "brandad.softgarden.io", "new": "BRANDAD", "name_source": "manual"},
+{"id": "229c375e-4fef-43c3-9dce-5501aaf2737c", "old": "career4.successfactors.com", "new": "ExxonMobil", "name_source": "manual"},
+{"id": "06e259a2-4344-4900-8424-e90eb7c71991", "old": "careers-americas.kia.com", "new": "Kia America", "name_source": "manual"},
+{"id": "d92e2973-a021-4078-ac8c-09bcfda48879", "old": "careers.ppg.com", "new": "PPG", "name_source": "manual"},
+{"id": "543e7d59-379e-4c7b-bca2-03b3558206a7", "old": "careerunitedstates.autoliv.com", "new": "Autoliv", "name_source": "manual"},
+{"id": "ee2a4d8d-2179-4fa4-a655-269f4458a9c4", "old": "Epicorsoftware", "new": "Epicor", "name_source": "manual"},
+{"id": "c99408ce-7f93-42f0-b13b-2d4c096a5278", "old": "GET.ON", "new": "HelloBetter", "name_source": "manual"},
+{"id": "8c7e8648-d3c4-4fff-88fa-3866bc41ad28", "old": "houseofcontrol.teamtailor.com", "new": "House of Control", "name_source": "manual"},
+{"id": "dd61e3fc-ba7f-489a-9f81-eeb4bf2f2b65", "old": "jobs.deere.com", "new": "John Deere", "name_source": "manual"},
+{"id": "aefc1c80-7ced-49ab-bbb7-be0c6b8f3668", "old": "jobs.tenethealth.com", "new": "Tenet Healthcare", "name_source": "manual"},
+{"id": "37700103-20ea-4dd9-a4d1-abb912f2788b", "old": "made-tech.pinpointhq.com", "new": "Made Tech", "name_source": "manual"},
+{"id": "54b8c77f-cf1a-4a1f-8c09-590056317410", "old": "Paloaltonetworks", "new": "Palo Alto Networks", "name_source": "manual"},
+{"id": "a43c01f1-fe51-414d-b4b9-0ef477898b0b", "old": "premierleague.pinpointhq.com", "new": "Premier League", "name_source": "manual"},
+{"id": "0f35336e-af89-422e-95f2-f31327302b62", "old": "signicat.teamtailor.com", "new": "Signicat", "name_source": "manual"},
+{"id": "d900a708-7432-4bd9-919c-ce007e7f0022", "old": "workday/phreesia/wd1/Phreesia", "new": "Phreesia", "name_source": "manual"},
+{"id": "a3250fc7-b8e6-49f1-a1b9-8dd3763afac6", "old": "www.jobs-ups.com", "new": "UPS", "name_source": "manual"}
+]
