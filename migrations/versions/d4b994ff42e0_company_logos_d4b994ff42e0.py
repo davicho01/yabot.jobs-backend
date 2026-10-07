@@ -25,8 +25,8 @@ depends_on: Union[str, Sequence[str], None] = None
 # companies.id -> (logo_key, logo_source_url)
 LOGOS = {
     "818c0f58-78f5-4f31-b877-c26ff4f80ea2": ("logos/21-marvell-asia-pte-ltd-3b97f934.png", "https://www.marvell.com/etc.clientlibs/marvell-com/clientlibs/clientlib-site/resources/icon-192x192.png"),
-    "cd2fb42f-1583-425f-ac76-a410e81f0391": ("logos/34-columbia-gas-of-ohio-inc-8b2b66ad.png", "https://www.columbiagasohio.com/columbiagas.ico"),
-    "2c50058d-3b30-42a1-8765-a0fc3be3a259": ("logos/38-columbia-gas-of-virginia-inc-8b2b66ad.png", "https://www.columbiagasva.com/columbiagas.ico"),
+    "cd2fb42f-1583-425f-ac76-a410e81f0391": ("logos/34-columbia-gas-of-ohio-inc-32ee674c.png", "https://www.columbiagasohio.com/columbiagas.ico"),
+    "2c50058d-3b30-42a1-8765-a0fc3be3a259": ("logos/38-columbia-gas-of-virginia-inc-32ee674c.png", "https://www.columbiagasva.com/columbiagas.ico"),
 }
 
 companies = sa.table(
