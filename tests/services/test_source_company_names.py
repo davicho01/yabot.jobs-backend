@@ -318,24 +318,28 @@ class TestOneOffs:
             ("greenhouse/coalition", "greenhouse/coalition"),
         ]
 
-    def test_curation_spaces_out_a_squashed_slug_name_the_way_its_pages_spell_it(self, scan_db, make_source, make_url):
+    def test_curation_proposes_spacing_out_a_squashed_slug_name_for_review(self, scan_db, make_source, make_url):
         from one_off.curate_source_names import curate
 
-        panw, epicor, single, manual = (make_source() for _ in range(4))
+        panw, epicor, single, manual, camel, caps = (make_source() for _ in range(6))
         panw.name, epicor.name, single.name = "Paloaltonetworks", "Epicorsoftware", "Thoughtworks"
         manual.name, manual.name_source = "Grafanalabs", MANUAL
+        camel.name, caps.name = "WeWork", "FIS"  # brands spelled as one word on purpose
         scan_db.commit()
         self._jobs(scan_db, make_url, panw, "Palo Alto Networks, Inc.", 5)
         self._jobs(scan_db, make_url, epicor, "EPIC Epicor Software", 5)
         self._jobs(scan_db, make_url, single, "Thoughtworks", 5)  # already one word on its pages too
         self._jobs(scan_db, make_url, manual, "Grafana Labs", 5)
+        self._jobs(scan_db, make_url, camel, "We Work Management LLC", 5)
+        self._jobs(scan_db, make_url, caps, "F I S Global", 5)
 
-        auto_fixes, _, _ = curate(scan_db)
+        auto_fixes, review, _ = curate(scan_db)
 
-        assert {s.name: new for s, new in auto_fixes.items()} == {
-            "Paloaltonetworks": "Palo Alto Networks",
-            "Epicorsoftware": "Epicor Software",
-        }
+        assert auto_fixes == {}  # never applied on its own: "Goodyear" looks just like a slug
+        assert sorted((s.name, proposal) for s, proposal, _ in review) == [
+            ("Epicorsoftware", "Epicor Software"),
+            ("Paloaltonetworks", "Palo Alto Networks"),
+        ]
 
     def test_curation_write_applies_auto_fixes_reviewed_names_and_sub_brands(self, scan_db, make_source):
         from one_off.curate_source_names import write_changes

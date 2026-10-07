@@ -10,14 +10,15 @@ Reports, per source:
     most of its jobs' pages agree on (company_names.promotable_name), the
     company in most of its stored page titles — that the board's own address
     confirms (one of its words in it: "Honda" in careers.honda.com), so
-    "L3HHCM20" on jobs.l3harris.com loses to a "L3Harris ..." page title;
-    a squashed slug-name -> the words its pages spell it with
-    ("Paloaltonetworks" -> "Palo Alto Networks").
+    "L3HHCM20" on jobs.l3harris.com loses to a "L3Harris ..." page title.
     Written with --write, unless an admin already set the name ("manual").
   - REVIEW: a usable-looking name that shares no word with the name most of
     its jobs' pages give ("Gem" vs "11x.ai"), and a slug/hostname whose
     proposed name the board's address doesn't confirm (a department, an
-    internal code) — maybe the wrong company. Never written; fix in admin.
+    internal code) — maybe the wrong company; and a name that looks like a
+    squashed slug, with the words its pages spell it with ("Paloaltonetworks"
+    -> "Palo Alto Networks", but "Goodyear" looks the same). Never written;
+    fix in admin.
   - SUB-BRAND?: page names on 20+ of a source's jobs that aren't a legal
     entity code or portal wording and don't share a word with the source's
     name (TJX -> "Homegoods LLC", "Marshalls of MA"). Never written as is:
@@ -116,9 +117,13 @@ def _unsquashed(name: str, page_names) -> str | None:
     pages write it: the run of a page name's words that joins up to exactly
     the source name ("Paloaltonetworks" in "Palo Alto Networks, Inc." ->
     "Palo Alto Networks"; "Epicorsoftware" in "EPIC Epicor Software" ->
-    "Epicor Software"). None for a name with spaces, or no such run."""
+    "Epicor Software"). None for a name with spaces, or no such run, or one
+    whose capitals show it's a brand spelled as one word on purpose
+    ("WeWork", "SiriusXM", "FIS") — a humanized slug is one capital and the
+    rest lowercase. Even then it's only a proposal: "Goodyear" and "Labcorp"
+    look exactly like slugs."""
     target = name.lower()
-    if " " in name or not target.isalnum():
+    if " " in name or not target.isalnum() or name != name[:1].upper() + name[1:].lower():
         return None
     for page_name in page_names:
         words = re.findall(r"[^\W_]+", page_name or "")
@@ -177,7 +182,7 @@ def curate(db) -> tuple[dict, list, list]:
                     # a code ("L3HHCM20"), a placeholder ("UNAVAILABLE"), the slug.
                     review.append((source, proposal, f"pages say it ({share:.0%}); the board address doesn't confirm it"))
         elif source.name_source != MANUAL and (spaced := _unsquashed(source.name, [n for n, _ in names.most_common()])):
-            auto_fixes[source] = spaced
+            review.append((source, spaced, "looks like a squashed slug; its pages spell it with spaces"))
         elif (
             brand
             and dominant
