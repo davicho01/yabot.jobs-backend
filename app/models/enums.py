@@ -125,6 +125,16 @@ class AtsType(StrEnum):
     # onto each customer's own careers domain via a "gnewton" embed script, no
     # customer-visible ATS host in the URL at all.
     PAYCOR_RECRUITING = "paycor_recruiting"
+    # Paylocity Recruiting: {n}recruiting.paylocity.com/recruiting/jobs/All/{guid}.
+    PAYLOCITY = "paylocity"
+    # Dayforce Recruiting: jobs.dayforcehcm.com/{lang}/{namespace}/{board}.
+    DAYFORCE = "dayforce"
+    # JOIN (join.com): join.com/companies/{slug}.
+    JOIN = "join"
+    # Homerun: {company}.homerun.co.
+    HOMERUN = "homerun"
+    # JobAps (government): www.jobapscloud.com/{agency}/ or /oec/{agency}/.
+    JOBAPS = "jobaps"
     # Scan-only: job URLs are only ever submitted directly, never discovered
     # by crawling a board (no ADAPTER.fetch_jobs) — see
     # app.services.adapters.stripe.
