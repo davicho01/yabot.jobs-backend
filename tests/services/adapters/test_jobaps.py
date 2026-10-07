@@ -48,6 +48,23 @@ def test_a_page_without_json_ld_is_read_from_its_title_and_bulletin(monkeypatch)
     assert 'Serve the city.' in result.description
 
 
+def test_san_joaquin_announcement_shape_is_read_from_the_bulletin_title(monkeypatch):
+    # Live San Joaquin County postings were all marked expired (and closed)
+    # before this shape was handled.
+    html = ('<title>Announcement: Ag Biologist/Standards Inspector IV - San Joaquin County</title>'
+            '<div class="JobBulletinTitle">Ag Biologist/Standards Inspector IV\r\n</div>'
+            '<div id="JobBulletinBody"><p>Inspect crops.</p></div></body>')
+    result = _scan(monkeypatch, html)
+    assert (result.success, result.title, result.company_name) == (
+        True, 'Ag Biologist/Standards Inspector IV', 'San Joaquin County'
+    )
+    assert 'Inspect crops.' in result.description
+
+
+def test_an_unrecognized_page_is_left_to_the_generic_scanner_not_expired(monkeypatch):
+    assert _scan(monkeypatch, '<title>Some New JobAps Layout</title>') is None
+
+
 def test_an_empty_announcement_is_expired(monkeypatch):
     result = _scan(monkeypatch, '<title>Job Announcement:  - City of Milwaukee</title>')
     assert (result.success, result.expired) == (False, True)

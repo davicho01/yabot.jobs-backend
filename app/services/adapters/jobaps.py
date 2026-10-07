@@ -20,8 +20,13 @@ _JOB_HREF_RE = re.compile(
     re.IGNORECASE,
 )
 _PARAM_RE = re.compile(r"(?:^|&)(R[123])=([^&]*)", re.IGNORECASE)
-_TITLE_RE = re.compile(r"^Job Announcement:\s*(.*?)\s*-\s*([^-]+)$")
-_BULLETIN_BODY_RE = re.compile(r'id="JobBulletinBody"[^>]*>(.*?)<[^>]+id="contentFooter"', re.DOTALL | re.IGNORECASE)
+# "Job Announcement: {title} - {agency}" (Milwaukee) or "Announcement: ..."
+# (San Joaquin County).
+_TITLE_RE = re.compile(r"^(?:Job\s+)?Announcement:\s*(.*?)\s*-\s*([^-]+)$", re.IGNORECASE)
+_BULLETIN_TITLE_RE = re.compile(r'class="JobBulletinTitle"[^>]*>\s*([^<]*?)\s*<', re.IGNORECASE)
+_BULLETIN_BODY_RE = re.compile(
+    r'id="JobBulletinBody"[^>]*>(.*?)(?:<[^>]+id="contentFooter"|</body>)', re.DOTALL | re.IGNORECASE
+)
 
 
 def _match(url: str) -> str | None:
@@ -67,12 +72,18 @@ def _scan_job_url(url: str) -> ScanResult | None:
     if base.extract_json_ld_postings(page.text):
         return None
     title = _TITLE_RE.match(" ".join(unescape(base.fallback_title(page.text) or "").split()))
-    if title is None or not title.group(1):
+    if title is None:
+        # Not a page shape seen before — let the generic scanner try rather
+        # than guess: a wrong "expired" closes the listing.
+        return None
+    bulletin_title = _BULLETIN_TITLE_RE.search(page.text)
+    job_title = (bulletin_title and " ".join(unescape(bulletin_title.group(1)).split())) or title.group(1)
+    if not job_title:
         return ScanResult(success=False, error="JobAps posting page has no job — removed or closed.", expired=True)
     body = _BULLETIN_BODY_RE.search(page.text)
     return ScanResult(
         success=True,
-        title=title.group(1),
+        title=job_title,
         company_name=title.group(2),
         description=html_to_formatted_text(body.group(1)) if body else base.fallback_description(page.text),
     )
