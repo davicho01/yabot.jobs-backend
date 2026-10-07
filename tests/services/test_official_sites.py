@@ -49,6 +49,34 @@ def test_a_page_link_to_a_supported_board_is_found_and_social_links_are_not():
     assert official_sites.board_in_page("https://acme.com/", '<a href="https://linkedin.com/jobs">x</a>') is None
 
 
+def test_a_board_loaded_from_a_script_or_json_blob_is_found():
+    html = """<html><script>window.cfg = {"jobsUrl": "https:\\/\\/boards.greenhouse.io\\/acme"}</script></html>"""
+    assert official_sites.board_in_page("https://careers.acme.com/", html) == "https://boards.greenhouse.io/acme"
+
+
+def test_careers_links_stay_on_the_company_s_own_sites():
+    html = """
+    <a href="/about">About</a>
+    <a href="https://careers.acme.com/"><span>Careers</span></a>
+    <a href="https://careers.acmecorp-group.com/">Join us</a>
+    <a href="https://www.linkedin.com/jobs/acme">Jobs on LinkedIn</a>
+    <a href="/work-with-us">Work with us</a>
+    """
+    assert official_sites.careers_links("https://www.acme.com/", html, "acme.com") == [
+        "https://careers.acme.com/",
+        "https://careers.acmecorp-group.com/",
+        "https://www.acme.com/work-with-us",
+    ]
+
+
+def test_the_board_one_level_below_the_homepage_s_careers_link_is_found():
+    client = _client({
+        "https://acme.com": '<a href="https://careers.acme.com/">Careers</a>',
+        "https://careers.acme.com/": '<iframe src="https://jobs.lever.co/acme"></iframe>',
+    })
+    assert official_sites.find_official_board("acme.com", client) == "https://jobs.lever.co/acme"
+
+
 def test_only_companies_seen_elsewhere_without_an_official_source_are_candidates(scan_db, make_source, make_url):
     linkedin = _linkedin(scan_db, make_source)
     official = make_source()

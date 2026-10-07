@@ -6,15 +6,17 @@ The official company site is the authority on who owns a job (see
 app.services.company_names); a company seen only second-hand has no such
 authority yet. For each one this looks up the company's own domain
 (Company.domain, else the domain its name is, else logo.dev's brand search),
-fetches its homepage and its /careers and /jobs pages, and takes the first
-link to a careers board on a platform we support (the same pure URL-shape
-match job submissions use, detect_ats_source). Registered as a *pending*
+fetches its homepage and its /careers and /jobs pages — then the careers
+pages those link to on its own domain — and takes the first careers board on
+a platform we support that one of them points to, in a link or anywhere in
+its HTML (the same pure URL-shape match job submissions use,
+detect_ats_source). Registered as a *pending*
 crawl source named after the company (register_discovered_board with
 needs_review): a homepage can link to someone else's board (a partner's, a
 parent's), so an agent verifies it belongs to the company before it's
 activated and crawled (docs/adapter-playbook.md, "Official-site candidates").
 
-Bounded on purpose: a small batch per run, at most three fetches per
+Bounded on purpose: a small batch per run, at most six fetches per
 company, and a company is looked at again only after RECHECK_AFTER, whatever
 the outcome — so an unanswerable company isn't retried every day.
 """
@@ -25,7 +27,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 from sqlalchemy import func, or_, select
@@ -38,7 +40,7 @@ from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
 from app.services import logo_dev
 from app.services.ats_adapters import detect_ats_source
-from app.services.company_logos import domain_named, is_platform_domain, usable_domain
+from app.services.company_logos import domain_named, is_platform_domain, registrable_domain, usable_domain
 from app.services.company_names import AUTO, PLACEHOLDER
 from app.services.crawl_sources import register_discovered_board
 from app.services.job_dedup import brand_from_source_name, normalize_company_name
@@ -51,6 +53,14 @@ DEFAULT_LIMIT = 25
 FETCH_TIMEOUT = 10.0
 _PATHS = ("", "/careers", "/jobs")
 _HREF_RE = re.compile(r"""href\s*=\s*["']([^"'#\s]+)""", re.IGNORECASE)
+_ANCHOR_RE = re.compile(r"""<a\b[^>]*?href\s*=\s*["']([^"'#\s]+)["'][^>]*>(.*?)</a>""", re.IGNORECASE | re.DOTALL)
+_URL_RE = re.compile(r"""https?://[A-Za-z0-9.-]+(?:/[^\s"'<>\\)]*)?""")
+_CAREERS_WORDS_RE = re.compile(r"\b(?:careers?|jobs|join (?:us|our team)|work (?:with|for|at) us|openings)\b", re.IGNORECASE)
+# A company's own careers site on a domain of its own ("careers.wabtec.com").
+# Job boards' hosts never look like this (theirs is a path: linkedin.com/jobs).
+_CAREERS_HOST_RE = re.compile(r"^(?:careers?|jobs)\.", re.IGNORECASE)
+# Careers pages followed one level down from the homepage, /careers and /jobs.
+MAX_CAREERS_PAGES = 3
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; yabot.jobs official-site finder; +https://yabot.jobs)"}
 
 FOUND = "found"
@@ -124,34 +134,79 @@ def _board_link(url: str) -> str | None:
 
 
 def board_in_page(base_url: str, html: str) -> str | None:
-    """The first link on a page to a careers board we can crawl."""
+    """The first careers board we can crawl that a page points to: in a
+    link, else anywhere in its HTML — careers pages often load the board
+    from a script, a JSON blob or an iframe rather than linking it."""
     for href in _HREF_RE.findall(html):
         link = urljoin(base_url, href)
         if link.startswith(("http://", "https://")) and _board_link(link):
             return link
+    text = html.replace("\\/", "/").replace("&quot;", '"').replace("&amp;", "&")
+    for url in _URL_RE.findall(text):
+        if _board_link(url):
+            return url
     return None
 
 
+def careers_links(base_url: str, html: str, domain: str) -> list[str]:
+    """Links on a page to the company's own careers pages, with careers
+    wording in the link's address or text: on its own domain, or a careers
+    site of its own on a sibling domain (wabteccorp.com ->
+    "careers.wabtec.com"). Never another site's jobs page (linkedin.com/jobs)."""
+    own = {registrable_domain(domain), registrable_domain(base_url)}
+    links: list[str] = []
+    for href, text in _ANCHOR_RE.findall(html):
+        link = urljoin(base_url, href)
+        if not link.startswith(("http://", "https://")):
+            continue
+        host = urlsplit(link).hostname or ""
+        if registrable_domain(link) not in own and not _CAREERS_HOST_RE.match(host):
+            continue
+        if (_CAREERS_WORDS_RE.search(href) or _CAREERS_WORDS_RE.search(re.sub(r"<[^>]+>", " ", text))) and link not in links:
+            links.append(link)
+    return links
+
+
+def _fetch(client: httpx.Client, url: str) -> httpx.Response | None:
+    try:
+        return client.get(url)
+    except httpx.HTTPError as exc:
+        logger.info("Fetching %s failed (%s).", url, exc)
+        return None
+
+
+def _board_from(response: httpx.Response) -> str | None:
+    """A board the response is (a redirect straight to it) or points to."""
+    if _board_link(str(response.url)):
+        return str(response.url)
+    return board_in_page(str(response.url), response.text) if response.status_code == 200 else None
+
+
 def find_official_board(domain: str, client: httpx.Client) -> str | None:
-    """A crawlable careers board linked from the company's own site: its
-    homepage, /careers or /jobs (or one of them redirecting straight to
-    it). Raises httpx.HTTPError only if every fetch failed."""
+    """A crawlable careers board on or linked from the company's own site:
+    its homepage, /careers or /jobs, then — one level deeper — the careers
+    pages those link to on its own domain ("careers.wabtec.com"). At most
+    len(_PATHS) + MAX_CAREERS_PAGES fetches. Raises httpx.HTTPError only if
+    every first-level fetch failed."""
     errors = 0
+    followed: list[str] = []
     for path in _PATHS:
-        url = f"https://{domain}{path}"
-        try:
-            response = client.get(url)
-        except httpx.HTTPError as exc:
-            logger.info("Fetching %s failed (%s).", url, exc)
+        response = _fetch(client, f"https://{domain}{path}")
+        if response is None:
             errors += 1
             continue
-        board = _board_link(str(response.url)) or (
-            board_in_page(str(response.url), response.text) if response.status_code == 200 else None
-        )
+        board = _board_from(response)
         if board:
             return board
+        if response.status_code == 200:
+            followed += [u for u in careers_links(str(response.url), response.text, domain) if u not in followed]
     if errors == len(_PATHS):
         raise httpx.ConnectError(f"every fetch of {domain} failed")
+    for url in followed[:MAX_CAREERS_PAGES]:
+        response = _fetch(client, url)
+        board = _board_from(response) if response is not None else None
+        if board:
+            return board
     return None
 
 
