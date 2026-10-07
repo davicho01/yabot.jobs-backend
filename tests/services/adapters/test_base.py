@@ -135,3 +135,12 @@ def test_job_ld_is_expired_false_when_missing():
 
 def test_job_ld_is_expired_false_when_unparseable():
     assert base.job_ld_is_expired({"validThrough": "not a date"}) is False
+
+
+def test_fetch_html_never_returns_a_bot_challenge_page(monkeypatch):
+    challenge = "<html><head><title>Just a moment...</title></head></html>"
+    monkeypatch.setattr(base, "_fetch_direct", lambda _url: FakeResponse(text=challenge, url=URL))
+    monkeypatch.setattr(base, "fetch_rendered_page", lambda _url, **_kw: None)
+
+    with pytest.raises(httpx.HTTPError):
+        base.fetch_html(URL)

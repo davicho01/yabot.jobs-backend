@@ -14,7 +14,9 @@ the service being unreachable, and an actual render failure all collapse to
 the same None return.
 """
 
+import html as html_lib
 import logging
+import re
 from dataclasses import dataclass
 
 import httpx
@@ -46,6 +48,31 @@ _TIMEOUT_SECONDS = 90.0
 # function gives up, so retrying here catches the case that backoff alone
 # leaves as a broken-looking page for hours.
 _RENDER_ATTEMPTS = 2
+
+# Interstitial pages bot-management fronts serve instead of the real page —
+# HTTP 200 once rendered, so nothing downstream could tell them apart from a
+# job page: 65 live listings were titled "Just a moment..." (Cloudflare:
+# Progressive, Epic Games, Domino's, Carvana, BairesDev) or "Access Denied"
+# (Akamai: Rubrik) as of 2026-10-07. Matched on the whole <title>, not a
+# substring, so a real posting that merely mentions one of these can't trip it.
+_BOT_CHALLENGE_TITLES = frozenset({
+    "just a moment...",
+    "just a moment",
+    "attention required! | cloudflare",
+    "please wait... | cloudflare",
+    "access denied",
+    "pardon our interruption",
+})
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+
+
+def is_bot_challenge_title(title: str | None) -> bool:
+    return " ".join(html_lib.unescape(title or "").split()).lower() in _BOT_CHALLENGE_TITLES
+
+
+def is_bot_challenge_page(html: str | None) -> bool:
+    match = _TITLE_RE.search(html or "")
+    return match is not None and is_bot_challenge_title(match.group(1))
 
 
 @dataclass
@@ -107,10 +134,14 @@ def fetch_rendered_page(
             )
             response.raise_for_status()
             data = response.json()
-            if data["html"] is not None:
+            if data["html"] is not None and not is_bot_challenge_page(data["html"]):
                 return RenderedPage(html=data["html"], url=data.get("final_url") or url)
             logger.info(
-                "Rendered fetch of %s came back empty (attempt %d/%d).", url, attempt, _RENDER_ATTEMPTS
+                "Rendered fetch of %s came back %s (attempt %d/%d).",
+                url,
+                "empty" if data["html"] is None else "as a bot-challenge page",
+                attempt,
+                _RENDER_ATTEMPTS,
             )
         except Exception:
             logger.warning(

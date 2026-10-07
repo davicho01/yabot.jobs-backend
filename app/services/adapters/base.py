@@ -12,7 +12,7 @@ import httpx
 
 from app.models.enums import EmploymentType, WorkplaceType
 from app.services.adapters.text import OG_TITLE_RE, clean_text, extract_balanced_tag, html_to_formatted_text
-from app.services.browser_fetch import fetch_rendered_page
+from app.services.browser_fetch import fetch_rendered_page, is_bot_challenge_page
 
 TIMEOUT = 30.0
 
@@ -338,7 +338,7 @@ def fetch_html(url: str) -> FetchedPage:
     """
     try:
         response = _fetch_direct(url)
-        if response.text.strip():
+        if response.text.strip() and not is_bot_challenge_page(response.text):
             return FetchedPage(text=response.text, url=str(response.url))
         # A 2xx status with an empty body is a WAF JS-challenge, not a real
         # page — raise_for_status() never catches this (verified live on
@@ -349,7 +349,10 @@ def fetch_html(url: str) -> FetchedPage:
         # browser render. avature.py's own _fetch_page_html already guards
         # against this same signature; this mirrors that check here so every
         # caller of fetch_html (the generic default scanner included) gets it.
-        logger.info("Direct fetch of %s returned an empty body; retrying via browser_fetch_service.", url)
+        logger.info(
+            "Direct fetch of %s returned an empty body or a bot-challenge page; retrying via browser_fetch_service.",
+            url,
+        )
     except httpx.HTTPError as exc:
         logger.info("Direct fetch of %s failed (%s); retrying via browser_fetch_service.", url, exc)
 
