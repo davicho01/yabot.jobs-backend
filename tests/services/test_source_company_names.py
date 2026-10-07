@@ -244,6 +244,16 @@ class TestAdminUpdate:
         assert (read.status, read.notes) == ("rejected", "robots.txt: User-agent: * / Disallow: /")
         assert read.name_source == AUTO  # a note isn't a rename
 
+    def test_creating_a_white_label_board_uses_embedded_detection(self, scan_db, monkeypatch):
+        from app.api.routes import crawl_sources
+        from app.schemas.crawl_source import CrawlSourceCreate
+
+        monkeypatch.setattr(crawl_sources, "detect_embedded_ats_source", lambda url: ("paradox", "careers.chuys.com"))
+        source = crawl_sources.create_crawl_source(
+            CrawlSourceCreate(name="Chuy's", board_url="https://careers.chuys.com"), scan_db
+        )
+        assert (source.ats_type, source.board_url, source.status) == ("paradox", "https://careers.chuys.com", "active")
+
 class TestOneOffs:
     def _jobs(self, scan_db, make_url, source, page_name, n, page_title=None):
         raw = {"html_excerpt": f"<html><head><title>{page_title}</title></head></html>"} if page_title else None

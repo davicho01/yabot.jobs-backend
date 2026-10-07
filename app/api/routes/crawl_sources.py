@@ -53,7 +53,13 @@ def create_crawl_source(payload: CrawlSourceCreate, db: Session = Depends(get_db
     try:
         ats_type, _ = detect_ats_source(payload.board_url)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+        # White-label platforms (Paradox, Clinch, TalentBrew, ...) have no
+        # static URL shape — same embedded fallback as update_crawl_source,
+        # or they could only ever be added through a job-URL submission.
+        embedded = detect_embedded_ats_source(payload.board_url)
+        if embedded is None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+        ats_type, _ = embedded
 
     # An admin typed this name, so it's the company's confirmed official name.
     source = CrawlSource(name=payload.name, ats_type=ats_type, board_url=payload.board_url, name_source=MANUAL)
