@@ -8,9 +8,11 @@ authority yet. For each one this looks up the company's own domain
 (Company.domain, else the domain its name is, else logo.dev's brand search),
 fetches its homepage and its /careers and /jobs pages, and takes the first
 link to a careers board on a platform we support (the same pure URL-shape
-match job submissions use, detect_ats_source). Registered the same way a
-submitted job's board is (register_discovered_board — active, so the next
-crawl dispatch picks it up), and named after the company.
+match job submissions use, detect_ats_source). Registered as a *pending*
+crawl source named after the company (register_discovered_board with
+needs_review): a homepage can link to someone else's board (a partner's, a
+parent's), so an agent verifies it belongs to the company before it's
+activated and crawled (docs/adapter-playbook.md, "Official-site candidates").
 
 Bounded on purpose: a small batch per run, at most three fetches per
 company, and a company is looked at again only after RECHECK_AFTER, whatever
@@ -210,7 +212,7 @@ def run(
             if dry_run:
                 continue
             if board:
-                source = register_discovered_board(db, board)
+                source = register_discovered_board(db, board, needs_review=True)
                 if source is not None and source.name_source == PLACEHOLDER:
                     source.name, source.name_source = company_name[:255], AUTO
             _record(db, company_key, company_name, result, now)

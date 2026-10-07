@@ -19,7 +19,7 @@ _NO_COMPANY_SLUG_ATS_TYPES = {AtsType.ADP}
 logger = logging.getLogger("app.crawl_sources")
 
 
-def register_discovered_board(db: Session, url: str) -> CrawlSource | None:
+def register_discovered_board(db: Session, url: str, *, needs_review: bool = False) -> CrawlSource | None:
     """Best-effort: note the board a submitted job URL belongs to, so the
     daily crawler picks up that company's future postings too, and so the
     submitted URL itself can be attributed back to that board (see caller:
@@ -32,6 +32,12 @@ def register_discovered_board(db: Session, url: str) -> CrawlSource | None:
     we don't recognize is instead noted as "pending" (keyed by domain, one
     row per unrecognized site regardless of how many people submit from
     it) — a queue of platforms worth investigating and implementing.
+
+    needs_review=True registers even a supported board as "pending", for an
+    agent to verify before it's crawled — the official-site finder's boards
+    (app.services.official_sites), found by following a company's homepage
+    links rather than from a job of theirs someone submitted. Such a row is
+    the one kind of pending row whose ats_type is already set.
     """
     try:
         ats_type, board_key = detect_ats_source(url)
@@ -56,7 +62,7 @@ def register_discovered_board(db: Session, url: str) -> CrawlSource | None:
         ats_type=ats_type,
         board_key=board_key,
         board_url=board_url,
-        status=CrawlSourceStatus.ACTIVE,
+        status=CrawlSourceStatus.PENDING if needs_review else CrawlSourceStatus.ACTIVE,
     )
 
 

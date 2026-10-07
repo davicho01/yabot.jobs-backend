@@ -81,7 +81,9 @@ def test_a_dry_run_reports_the_board_and_writes_nothing(scan_db, make_source, ma
     assert scan_db.scalar(select(Company).where(Company.company_key == "acme")).official_site_checked_at is None
 
 
-def test_a_found_board_becomes_a_source_named_after_the_company_and_isnt_looked_at_again(scan_db, make_source, make_url):
+def test_a_found_board_becomes_a_pending_source_named_after_the_company_and_isnt_looked_at_again(
+    scan_db, make_source, make_url
+):
     _job(scan_db, make_url, _linkedin(scan_db, make_source), "Acme")
     scan_db.add(Company(company_key="acme", display_name="Acme", domain="acme.com", domain_source="jsonld"))
     scan_db.commit()
@@ -90,7 +92,8 @@ def test_a_found_board_becomes_a_source_named_after_the_company_and_isnt_looked_
 
     source = scan_db.scalar(select(CrawlSource).where(CrawlSource.board_url.contains("greenhouse.io/acme")))
     assert source is not None
-    assert (source.name, source.name_source, source.status, source.is_official) == ("Acme", AUTO, "active", True)
+    # Pending until an agent verifies the board is really Acme's; its platform is already known.
+    assert (source.name, source.name_source, source.status, source.ats_type) == ("Acme", AUTO, "pending", "greenhouse")
     company = scan_db.scalar(select(Company).where(Company.company_key == "acme"))
     assert (company.official_site_result, company.official_site_checked_at is not None) == ("found", True)
     assert official_sites.companies_needing_official_site(scan_db, now=NOW, limit=10) == []
