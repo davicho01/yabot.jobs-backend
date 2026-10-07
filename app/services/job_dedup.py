@@ -59,6 +59,11 @@ _ATS_HOST_RE = re.compile(
     re.IGNORECASE,
 )
 _CAREERS_HOST_RE = re.compile(r"^(?:careers?|jobs|apply|hiring)\.[\w-]+(?:\.[\w-]+)+$", re.IGNORECASE)
+# Any other host with a subdomain ("signicat.teamtailor.com",
+# "careerunitedstates.autoliv.com", "www.jobs-ups.com"): a brand written as a
+# domain has two labels ("Ancestry.com", "incident.io"), not three. Lowercase
+# only, as hosts are written, so initials like "J.P.Morgan" stay a name.
+_MULTI_LABEL_HOST_RE = re.compile(r"^[a-z0-9-]+(?:\.[a-z0-9-]+){2,}$")
 # Careers-portal wording — Oracle "Candidate Experience" site names and the like
 # ("JPMC Candidate Experience page", "Chubb External", "Molina Talent
 # Acquisition", "Employment Opportunities at BuzzFeed, Inc.", "6090-Johnson &
@@ -106,7 +111,7 @@ def clean_company_name(name: str | None) -> str | None:
     original = " ".join(name.split())
     if not original:
         return None
-    if _ATS_HOST_RE.match(original) or _CAREERS_HOST_RE.match(original):
+    if _ATS_HOST_RE.match(original) or _CAREERS_HOST_RE.match(original) or _MULTI_LABEL_HOST_RE.match(original):
         return None
     segments = [seg.strip() for seg in original.split("|") if seg.strip()]
     if len(segments) > 1 and any(_is_careers_label(seg) for seg in segments):

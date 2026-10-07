@@ -10,7 +10,9 @@ Reports, per source:
     most of its jobs' pages agree on (company_names.promotable_name), the
     company in most of its stored page titles — that the board's own address
     confirms (one of its words in it: "Honda" in careers.honda.com), so
-    "L3HHCM20" on jobs.l3harris.com loses to a "L3Harris ..." page title.
+    "L3HHCM20" on jobs.l3harris.com loses to a "L3Harris ..." page title;
+    a squashed slug-name -> the words its pages spell it with
+    ("Paloaltonetworks" -> "Palo Alto Networks").
     Written with --write, unless an admin already set the name ("manual").
   - REVIEW: a usable-looking name that shares no word with the name most of
     its jobs' pages give ("Gem" vs "11x.ai"), and a slug/hostname whose
@@ -109,6 +111,28 @@ def _matches_board(name: str, source: CrawlSource) -> bool:
     return any(token in haystack for token in _tokens(name))
 
 
+def _unsquashed(name: str, page_names) -> str | None:
+    """The spaced name a squashed slug-name stands for, spelled the way its
+    pages write it: the run of a page name's words that joins up to exactly
+    the source name ("Paloaltonetworks" in "Palo Alto Networks, Inc." ->
+    "Palo Alto Networks"; "Epicorsoftware" in "EPIC Epicor Software" ->
+    "Epicor Software"). None for a name with spaces, or no such run."""
+    target = name.lower()
+    if " " in name or not target.isalnum():
+        return None
+    for page_name in page_names:
+        words = re.findall(r"[^\W_]+", page_name or "")
+        for start in range(len(words)):
+            joined = ""
+            for end in range(start, len(words)):
+                joined += words[end].lower()
+                if joined == target and end > start:
+                    return " ".join(words[start : end + 1])
+                if not target.startswith(joined):
+                    break
+    return None
+
+
 def _is_name(candidate: str | None) -> bool:
     """Whether a proposed name is a name at all, not a board slug or hostname
     ("greenhouse/coalition" left over as its old jobs' company name)."""
@@ -152,6 +176,8 @@ def curate(db) -> tuple[dict, list, list]:
                     # ("Business Systems, Data & AI" on jpmc.fa.oraclecloud.com),
                     # a code ("L3HHCM20"), a placeholder ("UNAVAILABLE"), the slug.
                     review.append((source, proposal, f"pages say it ({share:.0%}); the board address doesn't confirm it"))
+        elif source.name_source != MANUAL and (spaced := _unsquashed(source.name, [n for n, _ in names.most_common()])):
+            auto_fixes[source] = spaced
         elif (
             brand
             and dominant

@@ -52,7 +52,8 @@ def test_careers_wording_is_stripped(raw, expected):
 @pytest.mark.parametrize(
     "host", ["starbucks.eightfold.ai", "lockheedmartin.eightfold.ai", "careers.qualcomm.com", "careers.elcompanies.com",
              "acme.wd5.myworkdayjobs.com", "jobs.example.org", "www.rei.jobs", "aecom.jobs", "instacart.careers",
-             "jobs.dayforcehcm.com"],
+             "jobs.dayforcehcm.com", "signicat.teamtailor.com", "careerunitedstates.autoliv.com", "www.jobs-ups.com",
+             "app.eightfold.ai"],
 )
 def test_hostnames_are_dropped_so_the_next_fallback_is_used(host):
     assert clean_company_name(host) is None
@@ -61,7 +62,7 @@ def test_hostnames_are_dropped_so_the_next_fallback_is_used(host):
 @pytest.mark.parametrize(
     "name",
     ["BambooHR", "Ashby", "Super.com", "Harness.io", "11x.ai", "Scale AI", "Netflix", "Starbucks Coffee Company",
-     "Estée Lauder Companies"],
+     "Estée Lauder Companies", "Ancestry.com", "incident.io", "Ether.fi", "J.P.Morgan", "A.O. Smith"],
 )
 def test_real_names_pass_through_unchanged(name):
     # Odd-looking but real (BambooHR hires on its own Greenhouse board; Super.com is a brand).

@@ -19,11 +19,18 @@ _JOB_URL_RE = re.compile(r"referrals\.selectminds\.com/jobs/[a-z0-9-]+-\d+", re.
 # itself via OG tags as if open) — the real, current state only shows up
 # in the rendered page body itself, in this exact phrase.
 _CLOSED_SIGNATURE = "this position has been closed"
-_TITLE_RE = re.compile(r"<title>(.*?)\s*-\s*[^<]*</title>", re.IGNORECASE | re.DOTALL)
+# "<job title> - <employer> Careers": the employer suffix follows the *last*
+# " - ", since the job title itself can contain one ("Engineer - Data Initiatives").
+_TITLE_RE = re.compile(r"<title>(.*)\s+-\s+[^<]*</title>", re.IGNORECASE | re.DOTALL)
 _LOCATION_RE = re.compile(
     r'class="primary_location"[^>]*>.*?<span[^>]*>.*?</span>\s*(.*?)\s*</a>', re.IGNORECASE | re.DOTALL
 )
 _DESCRIPTION_START_RE = re.compile(r'class="job_description"[^>]*>', re.IGNORECASE)
+# Each tenant is a different employer: the page names it in og:site_name
+# ("Energy Transfer Family of Partnerships") and as its <title>'s suffix
+# ("Engineer - Data Initiatives - Energy Transfer Family of Partnerships Careers").
+_SITE_NAME_RE = re.compile(r'<meta[^>]+property="og:site_name"[^>]+content="([^"]+)"', re.IGNORECASE)
+_TITLE_SUFFIX_RE = re.compile(r"<title>.*\s-\s([^<]*?)(?:\s+Careers)?\s*</title>", re.IGNORECASE | re.DOTALL)
 
 
 def _match(url: str) -> str | None:
@@ -57,6 +64,11 @@ def _extract_balanced_div_like(html: str, start: int, tag: str) -> str | None:
     return None
 
 
+def _company_name(html: str) -> str | None:
+    match = _SITE_NAME_RE.search(html) or _TITLE_SUFFIX_RE.search(html)
+    return clean_text(match.group(1)) if match else None
+
+
 def extract(html: str) -> ExtractedJobFields:
     title_match = _TITLE_RE.search(html)
     location_match = _LOCATION_RE.search(html)
@@ -70,7 +82,7 @@ def extract(html: str) -> ExtractedJobFields:
     return ExtractedJobFields(
         title=clean_text(title_match.group(1)) if title_match else None,
         description=description,
-        company_name="Zions Bancorporation",
+        company_name=_company_name(html),
         location=clean_text(location_match.group(1)) if location_match else None,
     )
 
