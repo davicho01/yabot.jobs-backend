@@ -16,7 +16,8 @@ needs_review): a homepage can link to someone else's board (a partner's, a
 parent's), so an agent verifies it belongs to the company before it's
 activated and crawled (docs/adapter-playbook.md, "Official-site candidates").
 
-Bounded on purpose: a small batch per run, at most six fetches per
+Bounded on purpose: a run stops after TIME_BUDGET_SECONDS (the next run
+continues with the companies it didn't reach), at most six fetches per
 company, and a company is looked at again only after RECHECK_AFTER, whatever
 the outcome — so an unanswerable company isn't retried every day.
 """
@@ -25,6 +26,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urljoin, urlsplit
@@ -49,7 +51,11 @@ logger = logging.getLogger("app.official_sites")
 
 LOOKBACK = timedelta(days=60)
 RECHECK_AFTER = timedelta(days=30)
-DEFAULT_LIMIT = 25
+# A run checks companies until this much time has passed, then stops; the
+# next run picks up the ones not checked yet. Leaves room inside the Cloud
+# Function's 540s timeout for the company in progress (at most
+# len(_PATHS) + MAX_CAREERS_PAGES fetches of FETCH_TIMEOUT each).
+TIME_BUDGET_SECONDS = 420.0
 FETCH_TIMEOUT = 10.0
 _PATHS = ("", "/careers", "/jobs")
 _HREF_RE = re.compile(r"""href\s*=\s*["']([^"'#\s]+)""", re.IGNORECASE)
@@ -96,7 +102,7 @@ def _official_keys(db: Session) -> set[str]:
     return keys
 
 
-def companies_needing_official_site(db: Session, *, now: datetime, limit: int) -> list[tuple[str, str]]:
+def companies_needing_official_site(db: Session, *, now: datetime, limit: int | None) -> list[tuple[str, str]]:
     """[(company_key, company_name)] of companies with recent canonical jobs
     from a non-official place and no official source of their own, most jobs
     first, skipping any looked at within RECHECK_AFTER."""
@@ -231,15 +237,20 @@ def run(
     db: Session,
     *,
     dry_run: bool,
-    limit: int = DEFAULT_LIMIT,
+    limit: int | None = None,
+    time_budget: float = TIME_BUDGET_SECONDS,
     now: datetime | None = None,
     client: httpx.Client | None = None,
     logo_client: httpx.Client | None = None,
+    clock=time.monotonic,
 ) -> list[Outcome]:
-    """Look for the official site of up to `limit` companies. A board found
-    is registered as a crawl source named after the company; every company
-    looked at is recorded, so it waits RECHECK_AFTER before the next look.
-    A dry run only logs what it would do and writes nothing."""
+    """Look for the official site of companies that need one, most jobs
+    first, until `time_budget` seconds have passed (and at most `limit`
+    companies, if given). A board found is registered as a crawl source named
+    after the company; every company looked at is recorded, so it waits
+    RECHECK_AFTER before the next look and the next run starts with the ones
+    this one didn't reach. A dry run only logs what it would do and writes
+    nothing."""
     now = now or datetime.now(timezone.utc)
     own_client = client is None
     client = client or httpx.Client(follow_redirects=True, timeout=FETCH_TIMEOUT, headers=_HEADERS)
@@ -248,7 +259,12 @@ def run(
         logo_client = logo_dev.new_client()
     outcomes: list[Outcome] = []
     try:
-        for company_key, company_name in companies_needing_official_site(db, now=now, limit=limit):
+        started = clock()
+        candidates = companies_needing_official_site(db, now=now, limit=limit)
+        for company_key, company_name in candidates:
+            if clock() - started >= time_budget:
+                logger.info("Time budget used; %d compan(ies) left for the next run.", len(candidates) - len(outcomes))
+                break
             domain = _domain_for(db, company_key, company_name, logo_client)
             board, result = None, NONE
             if domain:

@@ -127,6 +127,22 @@ def test_a_found_board_becomes_a_pending_source_named_after_the_company_and_isnt
     assert official_sites.companies_needing_official_site(scan_db, now=NOW, limit=10) == []
 
 
+def test_a_run_stops_when_its_time_budget_is_used_and_the_next_run_continues(scan_db, make_source, make_url):
+    linkedin = _linkedin(scan_db, make_source)
+    for company, jobs in (("Acme", 3), ("Globex", 2), ("Initech", 1)):  # most jobs first
+        for _ in range(jobs):
+            _job(scan_db, make_url, linkedin, company)
+    ticks = iter([0, 0, 50, 100])  # start, then before each company: 0s, 50s, 100s elapsed
+
+    first = official_sites.run(
+        scan_db, dry_run=False, now=NOW, client=_client({}), time_budget=60, clock=lambda: next(ticks)
+    )
+    second = official_sites.run(scan_db, dry_run=False, now=NOW, client=_client({}))
+
+    assert [o.company_key for o in first] == ["acme", "globex"]
+    assert [o.company_key for o in second] == ["initech"]
+
+
 def test_no_domain_or_no_board_is_recorded_as_none(scan_db, make_source, make_url):
     _job(scan_db, make_url, _linkedin(scan_db, make_source), "Acme")
     _job(scan_db, make_url, None, "Initech")
