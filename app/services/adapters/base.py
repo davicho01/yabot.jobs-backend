@@ -909,6 +909,24 @@ _SALARY_SINGLE_RE = re.compile(
 )
 
 
+_SPACED_THOUSANDS_RE = re.compile(r"([\$£€]\s*\d{1,3}),\s(\d{3})(?!\d)")
+# Above this, or with a top more than this many times the bottom, a "range"
+# is a typo, not a salary ("$121, 720 - $143,200k" once read as 720 to
+# 143,200,000) — no salary beats a wrong one.
+_MAX_PLAUSIBLE_SALARY = 5_000_000
+_MAX_PLAUSIBLE_SPREAD = 10
+
+
+def _thousands(amount: int, k_suffix: str | None) -> int:
+    """A "k" suffix multiplies a short figure ("$143k") — not one already
+    written out in full ("$143,200k", a typo for 143,200)."""
+    return amount * 1000 if k_suffix and amount < 1000 else amount
+
+
+def _plausible_range(low: int, high: int) -> bool:
+    return 0 < low <= high <= _MAX_PLAUSIBLE_SALARY and high <= low * _MAX_PLAUSIBLE_SPREAD
+
+
 def salary_from_text(text: str | None) -> tuple[int | None, int | None, str | None]:
     """Regex fallback for when structured salary data is missing or
     zeroed out but the (plain-text, already-cleaned) description states a
@@ -918,6 +936,10 @@ def salary_from_text(text: str | None) -> tuple[int | None, int | None, str | No
     """
     if not text:
         return None, None, None
+    # A stray space after the thousands comma, right after a currency sign —
+    # "$121, 720" (verified live on a DispatchHealth/NLX posting) otherwise
+    # reads as 720. Only after a sign, so "Level 5, 272,000" can't merge.
+    text = _SPACED_THOUSANDS_RE.sub(r"\1,\2", text)
 
     # .search() alone would settle for the *first* number-dash-number shape
     # in the text and bail — verified live on an amazon.jobs posting whose
@@ -946,12 +968,12 @@ def salary_from_text(text: str | None) -> tuple[int | None, int | None, str | No
             salary_max = round(float(match.group("max").replace(",", "")))
         except ValueError:
             continue
-        if match.group("min_k"):
-            salary_min *= 1000
-        if match.group("max_k"):
-            salary_max *= 1000
+        salary_min = _thousands(salary_min, match.group("min_k"))
+        salary_max = _thousands(salary_max, match.group("max_k"))
         if salary_min > salary_max:
             salary_min, salary_max = salary_max, salary_min
+        if not _plausible_range(salary_min, salary_max):
+            continue
 
         currency = cur1 or cur1b or cur2 or cur3 or _CURRENCY_SYMBOLS.get(sym1 or sym2 or "")
         overall_min = salary_min if overall_min is None else min(overall_min, salary_min)
@@ -972,8 +994,9 @@ def salary_from_text(text: str | None) -> tuple[int | None, int | None, str | No
         amount = round(float(match.group("amount").replace(",", "")))
     except ValueError:
         return None, None, None
-    if match.group("amount_k"):
-        amount *= 1000
+    amount = _thousands(amount, match.group("amount_k"))
+    if not _plausible_range(amount, amount):
+        return None, None, None
 
     currency = cur1 or cur2 or _CURRENCY_SYMBOLS.get(sym1 or "")
     return amount, amount, currency.upper() if currency else None

@@ -1,3 +1,5 @@
+import pytest
+
 from app.services import job_scanner
 from app.services.adapters import base
 from app.services.adapters.text import extract_balanced_tag as _extract_balanced_tag
@@ -91,6 +93,38 @@ def test_salary_from_text_still_rejects_level_band_digit_as_range_start():
     assert _salary_from_text(
         "224,000 - 356,500 USD for Level 5, and 272,000 - 431,250 USD for Level 6"
     ) == (224000, 431250, "USD")
+
+
+def test_salary_from_text_reads_a_spaced_thousands_comma_and_a_redundant_k():
+    # The DispatchHealth/NLX typo "$121, 720 - $143,200k" was stored as
+    # 720 to 143,200,000 ("$143M" on the job page).
+    assert _salary_from_text("Pay Range: $121, 720 - $143,200k salary") == (121720, 143200, "USD")
+
+
+def test_salary_from_text_spaced_comma_only_merges_right_after_a_currency_sign():
+    # "Level 5, 272,000" must not become 5,272,000.
+    assert _salary_from_text("Level 5, 272,000 - 300,000 USD") == (272000, 300000, "USD")
+
+
+def test_salary_from_text_k_still_multiplies_a_short_figure():
+    assert _salary_from_text("$90k - $110K") == (90000, 110000, "USD")
+
+
+@pytest.mark.parametrize("text", [
+    "$5 - $900,000",                # top more than 10x the bottom: a typo, not a range
+    "$0 - $100,000",
+    "$4,000,000 - $9,000,000",      # above any plausible salary
+])
+def test_salary_from_text_drops_an_implausible_range(text):
+    assert _salary_from_text(text) == (None, None, None)
+
+
+def test_salary_from_text_keeps_a_plausible_band_when_another_is_dropped():
+    assert _salary_from_text("Bonus $5 - $900,000. Base $120,000 - $150,000") == (120000, 150000, "USD")
+
+
+def test_salary_from_text_hourly_ranges_are_still_plausible():
+    assert _salary_from_text("$15 - $25 per hour") == (15, 25, "USD")
 
 
 def test_scan_job_url_dispatches_to_the_matching_adapter(monkeypatch):
