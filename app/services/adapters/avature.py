@@ -257,6 +257,25 @@ def _fetch_job_detail_html(url: str) -> str | None:
     return _fetch_page_html(url, wait_for_selector=".description-ajax article, article.article--details")
 
 
+# Where a closed posting lands instead of its job-detail page (verified live
+# 2026-10-07): IBM redirects to /closedjob ("Sorry, this job is closed and we
+# are no longer accepting applications"), Jacobs to /careers/Error.
+_CLOSED_PATH_RE = re.compile(r"/(?:closedjob|careers/Error)/?$", re.IGNORECASE)
+_CLOSED_TEXT = "no longer accepting applications"
+
+
+def _is_closed_job(url: str) -> bool:
+    """Whether a job-detail page that never rendered its description is a
+    closed posting: the description wait times out on one (its content is
+    never there), which used to read as a failed fetch and was retried into
+    needs_review. Only asked after that wait failed — one more render,
+    without the wait, to see where the page landed."""
+    rendered = fetch_rendered_page(url)
+    if rendered is None:
+        return False
+    return bool(_CLOSED_PATH_RE.search(urlsplit(rendered.url).path)) or _CLOSED_TEXT in rendered.html.lower()
+
+
 def _resolve_careers_url(host: str) -> str | None:
     base_url = f"https://{host}/careers"
     try:
@@ -340,6 +359,8 @@ def scan_job_url(url: str) -> ScanResult | None:
         return None
     html = _fetch_job_detail_html(url)
     if html is None:
+        if _is_closed_job(url):
+            return ScanResult(success=False, error="Avature shows this job as closed.", expired=True)
         return ScanResult(success=False, error=f"Failed to fetch {url}: direct fetch and browser render both failed")
     if _AVATURE_META_SIGNATURE not in html:
         return None  # URL path shape was a coincidence; not actually Avature.
