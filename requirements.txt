@@ -18,6 +18,7 @@ boto3>=1.35
 jinja2>=3.1  # renders generate_static_job_pages.py's SEO pages
 tldextract>=5.1  # registrable domains for company logos (app/services/company_logos.py), offline snapshot only
 markdown-it-py>=3.0  # renders job descriptions on the static per-job pages (raw HTML disabled)
+numpy>=2.0  # sector model inference (app/services/sector_model.py)
 pypdf>=5.0
 python-docx>=1.1
 reportlab>=4.2

@@ -3,11 +3,12 @@
 Sector (the job function/department a posting is hiring for — engineering,
 sales, service_trades, ...) is set going forward by _upsert_posting on every
 scan via app.services.job_sector.classify_sector; this brings existing rows
-in line. Pure keyword matching against title/description — no network calls,
-so it's safe and fast over the whole table. Reads only id/title/description
-(rows are large: descriptions live in the same table), walks the table in id
-order, and writes only rows whose sector actually changes, so it's idempotent
-and safe to re-run whenever the keyword lists in job_sector.py change.
+in line. Runs the local sector model (app/ml/sector_model.npz) on each
+title/description — no network calls, ~1.5 ms per posting, so it's safe and
+fast over the whole table. Reads only id/title/description (rows are large:
+descriptions live in the same table), walks the table in id order, and writes
+only rows whose sector actually changes, so it's idempotent and safe to re-run
+whenever the model file changes.
 
 Use --dry-run first: it writes nothing and logs a before/after breakdown by
 sector to review.

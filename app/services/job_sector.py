@@ -5,267 +5,47 @@ app.services.workplace) this can't be derived from anything company-level:
 the same company can post HR, Finance, and Engineering roles at once, so
 each posting has to be classified from what it itself says it's hiring for.
 
-Keyword-only, no LLM call — job titles are standardized enough that a
-keyword match against the title, falling back to the description when the
-title doesn't say, classifies the overwhelming majority for free. It won't
-be perfect (a title like "Growth Lead" with no other signal falls through to
-UNKNOWN) but that's an acceptable trade for running on every scan at zero
-marginal cost; false UNKNOWNs can be revisited later, false positives are
-what actually erode a sector search page's trust and are avoided by keeping
-each sector's keyword list to terms that are genuinely diagnostic of it.
+Classified by a model trained in the yabot.jobs-ml project on ~8,500 real
+postings labeled by job function (full title + description), replacing the
+keyword lists this module used to hold. The model file, app/ml/sector_model.npz,
+is loaded once per process with only numpy (app.services.sector_model) —
+about 40 MB of memory and ~1.5 ms per posting, so it runs inline on every scan.
+
+Below the model's confidence threshold (stored in the file, currently 0.5) the
+answer is UNKNOWN: a wrong sector hurts a sector page more than a missing one.
+If the model file can't be loaded, every posting gets UNKNOWN and the error
+is logged once, rather than failing scans.
+
+To update the model: retrain in yabot.jobs-ml, run `python -m sector_ml.export`,
+copy models/sector_model.npz to app/ml/, then re-run one_off/backfill_sector.py.
 """
 
-import re
+import logging
+from functools import cache
+from pathlib import Path
 
 from app.models.enums import JobSector
+from app.services.sector_model import SectorModel
 
-# Checked in this order — first match wins. Function-specific sectors are
-# checked before EXECUTIVE so e.g. "VP of Engineering" lands in
-# engineering_tech, not executive; EXECUTIVE's own keywords are kept to
-# titles that don't already name a function (C-suite abbreviations,
-# "President", "Executive Director").
-_SECTOR_KEYWORDS: list[tuple[JobSector, tuple[str, ...]]] = [
-    (
-        JobSector.ENGINEERING_TECH,
-        (
-            # No bare "information technology" here on purpose: it used to be
-            # a multi-word keyword, but verified live it also matches when a
-            # career site's own department/category tag ("Information
-            # Technology" — a scraped page artifact, not job content) leaks
-            # into a totally unrelated description (a Walgreens "Pharmacy
-            # Intern" listing landed in engineering_tech purely from that).
-            # "it support"/"it technician" below already cover the genuine
-            # IT-role title patterns.
-            "engineer", "engineering", "developer", "programmer", "software",
-            "devops", "sre", "site reliability", "data scientist", "data engineer",
-            "data analyst", "machine learning", "ai researcher", "qa engineer",
-            "quality assurance engineer", "test engineer", "systems administrator",
-            "sysadmin", "network engineer", "security engineer", "cybersecurity",
-            "solutions architect", "software architect", "full stack", "full-stack",
-            "backend", "back-end", "frontend", "front-end", "ios developer",
-            "android developer", "mobile developer", "cloud engineer",
-            "database administrator", "dba", "it support", "it technician",
-            "web developer", "firmware engineer",
-            "embedded engineer", "computer vision",
-        ),
-    ),
-    (
-        JobSector.ENGINEERING_TRADITIONAL,
-        (
-            "civil engineer", "civil engineering", "mechanical engineer",
-            "mechanical engineering", "electrical engineer", "electrical engineering",
-            "aerospace engineer", "chemical engineer", "structural engineer",
-            "industrial engineer", "environmental engineer", "process engineer",
-            # Without this, a bare "engineer" (below) would catch this title
-            # as engineering_tech — same reasoning as "sales engineer" under
-            # SALES (verified live: "Manufacturing Engineer" landed in
-            # engineering_tech before this). "Quality Engineer" was
-            # considered too, but it's genuinely ambiguous — verified live,
-            # an L3 "Quality Engineer" posting was actually a *Software*
-            # Quality Engineer (QMS/CMMI/AS9100 for aerospace software), so
-            # it's not added here.
-            "manufacturing engineer", "manufacturing engineering",
-        ),
-    ),
-    (
-        JobSector.SALES,
-        (
-            "sales representative", "sales manager", "sales executive",
-            "sales director", "account executive",
-            "account manager", "business development", "bdr", "sdr",
-            "territory manager", "inside sales", "outside sales",
-            "sales engineer", "channel partner manager", "salesperson",
-        ),
-    ),
-    (
-        JobSector.MARKETING,
-        (
-            "marketing", "seo specialist", "content strategist", "content marketer",
-            "social media", "brand manager", "growth marketer", "demand generation",
-            "communications specialist", "pr manager", "public relations",
-            "copywriter", "digital marketing", "marketing analyst",
-        ),
-    ),
-    (
-        JobSector.FINANCE_ACCOUNTING,
-        (
-            "accountant", "accounting", "finance manager", "financial analyst",
-            "financial planning", "controller", "bookkeeper", "payroll",
-            "auditor", "audit associate", "treasury", "tax analyst",
-            "tax accountant", "credit analyst", "fp&a",
-        ),
-    ),
-    (
-        JobSector.HR,
-        (
-            "human resources", "recruiter", "recruiting", "talent acquisition",
-            "people operations", "hr business partner", "hr generalist",
-            "hr manager", "hr coordinator", "benefits specialist",
-            "compensation analyst", "talent partner",
-        ),
-    ),
-    (
-        JobSector.OPERATIONS_MANUFACTURING,
-        (
-            "manufacturing", "production associate", "production supervisor",
-            "warehouse", "logistics", "supply chain", "operations manager",
-            "operations associate", "machine operator", "assembly line",
-            "assembler", "plant manager", "quality control", "forklift",
-            "maintenance technician", "industrial", "fulfillment",
-            "distribution center",
-        ),
-    ),
-    (
-        JobSector.CUSTOMER_SUPPORT,
-        (
-            "customer support", "customer service", "support specialist",
-            "help desk", "technical support", "customer success",
-            "client services", "call center",
-        ),
-    ),
-    (
-        JobSector.LEGAL,
-        (
-            "attorney", "lawyer", "legal counsel", "paralegal",
-            "compliance officer", "compliance analyst", "legal assistant",
-            "corporate counsel", "contracts manager",
-        ),
-    ),
-    (
-        JobSector.HEALTHCARE,
-        (
-            "registered nurse", "physician", "medical assistant", "healthcare",
-            "clinical", "pharmacist", "therapist", "dental hygienist", "dentist",
-            "caregiver", "patient care", "nurse practitioner", "medical technician",
-            "phlebotomist", "radiology",
-        ),
-    ),
-    (
-        JobSector.DESIGN_PRODUCT,
-        (
-            "product manager", "product owner", "ux designer", "ui designer",
-            "graphic designer", "product design", "user experience",
-            "user researcher", "visual designer", "product marketing manager",
-        ),
-    ),
-    (
-        JobSector.EXECUTIVE,
-        (
-            "chief executive officer", "chief operating officer",
-            "chief financial officer", "chief technology officer",
-            "chief marketing officer", "chief people officer", "chief of staff",
-            "president", "executive director", " ceo ", " coo ", " cfo ", " cto ",
-        ),
-    ),
-    (
-        JobSector.ADMINISTRATIVE_OFFICE,
-        (
-            "receptionist", "office assistant", "administrative assistant",
-            "office manager", "data entry clerk", "data entry",
-            "executive assistant", "administrative coordinator",
-            "office coordinator", "administrative support",
-        ),
-    ),
-    (
-        JobSector.SERVICE_TRADES,
-        (
-            # Delivery/transport.
-            "delivery driver", "truck driver", "route driver", "cdl driver",
-            "courier", "delivery associate",
-            # Food service.
-            "pizza cook", "line cook", "prep cook", "head cook", "food service",
-            "food server", "wait staff", "waiter", "waitress", "bartender",
-            "barista", "dishwasher", "kitchen staff", "fast food", "restaurant",
-            "chef", "cook",
-            # Retail.
-            "sales associate", "retail associate", "store associate",
-            "stock associate", "cashier",
-            # Hospitality / hotel.
-            "hotel", "housekeeping", "housekeeper", "concierge",
-            # Skilled trades / building services.
-            "electrician", "plumber", "hvac technician", "hvac", "carpenter",
-            "welder", "construction worker", "general contractor", "handyman",
-            "landscaper", "groundskeeper", "janitor", "custodian",
-            "security guard", "loss prevention", "driver",
-        ),
-    ),
-]
+logger = logging.getLogger("app.job_sector")
 
-_WHITESPACE_RE = re.compile(r"\s+")
+MODEL_PATH = Path(__file__).resolve().parent.parent / "ml" / "sector_model.npz"
 
 
-def _normalize(text: str) -> str:
-    return " " + _WHITESPACE_RE.sub(" ", text.lower()) + " "
-
-
-def _is_word_char(c: str) -> bool:
-    return c.isalnum() or c == "_"
-
-
-def _contains_keyword(text: str, keyword: str) -> bool:
-    """Whether `keyword` occurs in `text` as a whole word/phrase, not just a
-    bare substring — plain `keyword in text` let "dba" (database
-    administrator) match inside "Handbags" (verified live: a Macy's "Retail
-    Sales Ambassador - Designer Handbags" listing landed in engineering_tech
-    purely from that). `str.find` in a loop plus a character check at each
-    candidate's edges, rather than a compiled `\\b...\\b` regex — this runs
-    on every scan and, at the scale of a full backfill (hundreds of
-    thousands of postings x a couple hundred keywords each), the regex
-    engine's per-call overhead measurably added up (~10x slower than this in
-    practice) for no behavioral difference."""
-    start = 0
-    keyword_len = len(keyword)
-    while True:
-        idx = text.find(keyword, start)
-        if idx == -1:
-            return False
-        before_ok = idx == 0 or not _is_word_char(text[idx - 1])
-        after_idx = idx + keyword_len
-        after_ok = after_idx >= len(text) or not _is_word_char(text[after_idx])
-        if before_ok and after_ok:
-            return True
-        start = idx + 1
-
-
-def _match(text: str, *, allow_single_word: bool = True) -> JobSector | None:
-    # Multi-word keywords ("sales engineer") are more specific than
-    # single-word ones ("engineer") and are checked first, across every
-    # sector, so a compound title isn't swallowed by a broader single-word
-    # keyword from an earlier sector in the list — otherwise
-    # engineering_tech's bare "engineer" would catch "Sales Engineer" before
-    # sales's own, more specific, entry was ever reached.
-    #
-    # allow_single_word=False is for the description fallback below: a long
-    # description very often contains a generic "Bachelor's degree in
-    # Business, Engineering, or related field" qualifications line that has
-    # nothing to do with what the job itself is — a bare single-word keyword
-    # matching anywhere in all that text is a false-positive risk a short,
-    # purpose-written title doesn't have (verified live: a Walmart "Manager,
-    # Seller Engagement" listing landed in engineering_tech purely from that
-    # boilerplate degree line). Multi-word phrases ("site reliability",
-    # "product manager") stay enabled for descriptions — specific enough to
-    # still be diagnostic wherever they appear.
-    for multi_word in (True, False):
-        if not multi_word and not allow_single_word:
-            continue
-        for sector, keywords in _SECTOR_KEYWORDS:
-            for keyword in keywords:
-                stripped = keyword.strip()
-                if (" " in stripped) == multi_word and _contains_keyword(text, stripped):
-                    return sector
-    return None
+@cache
+def _model() -> SectorModel | None:
+    try:
+        return SectorModel(MODEL_PATH)
+    except Exception:
+        logger.exception("Sector model failed to load from %s; every posting will get sector=unknown", MODEL_PATH)
+        return None
 
 
 def classify_sector(title: str | None, description: str | None = None) -> JobSector:
-    """The job function this posting is hiring for, from its title first
-    (short and reliable) and falling back to its description when the title
-    alone doesn't say. UNKNOWN when neither does."""
-    if title:
-        match = _match(_normalize(title))
-        if match is not None:
-            return match
-    if description:
-        match = _match(_normalize(description), allow_single_word=False)
-        if match is not None:
-            return match
-    return JobSector.UNKNOWN
+    """The job function this posting is hiring for, from its title and full
+    description. UNKNOWN when the model isn't confident enough (or can't load)."""
+    model = _model()
+    if model is None:
+        return JobSector.UNKNOWN
+    sector, _confidence = model.classify(title, description)
+    return JobSector(sector)
