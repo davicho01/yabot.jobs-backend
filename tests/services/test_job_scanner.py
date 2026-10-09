@@ -183,6 +183,45 @@ def test_scan_job_url_uses_microdata_when_no_json_ld_present(monkeypatch):
     assert "We're hiring" in (result.description or "")
 
 
+def test_a_page_handed_on_by_one_scanner_is_not_fetched_again(monkeypatch):
+    # SuccessFactors claims any "/job/" path, fetches it, and hands a page
+    # that isn't SuccessFactors's (a TalentBrew site, say) to the generic
+    # scanner, which used to fetch the same URL a second time.
+    url = "https://jobs.example-pharmacy.com/job/chicago/pharmacist/1/123"
+    html = '<script type="application/ld+json">{"@type": "JobPosting", "title": "Pharmacist"}</script>'
+    calls = []
+
+    def direct(fetched_url):
+        calls.append(fetched_url)
+        return httpx.Response(200, text=html, request=httpx.Request("GET", fetched_url))
+
+    monkeypatch.setattr(base, "_fetch_direct", direct)
+    result = job_scanner.scan_job_url(url)
+
+    assert result.success and result.title == "Pharmacist"
+    assert calls == [url]
+
+
+def test_the_page_cache_lasts_one_scan_and_keeps_no_failures(monkeypatch):
+    calls = []
+
+    def blocked_then_ok(fetched_url):
+        calls.append(fetched_url)
+        if len(calls) == 1:
+            raise httpx.ConnectError("blocked")
+        return httpx.Response(200, text="<html>ok</html>", request=httpx.Request("GET", fetched_url))
+
+    monkeypatch.setattr(base, "_fetch_direct", blocked_then_ok)
+    monkeypatch.setattr(settings, "browser_fetch_service_url", None)
+    with base.scan_page_cache():
+        with pytest.raises(httpx.HTTPError):
+            base.fetch_html("https://example.com/a")
+        base.fetch_html("https://example.com/a")  # a failure wasn't kept: fetched again
+        base.fetch_html("https://example.com/a")  # a success was: not fetched
+    base.fetch_html("https://example.com/a")  # outside a scan: no cache
+    assert len(calls) == 3
+
+
 def test_scan_job_url_fails_for_expired_posting(monkeypatch):
     # A real SmartRecruiters posting past its validThrough date keeps its
     # title/location microdata but replaces the actual content with "This

@@ -2,7 +2,9 @@ import json
 import logging
 import re
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from html import unescape
@@ -346,7 +348,39 @@ class PostingGone(httpx.HTTPError):
         super().__init__(f"{GONE_ERROR_PREFIX} (HTTP {status}): {url}")
 
 
+# Pages fetch_html already got during the current scan, by URL — None outside
+# a scan (see scan_page_cache). An adapter that claims a URL by its shape,
+# fetches it, then finds the page isn't its platform's hands the URL on, and
+# the next scanner used to fetch it again seconds later: ~8,600 URLs in the
+# week to 2026-10-09, mostly SuccessFactors's "/job/" check claiming
+# TalentBrew pages (Walgreens, UnitedHealth Group) before the generic scanner
+# re-fetched them. Two identical requests back to back is also exactly what
+# bot detection looks for.
+_scan_pages: ContextVar[dict[str, "FetchedPage"] | None] = ContextVar("scan_pages", default=None)
+
+
+@contextmanager
+def scan_page_cache() -> Iterator[None]:
+    """Within this block, fetch_html fetches each URL at most once; a
+    successful page is reused, a failure is not cached (the next caller
+    tries again, as before)."""
+    token = _scan_pages.set({})
+    try:
+        yield
+    finally:
+        _scan_pages.reset(token)
+
+
 def fetch_html(url: str) -> FetchedPage:
+    pages = _scan_pages.get()
+    if pages is None:
+        return _fetch_html_uncached(url)
+    if url not in pages:
+        pages[url] = _fetch_html_uncached(url)
+    return pages[url]
+
+
+def _fetch_html_uncached(url: str) -> FetchedPage:
     """Fetch a page, falling back to a real headless-browser render (via
     browser_fetch_service, already deployed as yabot-jobs-browser on Cloud
     Run) for sites that block a plain HTTP client — bot-detection
