@@ -56,13 +56,16 @@ def scan_job_url(url: str) -> ScanResult:
     """
     browser_fetch.reset_render_attempted()
     result = None
-    for adapter in ADAPTERS:
-        if adapter.scan_job_url is None:
-            continue
-        result = adapter.scan_job_url(url)
-        if result is not None:
-            break
-    result = _mark_gone(result if result is not None else _default_scan_job_url(url))
+    with base.scan_page_cache():
+        for adapter in ADAPTERS:
+            if adapter.scan_job_url is None:
+                continue
+            result = adapter.scan_job_url(url)
+            if result is not None:
+                break
+        if result is None:
+            result = _default_scan_job_url(url)
+    result = _mark_gone(result)
     result.scanned_via_browser = browser_fetch.render_attempted()
     return result
 
