@@ -56,13 +56,14 @@ _MIN_INSTANCES_CAP = 30
 
 # yabot-jobs-sector (the sector classifier, see app.services.sector_api) is
 # scaled from the same tick, by `worker` only — crawl-worker discovers URLs and
-# never classifies. From its load test (yabot.jobs-ml, 2026-10-08): one
-# instance handles ~1.8 postings/s, and a 15,000-posting scan over ~1 hour is
-# ~4.2/s, so ~3-4 instances for 30 workers. Re-tune against real latency/cost.
+# never classifies. Started at 0.12 from its load test; raised to 0.25 after the
+# first live scan (2026-10-09): 30 workers sent ~8 postings/s and Cloud Run sat
+# at 8 instances, about twice the estimate. Re-tune against real latency/cost.
 _SECTOR_SERVICE = "yabot-jobs-sector"
-_SECTOR_DEMAND_RATIO = 0.12
-# Its own max-instances (8) autoscales reactively above this floor.
-_SECTOR_MIN_INSTANCES_CAP = 5
+_SECTOR_DEMAND_RATIO = 0.25
+# Same safety rail as the browser's, not the real ceiling: the service's own
+# max-instances (100, like yabot-jobs-browser) autoscales reactively above it.
+_SECTOR_MIN_INSTANCES_CAP = _MIN_INSTANCES_CAP
 
 # How far back get_instance_count looks — deliberately a window, not an
 # instant point, so a momentary dip to 0 between scan-lane wake-ups isn't

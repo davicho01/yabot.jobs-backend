@@ -24,8 +24,8 @@ def test_scales_up_proportionally_to_combined_instance_count(monkeypatch):
 
     browser_scaler.main()
 
-    # Sector classifier: ceil(60 worker * 0.12) = 8, capped at 5.
-    assert set_calls == [("yabot-jobs-browser", 8), ("yabot-jobs-sector", 5)]
+    # Sector classifier: ceil(60 worker * 0.25) = 15.
+    assert set_calls == [("yabot-jobs-browser", 8), ("yabot-jobs-sector", 15)]
     assert pause_calls == []
 
 
@@ -36,6 +36,8 @@ def test_clamps_to_the_min_instances_cap_under_a_big_burst(monkeypatch):
     browser_scaler.main()
 
     assert set_calls[0] == ("yabot-jobs-browser", browser_scaler._MIN_INSTANCES_CAP)
+    # ceil(300 * 0.25) = 75: the classifier gets the same safety rail as the browser.
+    assert set_calls[1] == ("yabot-jobs-sector", browser_scaler._MIN_INSTANCES_CAP)
 
 
 def test_scales_down_and_pauses_itself_once_both_are_idle(monkeypatch):
@@ -48,12 +50,12 @@ def test_scales_down_and_pauses_itself_once_both_are_idle(monkeypatch):
 
 
 def test_sector_classifier_scales_by_worker_only(monkeypatch):
-    # crawl-worker never classifies: ceil(30 worker * 0.12) = 4, whatever crawl-worker does.
+    # crawl-worker never classifies: ceil(30 worker * 0.25) = 8, whatever crawl-worker does.
     set_calls, _ = _patch(monkeypatch, crawl_worker=10, worker=30)
 
     browser_scaler.main()
 
-    assert ("yabot-jobs-sector", 4) in set_calls
+    assert ("yabot-jobs-sector", 8) in set_calls
 
 
 def test_sector_scaling_failure_never_blocks_browser_scaling_or_the_pause(monkeypatch):
