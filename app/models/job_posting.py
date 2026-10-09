@@ -4,7 +4,7 @@ import uuid
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, String, Text, func, select
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, func, select, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
 
@@ -32,6 +32,9 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
         # Serves the metro-area filter (`metros @> '["41620"]'`) — see
         # app.api.routes.jobs.list_job_urls.
         Index("ix_job_postings_metros", "metros", postgresql_using="gin", postgresql_ops={"metros": "jsonb_path_ops"}),
+        # Serves the pending-sector sweep (job_sector.classify_pending_sectors):
+        # only the few rows whose sector API call failed, not the whole table.
+        Index("ix_job_postings_sector_pending", "id", postgresql_where=text("sector_model IS NULL")),
         # Also: ix_job_postings_locations_trgm, a pg_trgm GIN index on
         # CAST(locations AS TEXT) serving location_matches — created only in
         # migration c7d3e8a1f5b2, since an expression index with Postgres-only
@@ -100,6 +103,16 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
     # the same company can post across several sectors at once. Indexed since a
     # per-sector search page (the reason this exists) filters on it directly.
     sector: Mapped[str] = mapped_column(String(30), default=JobSector.UNKNOWN, nullable=False, index=True)
+    # Which model version set `sector` (e.g. "ettin32m-2026-10-08", as the
+    # sector API reports it). NULL = pending: the API didn't answer when this
+    # posting was scanned, so retry_failed_scans.py's sweep classifies it.
+    sector_model: Mapped[str | None] = mapped_column(String(40))
+    # The model's confidence in its top sector (0-1), kept even when it was
+    # below settings.sector_confidence_threshold and `sector` is unknown.
+    sector_confidence: Mapped[float | None] = mapped_column(Float)
+    # Hash of the title + description `sector` was computed from: a rescan
+    # with the same text skips the API call (see job_sector.input_hash).
+    sector_input_hash: Mapped[str | None] = mapped_column(String(16))
 
     salary_min: Mapped[int | None] = mapped_column(Integer)
     salary_max: Mapped[int | None] = mapped_column(Integer)

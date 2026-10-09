@@ -31,7 +31,7 @@ from app.services.job_llm_extractor import LlmExtraction, extract_with_llm, html
 from app.services import geo
 from app.services.geo import resolve_area_codes, resolve_country_for_locations, resolve_places
 from app.services.job_locations import location_matches, radius_search, split_locations
-from app.services.job_sector import classify_sector
+from app.services.job_sector import apply_sector
 from app.services.workplace import infer_workplace_type, reconcile_workplace_type
 from app.services.job_queue import enqueue_scan, enqueue_source_scan
 from app.services.job_scanner import ScanResult, domain_of, normalize_url, scan_job_url, url_hash
@@ -1035,7 +1035,6 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
     # guess that a plain place means on-site — see app.services.workplace.
     posting.workplace_type = reconcile_workplace_type(fields["workplace_type"], infer_workplace_type(posting.locations))
     posting.employment_type = fields["employment_type"]
-    posting.sector = classify_sector(posting.title, result.description)
     posting.salary_min = fields["salary_min"]
     posting.salary_max = fields["salary_max"]
     posting.salary_currency = _fit(fields["salary_currency"], _SALARY_CURRENCY_MAX)
@@ -1046,6 +1045,9 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
     # unreadable line because the browser collapses an un-decoded numeric
     # entity's whitespace same as any other).
     posting.description = _strip_nul(decode_entities(result.description))
+    # From the stored title/description (not the raw scrape), so the text hash
+    # matches what the pending sweep and the backfill compute from the row.
+    apply_sector(posting, posting.title, posting.description)
     posting.extracted_fields = _strip_nul(_merge_extracted_fields(result, llm_extraction))
     posting.raw_source = (
         {"html_excerpt": _strip_nul(result.raw_html_excerpt)} if result.raw_html_excerpt else None
