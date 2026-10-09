@@ -383,13 +383,14 @@ gcloud run jobs add-iam-policy-binding crawl-dispatcher \
 # hours (~9am-6pm local, so ~9am-9pm ET once PT is folded in), so a morning
 # run would mostly just re-serve the prior night's crawl. 1pm catches the
 # ET/CT morning wave; 9pm catches the rest of the day including PT (whose
-# posting activity has already tailed off by 9pm ET = 6pm PT).
+# posting activity has already tailed off by 9pm ET = 6pm PT). Weekdays only
+# (Mon-Fri): no collection runs on weekends.
 # --oauth-service-account-email (not --oidc-...) because the target is the
 # Run Admin REST API, not the job's own service URL.
 
 gcloud scheduler jobs create http crawl-dispatch-hourly \
   --location="$REGION" \
-  --schedule="0 13,21 * * *" \
+  --schedule="0 13,21 * * 1-5" \
   --time-zone="America/New_York" \
   --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/crawl-dispatcher:run" \
   --http-method=POST \
@@ -525,7 +526,7 @@ gcloud functions add-invoker-policy-binding saved-search-alerts \
 
 gcloud scheduler jobs create http saved-search-alerts-hourly \
   --location="$REGION" \
-  --schedule="0 14,22 * * *" \
+  --schedule="0 14,22 * * 1-5" \
   --time-zone="America/New_York" \
   --uri="$SAVED_SEARCH_ALERTS_FUNCTION_URL" \
   --http-method=POST \
@@ -680,7 +681,7 @@ gcloud functions add-invoker-policy-binding generate-static-job-pages \
 
 gcloud scheduler jobs create http generate-static-job-pages-30min \
   --location="$REGION" \
-  --schedule="0 14,22 * * *" \
+  --schedule="0 14,22 * * 1-5" \
   --time-zone="America/New_York" \
   --uri="$GENERATE_STATIC_JOB_PAGES_FUNCTION_URL" \
   --http-method=POST \
@@ -695,7 +696,10 @@ gcloud scheduler jobs create http generate-static-job-pages-30min \
 #     found elsewhere (see app.services.official_sites): a small batch per
 #     run, so a 4am America/New_York daily run is plenty and stays clear of
 #     the 1pm/9pm crawl dispatch. Uses logo.dev's brand search for a
-#     company's domain, hence its key. Review a dry run first
+#     company's domain, hence its key. Gets only what it uses plus the
+#     settings app.core.config requires to start — not COMMON_ENV/
+#     COMMON_SECRETS (no browser-fetch, sector API or LLM; it fetches with
+#     plain httpx). Weekdays only, like the crawl. Review a dry run first
 #     (python find_official_sites.py --dry-run on the one-off job) before
 #     creating the Scheduler job.
 # ---------------------------------------------------------------------------
@@ -709,8 +713,8 @@ gcloud functions deploy find-official-sites \
   --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=find_official_sites.py \
   --trigger-http \
   --no-allow-unauthenticated \
-  --set-env-vars="$COMMON_ENV" \
-  --set-secrets="$COMMON_SECRETS,LOGO_DEV_SECRET_KEY=logo-dev-secret-key:latest" \
+  --set-env-vars="GCP_PROJECT_ID=${PROJECT_ID}" \
+  --set-secrets="DATABASE_URL=database-url:latest,API_KEY_ENCRYPTION_KEY=api-key-encryption-key:latest,RESUME_STORAGE_ACCESS_KEY_ID=resume-storage-access-key:latest,RESUME_STORAGE_SECRET_ACCESS_KEY=resume-storage-secret-key:latest,LOGO_DEV_SECRET_KEY=logo-dev-secret-key:latest" \
   --memory=512Mi \
   --timeout=540s \
   --update-labels=function=find-official-sites
@@ -728,7 +732,7 @@ gcloud functions add-invoker-policy-binding find-official-sites \
 
 gcloud scheduler jobs create http find-official-sites-daily \
   --location="$REGION" \
-  --schedule="0 4 * * *" \
+  --schedule="0 4 * * 1-5" \
   --time-zone="America/New_York" \
   --uri="$FIND_OFFICIAL_SITES_FUNCTION_URL" \
   --http-method=POST \

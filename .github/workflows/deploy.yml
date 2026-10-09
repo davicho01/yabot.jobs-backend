@@ -2,18 +2,18 @@ name: Deploy
 
 # Redeploys api/worker/crawl-worker/crawl-dispatcher/browser-scaler/
 # saved-search-alerts/follow-up-reminders/retry-failed-scans/
-# generate-static-job-pages with the new image/source on every push to
+# generate-static-job-pages/find-official-sites with the new image/source on every push to
 # main. worker and crawl-worker are Cloud Functions (2nd gen, Pub/Sub-
 # triggered) redeployed from source, same as crawl-dispatcher,
 # browser-scaler, saved-search-alerts, follow-up-reminders,
-# retry-failed-scans, and generate-static-job-pages (HTTP-triggered,
+# retry-failed-scans, generate-static-job-pages, and find-official-sites (HTTP-triggered,
 # Scheduler-invoked) — not from the built image below.
 # One-time setup (API enablement,
 # Cloud SQL instance, secrets, IAM bindings, Scheduler jobs, the functions'
 # Pub/Sub triggers) lives in deploy/gcloud-deploy.sh and is NOT part of this
 # workflow — see that script's comments before changing infra, not just code.
 #
-# Job graph: test -> build (image + migrations) -> the nine deploy-*
+# Job graph: test -> build (image + migrations) -> the ten deploy-*
 # jobs, which all depend only on build and nothing else, so GitHub Actions
 # runs them concurrently instead of one long serial chain. Each deploy-*
 # job re-authenticates on its own fresh runner (no state carries over
@@ -410,6 +410,60 @@ jobs:
             --timeout=1800s \
             --update-secrets=LOGO_DEV_SECRET_KEY=logo-dev-secret-key:latest \
             --update-labels=function=generate-static-job-pages
+
+  deploy-find-official-sites:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/487584214286/locations/global/workloadIdentityPools/github/providers/github-provider
+          service_account: github-deployer@yabotjobs.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: latest
+
+      # Same shape as follow-up-reminders above — its own dispatch() entry
+      # point in find_official_sites.py, not this repo's main.py. Unlike the
+      # other functions, deploy/gcloud-deploy.sh's one-time setup was never
+      # run for this one, so this first-ever deploy has to carry everything
+      # that setup would have applied: the trigger, the Cloud SQL attachment
+      # and only the env vars/secrets it uses — DATABASE_URL, the logo.dev
+      # key (brand search for a company's domain), and the four settings
+      # app.core.config requires just to start (GCP_PROJECT_ID,
+      # API_KEY_ENCRYPTION_KEY, RESUME_STORAGE_*). It fetches career pages
+      # with plain httpx, so no browser-fetch service, sector API or LLM.
+      # --update-* only adds/changes these, so later redeploys keep them.
+      # The Scheduler job and its
+      # invoker binding are still one-time setup (gcloud-deploy.sh step 11).
+      - name: Deploy find-official-sites
+        run: |
+          gcloud functions deploy find-official-sites \
+            --gen2 \
+            --region="$REGION" \
+            --project="$PROJECT_ID" \
+            --runtime=python313 \
+            --source=. \
+            --entry-point=dispatch \
+            --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=find_official_sites.py \
+            --trigger-http \
+            --no-allow-unauthenticated \
+            --update-env-vars="GCP_PROJECT_ID=${PROJECT_ID}" \
+            --update-secrets="DATABASE_URL=database-url:latest,API_KEY_ENCRYPTION_KEY=api-key-encryption-key:latest,RESUME_STORAGE_ACCESS_KEY_ID=resume-storage-access-key:latest,RESUME_STORAGE_SECRET_ACCESS_KEY=resume-storage-secret-key:latest,LOGO_DEV_SECRET_KEY=logo-dev-secret-key:latest" \
+            --memory=512Mi \
+            --timeout=540s \
+            --update-labels=function=find-official-sites
+
+      - name: Attach Cloud SQL to find-official-sites
+        run: |
+          gcloud run services update find-official-sites \
+            --region="$REGION" \
+            --project="$PROJECT_ID" \
+            --add-cloudsql-instances="${PROJECT_ID}:${SQL_REGION}:yabot-jobs-db"
 
   deploy-browser-scaler:
     needs: build
