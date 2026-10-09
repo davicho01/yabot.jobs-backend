@@ -431,10 +431,14 @@ jobs:
       # point in find_official_sites.py, not this repo's main.py. Unlike the
       # other functions, deploy/gcloud-deploy.sh's one-time setup was never
       # run for this one, so this first-ever deploy has to carry everything
-      # that setup would have applied: the trigger, the env vars and secrets
-      # (DATABASE_URL, plus the logo.dev key it uses to find a company's
-      # domain) and the Cloud SQL attachment. --update-* only adds/changes
-      # these, so later redeploys keep them. The Scheduler job and its
+      # that setup would have applied: the trigger, the Cloud SQL attachment
+      # and only the env vars/secrets it uses — DATABASE_URL, the logo.dev
+      # key (brand search for a company's domain), and the four settings
+      # app.core.config requires just to start (GCP_PROJECT_ID,
+      # API_KEY_ENCRYPTION_KEY, RESUME_STORAGE_*). It fetches career pages
+      # with plain httpx, so no browser-fetch service, sector API or LLM.
+      # --update-* only adds/changes these, so later redeploys keep them.
+      # The Scheduler job and its
       # invoker binding are still one-time setup (gcloud-deploy.sh step 11).
       - name: Deploy find-official-sites
         run: |
@@ -448,8 +452,8 @@ jobs:
             --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=find_official_sites.py \
             --trigger-http \
             --no-allow-unauthenticated \
-            --update-env-vars="GCP_PROJECT_ID=${PROJECT_ID},BROWSER_FETCH_SERVICE_URL=https://yabot-jobs-browser-487584214286.us-central1.run.app,SECTOR_API_URL=${SECTOR_API_URL},FRONTEND_BASE_URL=https://yabot.jobs,SESSION_COOKIE_SECURE=true,SYSTEM_LLM_PROVIDER=deepseek,SYSTEM_LLM_MODEL=deepseek-v4-flash,RESUME_STORAGE_BUCKET=yabot.jobs-files,RESUME_STORAGE_REGION=us-east-1" \
-            --update-secrets="DATABASE_URL=database-url:latest,API_KEY_ENCRYPTION_KEY=api-key-encryption-key:latest,SYSTEM_LLM_API_KEY=system-llm-api-key:latest,RESUME_STORAGE_ACCESS_KEY_ID=resume-storage-access-key:latest,RESUME_STORAGE_SECRET_ACCESS_KEY=resume-storage-secret-key:latest,EMAIL_SENDER_ACCESS_KEY_ID=resume-storage-access-key:latest,EMAIL_SENDER_SECRET_ACCESS_KEY=resume-storage-secret-key:latest,LOGO_DEV_SECRET_KEY=logo-dev-secret-key:latest" \
+            --update-env-vars="GCP_PROJECT_ID=${PROJECT_ID}" \
+            --update-secrets="DATABASE_URL=database-url:latest,API_KEY_ENCRYPTION_KEY=api-key-encryption-key:latest,RESUME_STORAGE_ACCESS_KEY_ID=resume-storage-access-key:latest,RESUME_STORAGE_SECRET_ACCESS_KEY=resume-storage-secret-key:latest,LOGO_DEV_SECRET_KEY=logo-dev-secret-key:latest" \
             --memory=512Mi \
             --timeout=540s \
             --update-labels=function=find-official-sites

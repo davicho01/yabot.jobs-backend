@@ -696,7 +696,10 @@ gcloud scheduler jobs create http generate-static-job-pages-30min \
 #     found elsewhere (see app.services.official_sites): a small batch per
 #     run, so a 4am America/New_York daily run is plenty and stays clear of
 #     the 1pm/9pm crawl dispatch. Uses logo.dev's brand search for a
-#     company's domain, hence its key. Review a dry run first
+#     company's domain, hence its key. Gets only what it uses plus the
+#     settings app.core.config requires to start — not COMMON_ENV/
+#     COMMON_SECRETS (no browser-fetch, sector API or LLM; it fetches with
+#     plain httpx). Weekdays only, like the crawl. Review a dry run first
 #     (python find_official_sites.py --dry-run on the one-off job) before
 #     creating the Scheduler job.
 # ---------------------------------------------------------------------------
@@ -710,8 +713,8 @@ gcloud functions deploy find-official-sites \
   --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=find_official_sites.py \
   --trigger-http \
   --no-allow-unauthenticated \
-  --set-env-vars="$COMMON_ENV" \
-  --set-secrets="$COMMON_SECRETS,LOGO_DEV_SECRET_KEY=logo-dev-secret-key:latest" \
+  --set-env-vars="GCP_PROJECT_ID=${PROJECT_ID}" \
+  --set-secrets="DATABASE_URL=database-url:latest,API_KEY_ENCRYPTION_KEY=api-key-encryption-key:latest,RESUME_STORAGE_ACCESS_KEY_ID=resume-storage-access-key:latest,RESUME_STORAGE_SECRET_ACCESS_KEY=resume-storage-secret-key:latest,LOGO_DEV_SECRET_KEY=logo-dev-secret-key:latest" \
   --memory=512Mi \
   --timeout=540s \
   --update-labels=function=find-official-sites
