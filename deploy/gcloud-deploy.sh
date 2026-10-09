@@ -383,13 +383,14 @@ gcloud run jobs add-iam-policy-binding crawl-dispatcher \
 # hours (~9am-6pm local, so ~9am-9pm ET once PT is folded in), so a morning
 # run would mostly just re-serve the prior night's crawl. 1pm catches the
 # ET/CT morning wave; 9pm catches the rest of the day including PT (whose
-# posting activity has already tailed off by 9pm ET = 6pm PT).
+# posting activity has already tailed off by 9pm ET = 6pm PT). Weekdays only
+# (Mon-Fri): no collection runs on weekends.
 # --oauth-service-account-email (not --oidc-...) because the target is the
 # Run Admin REST API, not the job's own service URL.
 
 gcloud scheduler jobs create http crawl-dispatch-hourly \
   --location="$REGION" \
-  --schedule="0 13,21 * * *" \
+  --schedule="0 13,21 * * 1-5" \
   --time-zone="America/New_York" \
   --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/crawl-dispatcher:run" \
   --http-method=POST \
@@ -525,7 +526,7 @@ gcloud functions add-invoker-policy-binding saved-search-alerts \
 
 gcloud scheduler jobs create http saved-search-alerts-hourly \
   --location="$REGION" \
-  --schedule="0 14,22 * * *" \
+  --schedule="0 14,22 * * 1-5" \
   --time-zone="America/New_York" \
   --uri="$SAVED_SEARCH_ALERTS_FUNCTION_URL" \
   --http-method=POST \
@@ -680,7 +681,7 @@ gcloud functions add-invoker-policy-binding generate-static-job-pages \
 
 gcloud scheduler jobs create http generate-static-job-pages-30min \
   --location="$REGION" \
-  --schedule="0 14,22 * * *" \
+  --schedule="0 14,22 * * 1-5" \
   --time-zone="America/New_York" \
   --uri="$GENERATE_STATIC_JOB_PAGES_FUNCTION_URL" \
   --http-method=POST \
@@ -728,7 +729,7 @@ gcloud functions add-invoker-policy-binding find-official-sites \
 
 gcloud scheduler jobs create http find-official-sites-daily \
   --location="$REGION" \
-  --schedule="0 4 * * *" \
+  --schedule="0 4 * * 1-5" \
   --time-zone="America/New_York" \
   --uri="$FIND_OFFICIAL_SITES_FUNCTION_URL" \
   --http-method=POST \
