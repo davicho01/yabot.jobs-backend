@@ -164,6 +164,19 @@ def test_apply_scan_result_marks_a_never_successful_posting_failed(scan_db, make
     assert posting.title is None
 
 
+def test_apply_scan_result_records_the_latest_scans_browser_use(scan_db, make_source, make_url):
+    url_row = make_url(make_source())
+    assert url_row.scanned_via_browser is None  # not scanned yet: unknown
+
+    jobs._apply_scan_result(scan_db, url_row, ScanResult(success=False, error="blocked", scanned_via_browser=True))
+    scan_db.commit()
+    assert scan_db.get(JobPostingUrl, url_row.id).scanned_via_browser is True
+
+    jobs._apply_scan_result(scan_db, url_row, ScanResult(success=True, title="Real Title"))
+    scan_db.commit()
+    assert scan_db.get(JobPostingUrl, url_row.id).scanned_via_browser is False
+
+
 @pytest.fixture
 def lane_env(monkeypatch):
     monkeypatch.setattr(jobs, "scan_job_url", lambda url: ScanResult(success=True, title="ok"))

@@ -17,7 +17,11 @@ the same None return.
 import html as html_lib
 import logging
 import re
+import sys
+import time
+from contextvars import ContextVar
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 import httpx
 from google.auth.exceptions import DefaultCredentialsError
@@ -100,6 +104,46 @@ def _identity_token_headers(audience: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+# Whether a render was requested since the last reset_render_attempted() —
+# job_scanner.scan_job_url resets it per scan and records the answer on the
+# URL row (scanned_via_browser), so no adapter has to report it itself.
+_render_attempted: ContextVar[bool] = ContextVar("render_attempted", default=False)
+
+
+def reset_render_attempted() -> None:
+    _render_attempted.set(False)
+
+
+def render_attempted() -> bool:
+    return _render_attempted.get()
+
+
+def _caller_module() -> str:
+    # The first module outside this one: app.services.adapters.base means
+    # fetch_html's reactive fallback, any other adapter means a render that
+    # adapter always makes.
+    frame = sys._getframe(1)
+    while frame is not None and frame.f_globals.get("__name__") == __name__:
+        frame = frame.f_back
+    return frame.f_globals.get("__name__", "?") if frame is not None else "?"
+
+
+def _log_render(url: str, caller: str, outcome: str, attempts: int, started: float) -> None:
+    # One line per fetch_rendered_page call, so per-host success rate and
+    # render time (yabot-jobs-browser's cost) can be read straight off the
+    # worker logs, e.g. textPayload:"browser_render" grouped by host/outcome.
+    # Before this, a successful render left no trace of which URL it was for.
+    logger.info(
+        "browser_render host=%s outcome=%s attempts=%d seconds=%.1f caller=%s url=%s",
+        urlparse(url).hostname,
+        outcome,
+        attempts,
+        time.monotonic() - started,
+        caller,
+        url,
+    )
+
+
 def fetch_rendered_page(
     url: str, *, wait_for_selector: str | None = None, pierce_shadow: bool = False
 ) -> RenderedPage | None:
@@ -124,6 +168,10 @@ def fetch_rendered_page(
         logger.info("Browser fetch service not configured; skipping rendered fetch of %s", url)
         return None
 
+    _render_attempted.set(True)
+    caller = _caller_module()
+    started = time.monotonic()
+    outcome = "error"
     for attempt in range(1, _RENDER_ATTEMPTS + 1):
         try:
             response = httpx.post(
@@ -135,7 +183,9 @@ def fetch_rendered_page(
             response.raise_for_status()
             data = response.json()
             if data["html"] is not None and not is_bot_challenge_page(data["html"]):
+                _log_render(url, caller, "ok", attempt, started)
                 return RenderedPage(html=data["html"], url=data.get("final_url") or url)
+            outcome = "empty" if data["html"] is None else "challenge"
             logger.info(
                 "Rendered fetch of %s came back %s (attempt %d/%d).",
                 url,
@@ -144,11 +194,13 @@ def fetch_rendered_page(
                 _RENDER_ATTEMPTS,
             )
         except Exception:
+            outcome = "error"
             logger.warning(
                 "Rendered fetch of %s failed (attempt %d/%d).", url, attempt, _RENDER_ATTEMPTS, exc_info=True
             )
 
     logger.warning("Rendered fetch of %s exhausted every attempt; falling back to no enhancement.", url)
+    _log_render(url, caller, outcome, _RENDER_ATTEMPTS, started)
     return None
 
 

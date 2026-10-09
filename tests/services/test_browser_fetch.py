@@ -85,3 +85,17 @@ def test_is_bot_challenge_page_matches_the_whole_title_only():
     assert not browser_fetch.is_bot_challenge_page("<title>Just a moment of your time: Sales Associate</title>")
     assert not browser_fetch.is_bot_challenge_page("<title>Access Denied Investigator</title>")
     assert not browser_fetch.is_bot_challenge_page("<html>no title</html>")
+
+
+def test_every_render_logs_one_line_with_its_outcome(monkeypatch, caplog):
+    monkeypatch.setattr(settings, "browser_fetch_service_url", "https://browser.example")
+    monkeypatch.setattr(browser_fetch.httpx, "post", lambda *_a, **_k: _FakeHttpResponse(html=None))
+
+    with caplog.at_level("INFO", logger="app.browser_fetch"):
+        assert browser_fetch.fetch_rendered_page(URL) is None
+
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("browser_render ")]
+    assert len(lines) == 1
+    assert "host=jobs.dominos.com outcome=empty attempts=2" in lines[0]
+    assert f"caller={__name__}" in lines[0]
+    assert browser_fetch.render_attempted()
