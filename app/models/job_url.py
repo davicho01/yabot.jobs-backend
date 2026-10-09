@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -124,6 +124,11 @@ class JobPostingUrl(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # drop out of GET /jobs search and the static SEO pages.
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Whether the latest scan asked yabot-jobs-browser for a render, whatever
+    # came of it — with scan_status, that's per-source browser wins and
+    # (costly) browser failures. Null: not scanned since this column was added.
+    scanned_via_browser: Mapped[bool | None] = mapped_column(Boolean)
 
     # Two FKs to users.id now exist (submitted_by_user_id, flagged_by_user_id)
     # — foreign_keys disambiguates which one this relationship follows.

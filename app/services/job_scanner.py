@@ -4,6 +4,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import httpx
 
 from app.models.enums import EmploymentType, WorkplaceType
+from app.services import browser_fetch
 from app.services.adapters import ADAPTERS, base
 from app.services.adapters.base import ScanResult
 from app.services.adapters.text import clean_text as _clean_text
@@ -53,13 +54,17 @@ def scan_job_url(url: str) -> ScanResult:
     all — Lever, Ashby, BambooHR, ...) falls through to the generic
     JSON-LD/Open-Graph default below.
     """
+    browser_fetch.reset_render_attempted()
+    result = None
     for adapter in ADAPTERS:
         if adapter.scan_job_url is None:
             continue
         result = adapter.scan_job_url(url)
         if result is not None:
-            return _mark_gone(result)
-    return _mark_gone(_default_scan_job_url(url))
+            break
+    result = _mark_gone(result if result is not None else _default_scan_job_url(url))
+    result.scanned_via_browser = browser_fetch.render_attempted()
+    return result
 
 
 def _mark_gone(result: ScanResult) -> ScanResult:

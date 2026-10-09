@@ -201,6 +201,9 @@ class ScanResult:
     # filled, removed from its board) rather than a transient fetch problem —
     # app.services.jobs._apply_scan_result closes the URL on this.
     expired: bool = False
+    # Set by job_scanner.scan_job_url, not by adapters: whether this scan
+    # asked yabot-jobs-browser for a render (see browser_fetch.render_attempted).
+    scanned_via_browser: bool = False
 
 
 @dataclass(frozen=True)

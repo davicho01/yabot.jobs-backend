@@ -1,6 +1,8 @@
+import httpx
 import pytest
 
-from app.services import job_scanner
+from app.core.config import settings
+from app.services import browser_fetch, job_scanner
 from app.services.adapters import base
 from app.services.adapters.text import extract_balanced_tag as _extract_balanced_tag
 from app.services.adapters.text import html_to_formatted_text as _html_to_formatted_text
@@ -197,3 +199,35 @@ def test_scan_job_url_fails_for_expired_posting(monkeypatch):
     result = job_scanner.scan_job_url("https://example.com/careers/2")
     assert not result.success
     assert "expired" in (result.error or "").lower()
+
+
+def test_scan_job_url_records_whether_the_browser_was_used(monkeypatch):
+    # A blocked direct fetch falls back to a render; the next scan, served
+    # directly, must not inherit the first one's flag.
+    html = '<script type="application/ld+json">{"@type": "JobPosting", "title": "Staff Engineer"}</script>'
+    monkeypatch.setattr(settings, "browser_fetch_service_url", "https://browser.example")
+    monkeypatch.setattr(
+        browser_fetch.httpx, "post", lambda *_a, **_k: _RenderResponse(html, "https://example.com/careers/1")
+    )
+
+    def blocked(_url):
+        raise httpx.ConnectError("blocked")
+
+    monkeypatch.setattr(base, "_fetch_direct", blocked)
+    rendered = job_scanner.scan_job_url("https://example.com/careers/1")
+    assert rendered.success and rendered.scanned_via_browser
+
+    monkeypatch.setattr(base, "fetch_html", lambda _url: FakeResponse(text=html, url="https://example.com/careers/2"))
+    direct = job_scanner.scan_job_url("https://example.com/careers/2")
+    assert direct.success and not direct.scanned_via_browser
+
+
+class _RenderResponse:
+    def __init__(self, html: str, final_url: str):
+        self._data = {"html": html, "final_url": final_url}
+
+    def raise_for_status(self) -> None:
+        pass
+
+    def json(self) -> dict:
+        return self._data

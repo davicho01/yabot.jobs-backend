@@ -28,7 +28,7 @@ from app.services.company_names import (
 from app.services.crawl_sources import register_discovered_board
 from app.services.job_dedup import claim_primary, find_duplicate_primary, normalize_company_name, normalize_title
 from app.services.job_llm_extractor import LlmExtraction, extract_with_llm, html_to_text
-from app.services import geo
+from app.services import browser_fetch, geo
 from app.services.geo import resolve_area_codes, resolve_country_for_locations, resolve_places
 from app.services.job_locations import location_matches, radius_search, split_locations
 from app.services.job_sector import apply_sector
@@ -643,6 +643,7 @@ def _apply_scan_result(db: Session, url_row: JobPostingUrl, result: ScanResult) 
     url_row.scan_error = _strip_nul(result.error)
     url_row.last_scanned_at = now
     url_row.scan_claimed_at = None
+    url_row.scanned_via_browser = result.scanned_via_browser
 
     if result.success:
         url_row.scan_status = ScanStatus.SUCCESS
@@ -720,7 +721,11 @@ def run_source_lane(db: Session, source_id: uuid.UUID) -> int:
             # TTL forever). Record it like any other failed scan — it can be
             # retried from the admin rescan.
             logger.exception("Scan of %s (url_id=%s) raised; marking failed.", claimed.url, claimed.id)
-            result = ScanResult(success=False, error=f"Scan raised {type(exc).__name__}: {exc}")
+            result = ScanResult(
+                success=False,
+                error=f"Scan raised {type(exc).__name__}: {exc}",
+                scanned_via_browser=browser_fetch.render_attempted(),
+            )
 
         try:
             url_row = db.get(JobPostingUrl, claimed.id, with_for_update=True)
