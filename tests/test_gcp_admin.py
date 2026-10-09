@@ -18,7 +18,24 @@ def test_warms_the_browser_and_resumes_the_scaler_tick(monkeypatch):
     assert calls == [
         ("set", "yabot-jobs-browser", 3),
         ("resume", "browser-scaler-tick"),
+        ("set", "yabot-jobs-sector", 4),
     ]
+
+
+def test_sector_warmup_failure_never_blocks_the_browser_or_the_tick(monkeypatch):
+    calls = []
+
+    def _set(service, count):
+        if service == "yabot-jobs-sector":
+            raise RuntimeError("403 from Cloud Run Admin")
+        calls.append(("set", service, count))
+
+    monkeypatch.setattr(gcp_admin, "set_min_instances", _set)
+    monkeypatch.setattr(gcp_admin, "resume_scheduler_job", lambda job: calls.append(("resume", job)))
+
+    gcp_admin.warm_up_browser_scaler()  # must not raise
+
+    assert calls == [("set", "yabot-jobs-browser", 3), ("resume", "browser-scaler-tick")]
 
 
 def test_does_not_raise_if_set_min_instances_fails(monkeypatch):

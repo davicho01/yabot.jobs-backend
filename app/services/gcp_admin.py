@@ -151,11 +151,17 @@ def resume_scheduler_job(job_name: str) -> None:
 _BROWSER_SERVICE = "yabot-jobs-browser"
 _BROWSER_SCALER_SCHEDULER_JOB = "browser-scaler-tick"
 _BROWSER_WARMUP_MIN_INSTANCES = 3
+# yabot-jobs-sector (the sector classifier) is warmed at the same moment: every
+# new posting a scan saves calls it, and browser_scaler.py's first tick still
+# sees 0 workers (5-minute lookback) — verified live 2026-10-09, the first
+# scan after it shipped timed out twice in the first two minutes.
+_SECTOR_SERVICE = "yabot-jobs-sector"
+_SECTOR_WARMUP_MIN_INSTANCES = 4
 
 
 def warm_up_browser_scaler() -> None:
-    """Warm up yabot-jobs-browser immediately and turn browser_scaler.py's
-    tick back on, for any caller whose own work might need a browser render
+    """Warm up yabot-jobs-browser (and yabot-jobs-sector) immediately and turn
+    browser_scaler.py's tick back on, for any caller whose own work might need a browser render
     (see app.services.browser_fetch) — crawl_dispatcher.py's 3x/day and
     manually-triggered runs, and retry_failed_scans.py's hourly sweep, both
     call this at the top of their own main(). Without it, a scan that falls
@@ -171,3 +177,7 @@ def warm_up_browser_scaler() -> None:
         resume_scheduler_job(_BROWSER_SCALER_SCHEDULER_JOB)
     except Exception:
         logger.exception("Failed to warm up %s / resume the scaler tick.", _BROWSER_SERVICE)
+    try:  # separately, so a classifier problem never touches the browser warm-up above
+        set_min_instances(_SECTOR_SERVICE, _SECTOR_WARMUP_MIN_INSTANCES)
+    except Exception:
+        logger.exception("Failed to warm up %s.", _SECTOR_SERVICE)
