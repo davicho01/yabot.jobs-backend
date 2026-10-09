@@ -14,6 +14,11 @@ This script doesn't know or care how it's invoked — point any scheduler at it
 whatever cadence you want (hourly is the assumption the backoff schedule was
 tuned against; see scan_retry_base_seconds's docstring).
 
+Also the sweep for postings whose sector is pending (the sector service didn't
+answer when they were scanned — see app.services.job_sector): this is the
+hourly job that already has database access, which browser_scaler.py
+deliberately doesn't.
+
 Usage: python retry_failed_scans.py
 """
 
@@ -23,6 +28,7 @@ from app.core.log_config import configure_logging
 from app.db.session import SessionLocal
 from app.services.gcp_admin import warm_up_browser_scaler
 from app.services.job_queue import ensure_topic
+from app.services.job_sector import classify_pending_sectors
 from app.services.jobs import wake_retryable_failed_scans, wake_sources_with_pending_scans
 
 configure_logging()
@@ -51,6 +57,10 @@ def main() -> None:
         # instead.
         woken = wake_sources_with_pending_scans(db)
         logger.info("Woke scan lanes for %d crawl source(s) with pending urls.", woken)
+
+        # Kept well inside this function's 540s timeout, after the scan
+        # retries above (those are quick; this one waits on the sector API).
+        classify_pending_sectors(db, time_budget_seconds=300)
     finally:
         db.close()
 

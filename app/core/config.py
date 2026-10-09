@@ -138,6 +138,17 @@ class Settings(BaseSettings):
     # Unset just means that fallback is skipped.
     browser_fetch_service_url: str | None = None
 
+    # Private Cloud Run service that classifies a posting's sector (the
+    # yabot-jobs-sector model, built in yabot.jobs-ml/sector-classifier — see
+    # app/services/sector_api.py). Unset, or the service not answering, leaves
+    # the posting pending (sector_model NULL) for retry_failed_scans.py's sweep.
+    sector_api_url: str | None = None
+    # Below this model confidence the posting is shown as sector=unknown — a
+    # wrong sector page hurts more than a missing one. The confidence is stored
+    # either way (JobPosting.sector_confidence), so this can change without
+    # reclassifying anything.
+    sector_confidence_threshold: float = 0.7
+
     # logo.dev secret key (sk_...) for automatic company logos — server-side
     # only, used by the logo sync to download each logo once into our own
     # storage (see app.services.logo_dev). Never sent to browsers. Unset

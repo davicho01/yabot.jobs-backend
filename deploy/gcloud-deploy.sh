@@ -59,6 +59,9 @@ IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/backend"
 SQL_INSTANCE="yabot-jobs-db"
 CLOUDSQL_INSTANCE_CONNECTION="${PROJECT_ID}:${SQL_REGION}:${SQL_INSTANCE}"
 BROWSER_FETCH_SERVICE_URL="https://yabot-jobs-browser-487584214286.us-central1.run.app"
+# Sector classifier (app/services/sector_api.py) — deployed separately from
+# yabot.jobs-ml/sector-classifier by that repo's GitHub workflow.
+SECTOR_API_URL="https://yabot-jobs-sector-487584214286.us-central1.run.app"
 
 # Same bucket/distribution yabot.jobs-frontend's own deploy uses (its GitHub
 # Actions vars S3_BUCKET / CLOUDFRONT_DISTRIBUTION_ID — not committed to any
@@ -113,6 +116,13 @@ gcloud run services add-iam-policy-binding yabot-jobs-browser \
   --member="serviceAccount:${DEFAULT_COMPUTE_SA}" \
   --role="roles/run.invoker"
 
+# Same for yabot-jobs-sector (see SECTOR_API_URL above): worker classifies
+# each new posting, retry-failed-scans sweeps the pending ones.
+gcloud run services add-iam-policy-binding yabot-jobs-sector \
+  --region="$REGION" \
+  --member="serviceAccount:${DEFAULT_COMPUTE_SA}" \
+  --role="roles/run.invoker"
+
 # ---------------------------------------------------------------------------
 # 0b. Cloud SQL for Postgres — db-f1-micro, single zone (no HA). Generates a
 #     fresh app-user password and writes DATABASE_URL straight into
@@ -163,7 +173,7 @@ create_secret_from_env resume-storage-secret-key   RESUME_STORAGE_SECRET_ACCESS_
 create_secret_from_env logo-dev-secret-key         LOGO_DEV_SECRET_KEY
 
 # Non-secret, shared across api/worker/crawl-worker:
-COMMON_ENV="GCP_PROJECT_ID=${PROJECT_ID},BROWSER_FETCH_SERVICE_URL=${BROWSER_FETCH_SERVICE_URL},FRONTEND_BASE_URL=https://yabot.jobs,SESSION_COOKIE_SECURE=true,SYSTEM_LLM_PROVIDER=deepseek,SYSTEM_LLM_MODEL=deepseek-v4-flash,RESUME_STORAGE_BUCKET=yabot.jobs-files,RESUME_STORAGE_REGION=us-east-1,SEO_PAGES_BUCKET=${SEO_PAGES_BUCKET},SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID=${SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID}"
+COMMON_ENV="GCP_PROJECT_ID=${PROJECT_ID},BROWSER_FETCH_SERVICE_URL=${BROWSER_FETCH_SERVICE_URL},SECTOR_API_URL=${SECTOR_API_URL},FRONTEND_BASE_URL=https://yabot.jobs,SESSION_COOKIE_SECURE=true,SYSTEM_LLM_PROVIDER=deepseek,SYSTEM_LLM_MODEL=deepseek-v4-flash,RESUME_STORAGE_BUCKET=yabot.jobs-files,RESUME_STORAGE_REGION=us-east-1,SEO_PAGES_BUCKET=${SEO_PAGES_BUCKET},SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID=${SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID}"
 
 # EMAIL_SENDER_* map to the same underlying secrets as RESUME_STORAGE_* —
 # both are the yabot-jobs-backend IAM user's credentials (S3 + SES policies
@@ -453,6 +463,12 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --role="roles/monitoring.viewer" --condition=None
 
 gcloud run services add-iam-policy-binding yabot-jobs-browser \
+  --region="$REGION" \
+  --member="serviceAccount:${DEFAULT_COMPUTE_SA}" \
+  --role="roles/run.developer"
+
+# browser_scaler.py also sets yabot-jobs-sector's min-instances.
+gcloud run services add-iam-policy-binding yabot-jobs-sector \
   --region="$REGION" \
   --member="serviceAccount:${DEFAULT_COMPUTE_SA}" \
   --role="roles/run.developer"

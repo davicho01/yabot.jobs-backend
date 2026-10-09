@@ -20,10 +20,15 @@ with 429s because it was stuck at a static min-instances that had been
 manually reset to 0, unrelated to how much crawl-worker/worker traffic
 actually existed at the time.
 
+Also sets the sector classifier's warm capacity (yabot-jobs-sector) from the
+same worker counts — kept here rather than in a new scaler so crawl_dispatcher
+and the browser-scaler-tick scheduler job need no rewiring.
+
 Usage: python browser_scaler.py
 """
 
 import logging
+import math
 
 from app.core.log_config import configure_logging
 from app.services.gcp_admin import get_instance_count, pause_scheduler_job, set_min_instances
@@ -49,6 +54,16 @@ _BROWSER_DEMAND_RATIO = 0.10
 # outage.
 _MIN_INSTANCES_CAP = 30
 
+# yabot-jobs-sector (the sector classifier, see app.services.sector_api) is
+# scaled from the same tick, by `worker` only — crawl-worker discovers URLs and
+# never classifies. From its load test (yabot.jobs-ml, 2026-10-08): one
+# instance handles ~1.8 postings/s, and a 15,000-posting scan over ~1 hour is
+# ~4.2/s, so ~3-4 instances for 30 workers. Re-tune against real latency/cost.
+_SECTOR_SERVICE = "yabot-jobs-sector"
+_SECTOR_DEMAND_RATIO = 0.12
+# Its own max-instances (8) autoscales reactively above this floor.
+_SECTOR_MIN_INSTANCES_CAP = 5
+
 # How far back get_instance_count looks — deliberately a window, not an
 # instant point, so a momentary dip to 0 between scan-lane wake-ups isn't
 # mistaken for "fully drained" and ends the window early.
@@ -69,6 +84,15 @@ def main() -> None:
     )
 
     set_min_instances(_BROWSER_SERVICE, desired)
+
+    desired_sector = min(math.ceil(_SECTOR_DEMAND_RATIO * worker_count), _SECTOR_MIN_INSTANCES_CAP)
+    logger.info("worker=%d -> %s desired min-instances=%d", worker_count, _SECTOR_SERVICE, desired_sector)
+    try:
+        set_min_instances(_SECTOR_SERVICE, desired_sector)
+    except Exception:
+        # Never let the classifier's scaling break the browser's (or the
+        # self-pause below): a missed tick only means a colder start.
+        logger.exception("Couldn't set %s min-instances", _SECTOR_SERVICE)
 
     if total == 0:
         # Both services have been quiet for the full lookback window: the
