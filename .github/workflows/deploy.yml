@@ -25,6 +25,16 @@ on:
   push:
     branches: [main]
 
+# One deploy at a time. Without this, two merges minutes apart (PRs #16 and
+# #17, 2026-10-09) ran two deploys in parallel: both ran migrate, and each
+# service ended on whichever run happened to finish it last, possibly the
+# older image. Queued, not cancelled: a run mid-deploy is left to finish.
+# GitHub keeps only the newest waiting run, which is fine since each one
+# builds from main's latest commit.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
 permissions:
   contents: read
   id-token: write # required for Workload Identity Federation
