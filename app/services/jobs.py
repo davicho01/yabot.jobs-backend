@@ -788,7 +788,9 @@ def wake_retryable_failed_scans(db: Session) -> int:
     flipped back to PENDING and re-enqueued, same as a human clicking
     rescan, except automatic. NEEDS_REVIEW rows (out of retries) have no
     next_retry_at and are never selected here — only a deliberate rescan
-    gets one moving again.
+    gets one moving again. Neither are closed rows: a job found expired, or
+    no longer on its board, would otherwise be re-fetched (often through the
+    paid browser render) until its retries ran out, for a listing nobody sees.
 
     Committed before publishing, not just flushed — same race avoided as
     get_or_create_job_posting: the worker reads these rows on a separate
@@ -801,6 +803,7 @@ def wake_retryable_failed_scans(db: Session) -> int:
             JobPostingUrl.scan_status == ScanStatus.FAILED,
             JobPostingUrl.next_retry_at.is_not(None),
             JobPostingUrl.next_retry_at <= now,
+            JobPostingUrl.closed_at.is_(None),
         )
     ).all()
     for url_row in rows:

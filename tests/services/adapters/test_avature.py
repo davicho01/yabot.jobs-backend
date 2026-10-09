@@ -119,8 +119,38 @@ def test_scan_job_url_returns_none_when_signature_missing(monkeypatch):
 
 def test_scan_job_url_reports_failure_when_fetch_fails(monkeypatch):
     monkeypatch.setattr(avature, "_fetch_job_detail_html", lambda _url: None)
+    monkeypatch.setattr(avature, "fetch_rendered_page", lambda _url, **_kw: None)
     result = avature.scan_job_url(URL)
-    assert result.success is False
+    assert result.success is False and result.expired is False
+
+
+@pytest.mark.parametrize("landed_on,html", [
+    ("https://careers.ibm.com/en_US/closedjob", "<p>Sorry, this job is closed</p>"),
+    ("https://careers.jacobs.com/en_US/careers/Error", "<p>Error</p>"),
+    (URL, "<p>We are no longer accepting applications for this role.</p>"),
+])
+def test_a_closed_posting_is_reported_expired_not_failed(monkeypatch, landed_on, html):
+    from app.services.browser_fetch import RenderedPage
+
+    monkeypatch.setattr(avature, "_fetch_job_detail_html", lambda _url: None)  # the description never rendered
+    monkeypatch.setattr(avature, "fetch_rendered_page", lambda _url, **_kw: RenderedPage(html=html, url=landed_on))
+
+    result = avature.scan_job_url(URL)
+
+    assert result.success is False and result.expired is True
+
+
+def test_a_blocked_page_is_still_a_plain_failure(monkeypatch):
+    from app.services.browser_fetch import RenderedPage
+
+    monkeypatch.setattr(avature, "_fetch_job_detail_html", lambda _url: None)
+    monkeypatch.setattr(
+        avature, "fetch_rendered_page", lambda _url, **_kw: RenderedPage(html="<h1>406 Not Acceptable</h1>", url=URL)
+    )
+
+    result = avature.scan_job_url(URL)
+
+    assert result.success is False and result.expired is False
 
 
 def test_job_detail_fetch_waits_for_the_description_to_actually_render(monkeypatch):
