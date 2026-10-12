@@ -31,11 +31,16 @@ def is_complete_description(description: str | None) -> bool:
     return len((description or "").strip()) >= settings.scan_min_description_chars
 
 
-def incomplete_reasons(result: ScanResult) -> list[str]:
-    """Why a successful scan's content looks incomplete; empty when it's fine."""
-    description = (result.description or "").strip()
+def description_reasons(description: str | None) -> list[str]:
+    """Why a stored or scanned description looks incomplete; empty when it's fine."""
+    description = (description or "").strip()
     if not description:
         return ["no description"]
     if not is_complete_description(description):
         return [f"description is {len(description)} characters (under {settings.scan_min_description_chars})"]
     return []
+
+
+def incomplete_reasons(result: ScanResult) -> list[str]:
+    """Why a successful scan's content looks incomplete; empty when it's fine."""
+    return description_reasons(result.description)

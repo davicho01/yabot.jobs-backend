@@ -52,15 +52,21 @@ def _posting(scan_db, url_row) -> JobPosting:
     return scan_db.query(JobPosting).filter_by(url_id=url_row.id).one()
 
 
-def test_incomplete_scan_is_shown_but_retried(scan_db, make_source, make_url):
+def _searchable_ids(scan_db) -> set:
+    stmt, _order, _area = jobs.build_job_search_statement()
+    return {row.id for row in scan_db.scalars(stmt)}
+
+
+def test_incomplete_scan_is_stored_hidden_and_retried(scan_db, make_source, make_url):
     url_row = make_url(make_source())
 
     jobs._apply_scan_result(scan_db, url_row, _incomplete(location="Taguig"))
     scan_db.commit()
 
     posting = _posting(scan_db, url_row)
-    assert posting.extraction_status == ScanStatus.SUCCESS  # visible in search
-    assert posting.description == TEASER and posting.location == "Taguig"
+    assert posting.description == TEASER and posting.location == "Taguig"  # stored
+    assert posting.extraction_status == ScanStatus.FAILED
+    assert url_row.id not in _searchable_ids(scan_db)  # hidden
     url_row = scan_db.get(JobPostingUrl, url_row.id)
     assert url_row.scan_status == ScanStatus.FAILED  # picked up by the retry sweep
     assert url_row.scan_attempts == 1 and url_row.next_retry_at is not None
@@ -77,10 +83,10 @@ def test_incomplete_scan_ends_in_needs_review(scan_db, make_source, make_url):
     url_row = scan_db.get(JobPostingUrl, url_row.id)
     assert url_row.scan_status == ScanStatus.NEEDS_REVIEW and url_row.next_retry_at is None
     assert url_row.scan_error.startswith(INCOMPLETE_SCAN_ERROR_PREFIX)
-    assert _posting(scan_db, url_row).extraction_status == ScanStatus.SUCCESS  # still shown
+    assert _posting(scan_db, url_row).extraction_status == ScanStatus.NEEDS_REVIEW  # still hidden
 
 
-def test_incomplete_rescan_keeps_an_earlier_complete_posting(scan_db, make_source, make_url):
+def test_incomplete_rescan_keeps_an_earlier_complete_posting_searchable(scan_db, make_source, make_url):
     url_row = make_url(make_source())
     jobs._apply_scan_result(scan_db, url_row, _complete(location="Atlanta, GA"))
     scan_db.commit()
@@ -90,10 +96,12 @@ def test_incomplete_rescan_keeps_an_earlier_complete_posting(scan_db, make_sourc
 
     posting = _posting(scan_db, url_row)
     assert posting.description == FULL and posting.location == "Atlanta, GA"
-    assert scan_db.get(JobPostingUrl, url_row.id).scan_status == ScanStatus.FAILED
+    assert posting.extraction_status == ScanStatus.SUCCESS
+    assert url_row.id in _searchable_ids(scan_db)
+    assert scan_db.get(JobPostingUrl, url_row.id).scan_status == ScanStatus.FAILED  # still retried
 
 
-def test_complete_rescan_clears_the_incomplete_state(scan_db, make_source, make_url):
+def test_complete_rescan_makes_it_searchable_again(scan_db, make_source, make_url):
     url_row = make_url(make_source())
     jobs._apply_scan_result(scan_db, url_row, _incomplete())
     scan_db.commit()
@@ -105,6 +113,65 @@ def test_complete_rescan_clears_the_incomplete_state(scan_db, make_source, make_
     assert url_row.scan_status == ScanStatus.SUCCESS
     assert url_row.scan_attempts == 0 and url_row.next_retry_at is None and url_row.scan_error is None
     assert _posting(scan_db, url_row).description == FULL
+    assert url_row.id in _searchable_ids(scan_db)
+
+
+# ------------------------------------------------------------ duplicates
+
+
+# Same setup as test_source_company_names.TestOfficialVsElsewhere: copies of
+# one job need the same company and a metro-level location to dedup, and a
+# URL with no crawl source keeps the page's company name.
+
+
+def _scan_copy(scan_db, url_row, description):
+    result = ScanResult(
+        success=True, title="Engineer", company_name="Acme", location="Austin, TX", description=description
+    )
+    result.incomplete_reasons = incomplete_reasons(result)
+    jobs._apply_scan_result(scan_db, url_row, result)
+    scan_db.commit()
+    return _posting(scan_db, url_row)
+
+
+def _job_board(scan_db, make_source):
+    board = make_source()
+    board.name, board.status, board.is_official = "linkedin.com", "pending", False
+    scan_db.commit()
+    return board
+
+
+def test_control_two_complete_copies_link(scan_db, make_url):
+    # Guards the two tests below: this pair, both complete, does dedup — so
+    # their results aren't just a scenario that never matches.
+    first = _scan_copy(scan_db, make_url(None), FULL)
+    second = _scan_copy(scan_db, make_url(None), FULL)
+
+    assert second.primary_posting_id == first.id
+
+
+def test_complete_copy_never_attaches_to_a_hidden_incomplete_one(scan_db, make_url):
+    _scan_copy(scan_db, make_url(None), TEASER)
+    complete_row = make_url(None)
+    complete = _scan_copy(scan_db, complete_row, FULL)
+
+    assert complete.primary_posting_id is None
+    assert complete_row.id in _searchable_ids(scan_db)
+
+
+def test_incomplete_official_copy_does_not_take_over_a_complete_one(scan_db, make_source, make_url):
+    acme = make_source()
+    acme.name = "Acme"
+    scan_db.commit()
+    board_row = make_url(_job_board(scan_db, make_source))
+    board_copy = _scan_copy(scan_db, board_row, FULL)
+
+    official = _scan_copy(scan_db, make_url(acme), TEASER)
+    scan_db.expire_all()
+
+    assert scan_db.get(JobPosting, board_copy.id).primary_posting_id is None
+    assert board_row.id in _searchable_ids(scan_db)
+    assert scan_db.get(JobPosting, official.id).extraction_status == ScanStatus.FAILED
 
 
 # ------------------------------------------------------------ the scanner

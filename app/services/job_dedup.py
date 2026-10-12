@@ -25,6 +25,7 @@ from difflib import SequenceMatcher
 from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
+from app.models.enums import ScanStatus
 from app.models.job_posting import JobPosting
 
 # Common legal suffixes scraped company names carry inconsistently
@@ -278,6 +279,10 @@ def find_duplicate_primary(db: Session, posting: JobPosting) -> uuid.UUID | None
             JobPosting.company_key == posting.company_key,
             JobPosting.primary_posting_id.is_(None),
             JobPosting.id != posting.id,
+            # Only a visible canonical: a posting hidden as an incomplete scan
+            # (see app.services.scan_completeness) would otherwise take a
+            # complete duplicate out of search with it.
+            JobPosting.extraction_status == ScanStatus.SUCCESS,
         )
     ).all()
 

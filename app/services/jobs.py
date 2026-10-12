@@ -625,7 +625,7 @@ def process_scan_job(db: Session, url_id: uuid.UUID) -> None:
         if source is not None:
             url_row.crawl_source_id = source.id
 
-    _apply_scan_result(db, url_row, scan_job_url(url_row.url))
+    _apply_scan_result(db, url_row, scan_job_url(url_row.url, board_url=_source_board_url(db, url_row)))
 
 
 def _backoff_seconds(attempts: int) -> float:
@@ -673,15 +673,18 @@ def _apply_scan_result(db: Session, url_row: JobPostingUrl, result: ScanResult) 
 
     if result.success and result.incomplete_reasons:
         # The page answered but the job content is missing or a teaser (see
-        # app.services.scan_completeness). Shown with what we have, unless an
-        # earlier scan already stored a complete posting — then that one is
-        # kept, same as for a failed rescan. Either way the URL is retried
-        # like a failed scan and ends in needs_review if it never completes.
-        posting = db.scalar(select(JobPosting).where(JobPosting.url_id == url_row.id))
-        if posting is None or not is_complete_description(posting.description):
-            _upsert_posting(db, url_row, result, now)
+        # app.services.scan_completeness). The URL is retried like a failed
+        # scan and ends in needs_review if it never completes. A posting that
+        # already has a complete description from an earlier scan is kept and
+        # stays searchable, same as for a failed rescan; otherwise what this
+        # scan got is stored but hidden (extraction_status mirrors the URL's
+        # failed/needs_review), until a later scan completes it.
         url_row.scan_error = _strip_nul(f"{INCOMPLETE_SCAN_ERROR_PREFIX}{'; '.join(result.incomplete_reasons)}")
         _schedule_retry(url_row, now)
+        posting = db.scalar(select(JobPosting).where(JobPosting.url_id == url_row.id))
+        if posting is None or not is_complete_description(posting.description):
+            posting = _upsert_posting(db, url_row, result, now)
+            posting.extraction_status = url_row.scan_status
         logger.info(
             "Incomplete scan of url_id=%s (%s): %s", url_row.id, url_row.domain, "; ".join(result.incomplete_reasons)
         )
@@ -737,6 +740,7 @@ def run_source_lane(db: Session, source_id: uuid.UUID) -> int:
     """
     deadline = time.monotonic() + settings.scan_lane_deadline_seconds
     scanned = 0
+    board_url = db.scalar(select(CrawlSource.board_url).where(CrawlSource.id == source_id))
     logger.info("Lane started for source_id=%s.", source_id)
 
     while True:
@@ -746,7 +750,7 @@ def run_source_lane(db: Session, source_id: uuid.UUID) -> int:
 
         fetch_started = time.monotonic()
         try:
-            result = scan_job_url(claimed.url)
+            result = scan_job_url(claimed.url, board_url=board_url)
         except Exception as exc:
             # One page that blows up must not stall the rest of the source
             # (or, left PENDING, be reclaimed and blow up again after the
@@ -948,9 +952,17 @@ def rescan_job_url(db: Session, url_row: JobPostingUrl) -> JobPostingUrl:
     rather than picking up where the automatic sweep left off.
     """
     url_row.scan_attempts = 0
-    result = scan_job_url(url_row.url)
+    result = scan_job_url(url_row.url, board_url=_source_board_url(db, url_row))
     _apply_scan_result(db, url_row, result)
     return url_row
+
+
+def _source_board_url(db: Session, url_row: JobPostingUrl) -> str | None:
+    """The board URL of the crawl source this URL came from, if any — passed
+    to the scanner as a hint (see base.scan_board_url)."""
+    if url_row.crawl_source_id is None:
+        return None
+    return db.scalar(select(CrawlSource.board_url).where(CrawlSource.id == url_row.crawl_source_id))
 
 
 def flag_job_url(
@@ -1105,8 +1117,15 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
         posting.title_key = normalize_title(posting.title)
         posting.primary_posting_id = find_duplicate_primary(db, posting)
         # The official site's copy of a job wins over one found first
-        # elsewhere: it becomes the canonical row, the other its duplicate.
-        if official and posting.primary_posting_id and not _posting_is_official(db, posting.primary_posting_id):
+        # elsewhere: it becomes the canonical row, the other its duplicate —
+        # unless this scan is incomplete, which gets hidden (see
+        # _apply_scan_result) and must not take the complete copy with it.
+        if (
+            official
+            and not result.incomplete_reasons
+            and posting.primary_posting_id
+            and not _posting_is_official(db, posting.primary_posting_id)
+        ):
             claim_primary(db, posting, posting.primary_posting_id)
         # The company's logo domain (see app.services.company_logos) — every
         # scan/rescan may bring a better signal than the last one had.
