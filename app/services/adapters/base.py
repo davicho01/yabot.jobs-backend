@@ -203,6 +203,9 @@ class ScanResult:
     # Set by job_scanner.scan_job_url, not by adapters: whether this scan
     # asked yabot-jobs-browser for a render (see browser_fetch.render_attempted).
     scanned_via_browser: bool = False
+    # Set by job_scanner.scan_job_url, not by adapters: why a successful
+    # scan's content looks incomplete (see app.services.scan_completeness).
+    incomplete_reasons: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

@@ -37,6 +37,7 @@ from app.services.job_queue import enqueue_scan, enqueue_source_scan
 from app.services.job_scanner import ScanResult, domain_of, normalize_url, scan_job_url, url_hash
 from app.services.llm_client import LlmError
 from app.services.scan_claims import claim_next_url, has_unclaimed_pending, sources_with_pending_scans
+from app.services.scan_completeness import INCOMPLETE_SCAN_ERROR_PREFIX, is_complete_description
 from app.schemas.job import JobDetailRead, SearchAreaRead
 
 logger = logging.getLogger("app.jobs")
@@ -649,6 +650,20 @@ def _mark_scanned(posting: JobPosting, now: datetime) -> None:
         posting.first_scanned_at = now
 
 
+def _schedule_retry(url_row: JobPostingUrl, now: datetime) -> None:
+    """Count a failed (or incomplete) scan attempt: FAILED with the next
+    backoff window, or NEEDS_REVIEW once scan_retry_max_attempts is reached."""
+    url_row.scan_attempts += 1
+    if url_row.scan_attempts >= settings.scan_retry_max_attempts:
+        # Given up: a human has to rescan it (which resets scan_attempts)
+        # for it to be eligible again — see rescan_job_url/rescan_crawl_source.
+        url_row.scan_status = ScanStatus.NEEDS_REVIEW
+        url_row.next_retry_at = None
+    else:
+        url_row.scan_status = ScanStatus.FAILED
+        url_row.next_retry_at = now + timedelta(seconds=_backoff_seconds(url_row.scan_attempts))
+
+
 def _apply_scan_result(db: Session, url_row: JobPostingUrl, result: ScanResult) -> None:
     now = datetime.now(timezone.utc)
     url_row.scan_error = _strip_nul(result.error)
@@ -656,7 +671,21 @@ def _apply_scan_result(db: Session, url_row: JobPostingUrl, result: ScanResult) 
     url_row.scan_claimed_at = None
     url_row.scanned_via_browser = result.scanned_via_browser
 
-    if result.success:
+    if result.success and result.incomplete_reasons:
+        # The page answered but the job content is missing or a teaser (see
+        # app.services.scan_completeness). Shown with what we have, unless an
+        # earlier scan already stored a complete posting — then that one is
+        # kept, same as for a failed rescan. Either way the URL is retried
+        # like a failed scan and ends in needs_review if it never completes.
+        posting = db.scalar(select(JobPosting).where(JobPosting.url_id == url_row.id))
+        if posting is None or not is_complete_description(posting.description):
+            _upsert_posting(db, url_row, result, now)
+        url_row.scan_error = _strip_nul(f"{INCOMPLETE_SCAN_ERROR_PREFIX}{'; '.join(result.incomplete_reasons)}")
+        _schedule_retry(url_row, now)
+        logger.info(
+            "Incomplete scan of url_id=%s (%s): %s", url_row.id, url_row.domain, "; ".join(result.incomplete_reasons)
+        )
+    elif result.success:
         url_row.scan_status = ScanStatus.SUCCESS
         url_row.scan_attempts = 0
         url_row.next_retry_at = None
@@ -673,15 +702,7 @@ def _apply_scan_result(db: Session, url_row: JobPostingUrl, result: ScanResult) 
             # than waiting for crawls to stop listing it (and for a
             # user-submitted URL, no crawl ever would).
             url_row.closed_at = now
-        url_row.scan_attempts += 1
-        if url_row.scan_attempts >= settings.scan_retry_max_attempts:
-            # Given up: a human has to rescan it (which resets scan_attempts)
-            # for it to be eligible again — see rescan_job_url/rescan_crawl_source.
-            url_row.scan_status = ScanStatus.NEEDS_REVIEW
-            url_row.next_retry_at = None
-        else:
-            url_row.scan_status = ScanStatus.FAILED
-            url_row.next_retry_at = now + timedelta(seconds=_backoff_seconds(url_row.scan_attempts))
+        _schedule_retry(url_row, now)
         # A failed re-scan (transient WAF block, timeout, ...) must not
         # clobber a posting that already has good data from a previous
         # successful scan - same reasoning rescan_job_url already applies.

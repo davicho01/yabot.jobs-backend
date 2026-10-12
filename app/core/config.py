@@ -115,6 +115,10 @@ class Settings(BaseSettings):
     scan_retry_backoff_multiplier: float = 4.0
     scan_retry_max_seconds: float = 86400.0
     scan_retry_max_attempts: int = 5
+    # A successful scan whose description is shorter than this is treated as
+    # incomplete (a teaser, or nothing) and retried — see
+    # app.services.scan_completeness for the prod audit behind 300.
+    scan_min_description_chars: int = 300
 
     # How long a crawl-sourced URL can go unlisted on its board before it
     # counts as closed (see app.services.jobs.record_board_presence). Only a

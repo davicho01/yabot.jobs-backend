@@ -10,6 +10,7 @@ from app.services.adapters.base import ScanResult
 from app.services.adapters.text import clean_text as _clean_text
 from app.services.adapters.text import html_to_formatted_text as _html_to_formatted_text
 from app.services.company_logos import hiring_org_url
+from app.services.scan_completeness import incomplete_reasons
 
 _TRACKING_PARAM_PREFIXES = ("utm_",)
 _TRACKING_PARAMS = {"gclid", "fbclid", "ref", "igshid"}
@@ -67,6 +68,10 @@ def scan_job_url(url: str) -> ScanResult:
             result = _default_scan_job_url(url)
     result = _mark_gone(result)
     result.scanned_via_browser = browser_fetch.render_attempted()
+    if result.success:
+        # Every adapter's result and the generic fallback pass through here,
+        # so this one check covers all platforms.
+        result.incomplete_reasons = incomplete_reasons(result)
     return result
 
 

@@ -19,6 +19,11 @@ class ScanHourCount(BaseModel):
     count: int
 
 
+class IncompleteScanDomainCount(BaseModel):
+    domain: str
+    count: int
+
+
 class ScanWeekCount(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

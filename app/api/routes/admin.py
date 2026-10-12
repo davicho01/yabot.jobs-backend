@@ -18,6 +18,7 @@ from app.schemas.admin import (
     AdminCompanyLogoUrl,
     AdminCompanyRead,
     AdminDashboardRead,
+    IncompleteScanDomainCount,
     ScanDayCount,
     ScanHourCount,
     ScanMonthCount,
@@ -38,6 +39,7 @@ from app.services.company_logos import (
     usable_domain_clause,
 )
 from app.services.jobs import dismiss_job_flag, to_job_detail
+from app.services.scan_completeness import INCOMPLETE_SCAN_ERROR_PREFIX
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(get_current_admin_user)])
 
@@ -85,6 +87,7 @@ def get_jobs(
     scan_from: datetime | None = Query(None),
     scan_to: datetime | None = Query(None),
     flagged: bool | None = Query(None),
+    incomplete: bool | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     sort_by: Literal["company", "title", "status", "discovered"] = Query("discovered"),
@@ -96,7 +99,8 @@ def get_jobs(
     bar (source-scoped from the source stats page, unscoped from the
     dashboard's all-sources chart) as well as the plain per-source listing.
     `flagged=true` is the user-report triage queue instead (see POST
-    /jobs/{url_id}/flag)."""
+    /jobs/{url_id}/flag). `incomplete=true` lists listings whose latest scan
+    got no real job content (see app.services.scan_completeness)."""
     if source_id is not None and db.get(CrawlSource, source_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Crawl source not found.")
 
@@ -109,6 +113,9 @@ def get_jobs(
         stmt = stmt.where(JobPostingUrl.last_scanned_at <= scan_to)
     if flagged is not None:
         stmt = stmt.where(JobPostingUrl.flagged_at.isnot(None) if flagged else JobPostingUrl.flagged_at.is_(None))
+    if incomplete is not None:
+        is_incomplete = JobPostingUrl.scan_error.startswith(INCOMPLETE_SCAN_ERROR_PREFIX)
+        stmt = stmt.where(is_incomplete if incomplete else ~is_incomplete | JobPostingUrl.scan_error.is_(None))
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
 
@@ -122,6 +129,26 @@ def get_jobs(
     return JobListRead(
         items=[to_job_detail(row, include_flag=True) for row in url_rows], total=total, page=page, page_size=page_size
     )
+
+
+@router.get("/incomplete-scans-by-domain", response_model=list[IncompleteScanDomainCount])
+def get_incomplete_scans_by_domain(
+    limit: int = Query(50, ge=1, le=500), db: Session = Depends(get_db)
+) -> list[dict]:
+    """Open listings whose latest scan got no real job content, counted per
+    domain, most first — a domain near the top usually means its platform
+    needs an adapter (as Workable did), not that its jobs are thin."""
+    rows = db.execute(
+        select(JobPostingUrl.domain, func.count().label("count"))
+        .where(
+            JobPostingUrl.scan_error.startswith(INCOMPLETE_SCAN_ERROR_PREFIX),
+            JobPostingUrl.closed_at.is_(None),
+        )
+        .group_by(JobPostingUrl.domain)
+        .order_by(desc("count"), JobPostingUrl.domain)
+        .limit(limit)
+    ).all()
+    return [{"domain": domain, "count": count} for domain, count in rows]
 
 
 @router.delete("/listings/{url_id}", status_code=status.HTTP_204_NO_CONTENT)
