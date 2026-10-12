@@ -1,4 +1,3 @@
-import functools
 import re
 
 import httpx
@@ -88,7 +87,9 @@ def _account_and_shortcode(url: str) -> tuple[str, str] | None:
         return match.group(1), match.group(2)
     if not _WORKABLE_SHORTLINK_CODE_RE.search(url):
         return None
-    response = httpx.get(url, timeout=TIMEOUT, follow_redirects=False)
+    response = get_with_retry(url, timeout=TIMEOUT, follow_redirects=False)
+    if response.status_code == httpx.codes.TOO_MANY_REQUESTS:
+        response.raise_for_status()  # still rate limited after the retry: a plain failed scan
     # The Location header is a relative path ("/{account}/j/{code}"). An
     # unknown or removed job redirects to "/oops" instead (verified live).
     location = response.headers.get("location")
@@ -100,18 +101,24 @@ def _account_and_shortcode(url: str) -> tuple[str, str] | None:
     return (match.group(1), match.group(2)) if match else None
 
 
-@functools.lru_cache(maxsize=256)
+_account_cache: dict[str, tuple[str | None, str | None]] = {}
+
+
 def _account_info(account: str) -> tuple[str | None, str | None]:
     """(company name, company website) for a Workable account, cached per
     process: a scan lane drains one board's jobs, which share an account.
-    Best-effort — a failure only costs the name, never the scan."""
+    Best-effort — a failure only costs the name, never the scan, and isn't
+    cached, so the next job from the account tries again."""
+    if account in _account_cache:
+        return _account_cache[account]
     try:
         response = get_with_retry(_WORKABLE_ACCOUNT_API_URL.format(account=account), timeout=TIMEOUT)
         response.raise_for_status()
         data = response.json()
     except (httpx.HTTPError, ValueError):
         return None, None
-    return clean_text(data.get("name")), data.get("url") or None
+    _account_cache[account] = (clean_text(data.get("name")), data.get("url") or None)
+    return _account_cache[account]
 
 
 def _location_of(job: dict) -> str | None:

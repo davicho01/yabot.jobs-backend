@@ -66,13 +66,13 @@ def limit_job_urls(urls: Iterable[str]) -> list[str]:
 
 logger = logging.getLogger(__name__)
 
-# job_scanner.py's own retry helper caps at 3 attempts / 18s max backoff,
-# tuned for a single interactive job-page fetch. That budget isn't enough
-# here: verified live against Microsoft's Eightfold tenant, whose rate
-# limiter keeps tripping every few pages during a ~25-request pagination
-# run and needed 6 attempts / a 30s ceiling to ride out (crawl_worker.py has
-# no tight time budget, so the extra wall-clock cost here is fine).
-_RATE_LIMIT_MAX_ATTEMPTS = 6
+# Two attempts: the first try plus one retry after a 429, then give up — a
+# failed scan is retried later by the failed-scan sweep, and a failed crawl on
+# its next dispatch. Was 6 (tuned to ride out Microsoft's Eightfold tenant,
+# whose rate limiter trips every few pages of a ~25-request pagination run),
+# but six waits of up to 60s each held a worker or scan lane for ~5 minutes
+# per rate-limited request (verified live on Workable, 2026-10-12).
+_RATE_LIMIT_MAX_ATTEMPTS = 2
 _RATE_LIMIT_MAX_WAIT_SECONDS = 60.0
 _RATE_LIMIT_BACKOFF_SECONDS = (2.0, 5.0, 10.0, 20.0, 30.0)
 
@@ -95,12 +95,9 @@ def _rate_limit_wait_seconds(response: httpx.Response, attempt: int) -> float:
 
 
 def _request_with_retry(request_fn: Callable[[], httpx.Response], url: str) -> httpx.Response:
-    """Shared retry loop behind get_with_retry/post_with_retry: retries a
-    few times on 429, for tenant APIs hit repeatedly in a tight pagination
-    loop (e.g. Eightfold's /api/pcsx/search) — a burst of back-to-back
-    requests to the same host can trip the tenant's own rate limiter partway
-    through. Does not call raise_for_status(); callers do that themselves,
-    same as a plain httpx.get()/httpx.post() call.
+    """Shared retry loop behind get_with_retry/post_with_retry: retries once
+    on 429 (see _RATE_LIMIT_MAX_ATTEMPTS). Does not call raise_for_status();
+    callers do that themselves, same as a plain httpx.get()/httpx.post() call.
     """
     attempt = 0
     while True:
@@ -285,12 +282,10 @@ def parse_month_day_year(raw: str | None, *, month_style: str) -> date | None:
 # --- Page fetching for scan_job_url (both per-platform adapters and the
 # generic default scanner) ---
 
-# A tighter retry budget than get_with_retry/post_with_retry above: this is
-# a single interactive job-page fetch (a user waiting on a submit-a-URL
-# flow), not a tight pagination loop against one tenant's API, so there's no
-# need for get_with_retry's 6-attempt/60s ceiling tuned for riding out
-# Eightfold's rate limiter across ~25 requests.
-_SCAN_FETCH_RATE_LIMIT_MAX_ATTEMPTS = 3
+# Same budget as get_with_retry/post_with_retry above: the first try plus
+# one retry after a 429, then the scan fails and is left to the failed-scan
+# retry sweep (was 3).
+_SCAN_FETCH_RATE_LIMIT_MAX_ATTEMPTS = 2
 _SCAN_FETCH_RATE_LIMIT_MAX_WAIT_SECONDS = 60.0
 _SCAN_FETCH_RATE_LIMIT_BACKOFF_SECONDS = (2.0, 6.0, 18.0)
 

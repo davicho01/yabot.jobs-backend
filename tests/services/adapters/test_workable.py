@@ -2,7 +2,7 @@ import httpx
 import pytest
 
 from app.models.enums import EmploymentType, WorkplaceType
-from app.services.adapters import workable
+from app.services.adapters import base, workable
 
 SHORTLINK = "https://apply.workable.com/j/F853A573AA"
 ACCOUNT_URL = "https://apply.workable.com/manilarecruitment/j/F853A573AA"
@@ -27,30 +27,31 @@ def _response(status, url, *, json=None, headers=None):
     return httpx.Response(status, json=json, headers=headers, request=httpx.Request("GET", url))
 
 
+def _redirect(location):
+    return _response(301, SHORTLINK, headers={"location": location})
+
+
 @pytest.fixture
 def workable_api(monkeypatch):
-    """Fakes Workable: the shortlink redirect (httpx.get) and the job/account
-    APIs (get_with_retry). Returns the dict of API responses to tweak."""
-    workable._account_info.cache_clear()
+    """Fakes Workable underneath the real retry helper: maps each URL to a
+    response, or to a list of responses served in order (e.g. a 429 then a
+    200). Returns that dict to tweak; "_calls" records every request."""
+    workable._account_cache.clear()
     calls = []
     api = {
+        SHORTLINK: _redirect("/manilarecruitment/j/F853A573AA"),
         JOB_API: _response(200, JOB_API, json=JOB),
         ACCOUNT_API: _response(200, ACCOUNT_API, json={"name": "Manila Recruitment", "url": "http://manilarecruitment.com"}),
+        "_calls": calls,
     }
-    redirects = {SHORTLINK: "/manilarecruitment/j/F853A573AA"}
 
     def fake_get(url, **kwargs):
         calls.append(url)
-        return _response(301, url, headers={"location": redirects[url]})
+        served = api[url]
+        return served.pop(0) if isinstance(served, list) else served
 
-    def fake_get_with_retry(url, **kwargs):
-        calls.append(url)
-        return api[url]
-
-    monkeypatch.setattr(workable.httpx, "get", fake_get)
-    monkeypatch.setattr(workable, "get_with_retry", fake_get_with_retry)
-    api["_calls"] = calls
-    api["_redirects"] = redirects
+    monkeypatch.setattr(base.httpx, "get", fake_get)
+    monkeypatch.setattr(base.time, "sleep", lambda seconds: None)
     return api
 
 
@@ -77,7 +78,7 @@ def test_account_url_needs_no_redirect(workable_api):
 
 
 def test_removed_job_shortlink_is_expired(workable_api):
-    workable_api["_redirects"][SHORTLINK] = "/oops"
+    workable_api[SHORTLINK] = _redirect("/oops")
 
     result = workable.scan_job_url(SHORTLINK)
 
@@ -114,6 +115,45 @@ def test_account_lookup_failure_keeps_the_scan(workable_api):
     result = workable.scan_job_url(ACCOUNT_URL)
 
     assert result.success and result.company_name is None
+
+
+def test_rate_limited_job_is_retried_once(workable_api):
+    workable_api[JOB_API] = [_response(429, JOB_API), _response(200, JOB_API, json=JOB)]
+
+    result = workable.scan_job_url(ACCOUNT_URL)
+
+    assert result.success
+    assert workable_api["_calls"].count(JOB_API) == 2
+
+
+def test_still_rate_limited_after_one_retry_fails_without_expiring(workable_api):
+    workable_api[JOB_API] = [_response(429, JOB_API), _response(429, JOB_API), _response(200, JOB_API, json=JOB)]
+
+    result = workable.scan_job_url(ACCOUNT_URL)
+
+    assert (result.success, result.expired) == (False, False)
+    assert "429" in result.error
+    assert workable_api["_calls"].count(JOB_API) == 2
+
+
+def test_rate_limited_shortlink_fails_without_expiring(workable_api):
+    workable_api[SHORTLINK] = [_response(429, SHORTLINK), _response(429, SHORTLINK)]
+
+    result = workable.scan_job_url(SHORTLINK)
+
+    assert (result.success, result.expired) == (False, False)
+    assert workable_api["_calls"].count(SHORTLINK) == 2
+
+
+def test_failed_account_lookup_is_not_cached(workable_api):
+    workable_api[ACCOUNT_API] = [
+        _response(429, ACCOUNT_API),
+        _response(429, ACCOUNT_API),
+        _response(200, ACCOUNT_API, json={"name": "Manila Recruitment"}),
+    ]
+
+    assert workable.scan_job_url(ACCOUNT_URL).company_name is None
+    assert workable.scan_job_url(ACCOUNT_URL).company_name == "Manila Recruitment"
 
 
 def test_remote_flag_is_used_when_workplace_is_missing(workable_api):
