@@ -46,7 +46,9 @@ def _make_user(db, *, email_alerts_enabled: bool = True) -> m.User:
     return user
 
 
-def _make_scanned_posting(db, *, scanned_at: datetime, title="Engineer", company="Acme") -> m.JobPosting:
+def _make_scanned_posting(
+    db, *, scanned_at: datetime, title="Engineer", company="Acme", first_scanned_at: datetime | None = None
+) -> m.JobPosting:
     n = next(_url_counter)
     url = m.JobPostingUrl(
         url=f"https://example.com/jobs/alert-{n}",
@@ -57,7 +59,12 @@ def _make_scanned_posting(db, *, scanned_at: datetime, title="Engineer", company
     db.add(url)
     db.flush()
     posting = m.JobPosting(
-        url_id=url.id, title=title, company_name=company, extraction_status=ScanStatus.SUCCESS, scanned_at=scanned_at
+        url_id=url.id,
+        title=title,
+        company_name=company,
+        extraction_status=ScanStatus.SUCCESS,
+        scanned_at=scanned_at,
+        first_scanned_at=first_scanned_at or scanned_at,  # a new job unless told otherwise
     )
     db.add(posting)
     db.commit()
@@ -204,3 +211,29 @@ def test_sweep_skips_a_users_searches_entirely_when_alerts_are_off(send, db):
     # Not just "no email" — left alone entirely, so turning alerts back on
     # picks up from here rather than either a lost gap or a flood of backlog.
     assert opted_out_search.last_alerted_at is None
+
+
+@patch("app.services.saved_search_alerts.send_saved_search_digest_email")
+def test_sweep_ignores_an_old_posting_that_was_just_rescanned(send, db):
+    # The 2026-10-12 incident: a posting first found Sep 19 was rescanned by
+    # the incomplete-scan backfill and went out as a "new" match.
+    now = datetime.now(timezone.utc)
+    user = _make_user(db)
+    _make_saved_search(db, user, q="engineer", created_at=now - timedelta(days=60), last_alerted_at=now - timedelta(minutes=30))
+    _make_scanned_posting(db, scanned_at=now, first_scanned_at=now - timedelta(days=23), title="Senior Software Engineer")
+
+    assert sweep_saved_searches(db, now=now) == 0
+    send.assert_not_called()
+
+
+@patch("app.services.saved_search_alerts.send_saved_search_digest_email")
+def test_sweep_alerts_a_new_posting_completed_by_a_later_retry(send, db):
+    # First scan attempt (incomplete, hidden) 5h ago, before the last sweep;
+    # completed by a retry just now — still a new job, so it's sent.
+    now = datetime.now(timezone.utc)
+    user = _make_user(db)
+    _make_saved_search(db, user, q="engineer", created_at=now - timedelta(days=1), last_alerted_at=now - timedelta(minutes=30))
+    _make_scanned_posting(db, scanned_at=now, first_scanned_at=now - timedelta(hours=5), title="Backend Engineer")
+
+    assert sweep_saved_searches(db, now=now) == 1
+    send.assert_called_once()
