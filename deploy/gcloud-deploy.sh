@@ -492,11 +492,12 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
 #    respect (HTTP-triggered, no-allow-unauthenticated, OIDC-invoked by
 #    Scheduler, Cloud SQL attached to the underlying Cloud Run service
 #    afterward since `gcloud functions deploy` has no --set-cloudsql-instances
-#    flag). 2x/day (2pm/10pm America/New_York). That timing was chosen as
-#    an hour after the old 1pm/9pm crawl-dispatch bursts; since 2026-10-12
+#    flag). Hourly, 8am-11pm America/New_York, weekdays (since 2026-10-12):
 #    crawl-dispatch runs every 30 minutes and new postings land throughout
-#    the day, so alerts simply batch whatever was found since the last run.
-#    Run it more often if alerts should arrive sooner.
+#    the day, so alerts go out within the hour. Each saved search only gets
+#    jobs scanned since its own last_alerted_at, so running more often never
+#    sends duplicates (was 2x/day, 2pm/10pm, an hour after the old 1pm/9pm
+#    crawl-dispatch bursts).
 # ---------------------------------------------------------------------------
 
 gcloud functions deploy saved-search-alerts \
@@ -527,7 +528,7 @@ gcloud functions add-invoker-policy-binding saved-search-alerts \
 
 gcloud scheduler jobs create http saved-search-alerts-hourly \
   --location="$REGION" \
-  --schedule="0 14,22 * * 1-5" \
+  --schedule="0 8-23 * * 1-5" \
   --time-zone="America/New_York" \
   --uri="$SAVED_SEARCH_ALERTS_FUNCTION_URL" \
   --http-method=POST \
