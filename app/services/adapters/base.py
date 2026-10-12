@@ -965,6 +965,25 @@ _SALARY_SINGLE_RE = re.compile(
 )
 
 
+# Some listings (many Workday tenants) state each end of the range under its
+# own label instead of as one "X - Y" range, e.g. "**Salary Minimum**
+# \n\n$92,000.00\n\n**Salary Maximum**\n\n$120,750.00" (verified live on a
+# Wolverine Worldwide posting, stored with no salary). Each bound needs a
+# currency marker ("Minimum of 3 years" isn't pay) and a pay word next to
+# its label — checked in _labelled_bounds.
+_LABELLED_BOUND_RE = re.compile(
+    rf"""
+    \b(?P<label>minimum|maximum|min|max)\b
+    [^\d\$£€]{{0,40}}?
+    (?:(?P<cur1>{_CURRENCY_CODES})\s*)?(?P<sym>[\$£€])?\s*
+    (?<!\d)(?P<amount>\d{{1,3}}(?:,\d{{3}})*(?:\.\d+)?|\d+(?:\.\d+)?)(?!\d)(?P<amount_k>[kK])?
+    (?:\s*(?P<cur2>{_CURRENCY_CODES}))?
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+_PAY_WORD_RE = re.compile(r"\b(?:salary|pay|compensation|wage|rate|base)\b", re.IGNORECASE)
+_LABELLED_BOUNDS_MAX_GAP = 400
+
 _SPACED_THOUSANDS_RE = re.compile(r"([\$£€]\s*\d{1,3}),\s(\d{3})(?!\d)")
 # Above this, or with a top more than this many times the bottom, a "range"
 # is a typo, not a salary ("$121, 720 - $143,200k" once read as 720 to
@@ -981,6 +1000,34 @@ def _thousands(amount: int, k_suffix: str | None) -> int:
 
 def _plausible_range(low: int, high: int) -> bool:
     return 0 < low <= high <= _MAX_PLAUSIBLE_SALARY and high <= low * _MAX_PLAUSIBLE_SPREAD
+
+
+def _labelled_bounds(text: str) -> tuple[int, int, str | None] | None:
+    """A range stated as separately labelled bounds ("Salary Minimum ...
+    $92,000.00 ... Salary Maximum ... $120,750.00"; see _LABELLED_BOUND_RE):
+    the first minimum and the first maximum after it within
+    _LABELLED_BOUNDS_MAX_GAP characters, each carrying a currency marker and
+    a pay word within 40 characters of its label."""
+    minimum = maximum = None
+    for match in _LABELLED_BOUND_RE.finditer(text):
+        if not (match.group("cur1") or match.group("sym") or match.group("cur2")):
+            continue
+        context = text[max(0, match.start() - 40) : match.end()]
+        if not _PAY_WORD_RE.search(context):
+            continue
+        try:
+            amount = _thousands(round(float(match.group("amount").replace(",", ""))), match.group("amount_k"))
+        except ValueError:
+            continue
+        currency = match.group("cur1") or match.group("cur2") or _CURRENCY_SYMBOLS.get(match.group("sym") or "")
+        bound = (match.start(), amount, currency.upper() if currency else None)
+        if match.group("label").lower().startswith("min"):
+            minimum = minimum or bound
+        elif minimum is not None and maximum is None and match.start() - minimum[0] <= _LABELLED_BOUNDS_MAX_GAP:
+            maximum = bound
+    if minimum is None or maximum is None or not _plausible_range(minimum[1], maximum[1]) or minimum[1] > maximum[1]:
+        return None
+    return minimum[1], maximum[1], minimum[2] or maximum[2]
 
 
 def salary_from_text(text: str | None) -> tuple[int | None, int | None, str | None]:
@@ -1038,6 +1085,10 @@ def salary_from_text(text: str | None) -> tuple[int | None, int | None, str | No
 
     if overall_min is not None:
         return overall_min, overall_max, overall_currency
+
+    labelled = _labelled_bounds(text)
+    if labelled is not None:
+        return labelled
 
     # No range found — some listings (see _SALARY_SINGLE_RE) state a single
     # flat figure instead of a range.

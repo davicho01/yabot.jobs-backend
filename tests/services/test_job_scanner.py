@@ -97,6 +97,36 @@ def test_salary_from_text_still_rejects_level_band_digit_as_range_start():
     ) == (224000, 431250, "USD")
 
 
+def test_salary_from_text_reads_separately_labelled_bounds():
+    # Wolverine Worldwide's Workday posting, as stored (Markdown).
+    text = (
+        "100% Remote for the right candidate.\n\n#LI-Remote\n\n**Salary Minimum**\n\n$92,000.00\n\n"
+        "**Salary Maximum**\n\n$120,750.00\n\nThe above statements are intended to describe the general nature..."
+    )
+    assert _salary_from_text(text) == (92000, 120750, "USD")
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("Pay Range Minimum: USD 25.50 per hour. Pay Range Maximum: USD 32.00 per hour.", (26, 32, "USD")),
+    ("Minimum Salary: £40,000\nMaximum Salary: £52,000", (40000, 52000, "GBP")),
+    ("Base pay min $85k, base pay max $110k", (85000, 110000, "USD")),
+])
+def test_salary_from_text_labelled_bound_variants(text, expected):
+    assert _salary_from_text(text) == expected
+
+
+@pytest.mark.parametrize("text", [
+    # Experience, not pay: no currency marker.
+    "Minimum of 3 years of experience. Maximum 10 direct reports.",
+    # Currency, but no pay word near the labels.
+    "Minimum order $50. Maximum order $500.",
+    # Only one bound.
+    "Salary Minimum: $92,000",
+])
+def test_salary_from_text_labelled_bounds_need_currency_pay_word_and_both_ends(text):
+    assert _salary_from_text(text) == (None, None, None)
+
+
 def test_salary_from_text_reads_a_spaced_thousands_comma_and_a_redundant_k():
     # The DispatchHealth/NLX typo "$121, 720 - $143,200k" was stored as
     # 720 to 143,200,000 ("$143M" on the job page).
