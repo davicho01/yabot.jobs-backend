@@ -1,3 +1,4 @@
+import uuid
 from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict
@@ -116,3 +117,31 @@ class AdminCompanyLogoUrl(BaseModel):
     display_name: str | None = None
     # An image's address, or any page the logo is on (e.g. the homepage).
     url: str
+
+
+class DuplicateMemberRead(BaseModel):
+    url_id: uuid.UUID
+    posting_id: uuid.UUID
+    url: str
+    domain: str
+    title: str | None
+    location: str | None
+    # The group's canonical row — the one GET /jobs lists (see
+    # app.services.job_dedup). In a "possible" group none is linked yet, so
+    # every member is its own primary.
+    is_primary: bool
+    closed: bool
+    last_scanned_at: datetime | None
+
+
+class DuplicateGroupRead(BaseModel):
+    company_name: str | None
+    title: str | None
+    members: list[DuplicateMemberRead]
+
+
+class DuplicateGroupListRead(BaseModel):
+    items: list[DuplicateGroupRead]
+    total: int
+    page: int
+    page_size: int
