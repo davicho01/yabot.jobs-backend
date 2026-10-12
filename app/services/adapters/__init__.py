@@ -82,6 +82,12 @@ from app.services.adapters import (
 from app.services.adapters.base import AtsAdapter
 
 ADAPTERS: list[AtsAdapter] = [
+    # Ahead of greenhouse: Toss's job URLs (toss.im/career/job-detail?gh_jid=N)
+    # carry a Greenhouse gh_jid, which greenhouse's scan claims — but Toss's
+    # board isn't public on Greenhouse's API, so that fell back to the page's
+    # one-line tagline (verified 2026-10-12), while Toss's own job-groups
+    # feed has the full description. toss only ever matches toss.im.
+    toss.ADAPTER,
     greenhouse.ADAPTER,
     lever.ADAPTER,
     ashby.ADAPTER,
@@ -110,7 +116,6 @@ ADAPTERS: list[AtsAdapter] = [
     walmart.ADAPTER,
     bestbuy.ADAPTER,
     linecorp.ADAPTER,
-    toss.ADAPTER,
     fullstack.ADAPTER,
     motion_recruitment.ADAPTER,
     oracle_fusion.ADAPTER,

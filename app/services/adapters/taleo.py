@@ -1,9 +1,11 @@
 import re
-from urllib.parse import parse_qs, urlsplit
+from html import unescape
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import httpx
 
 from app.models.enums import AtsType
+from app.services import geo
 from app.services.adapters import base
 from app.services.adapters.base import (
     DEFAULT_MAX_JOBS_PER_CRAWL,
@@ -178,12 +180,82 @@ def extract(html: str) -> ExtractedJobFields:
     )
 
 
+# The plain (unrendered) page does carry the posting after all, in the
+# hidden initialHistory input: a "!|!"-separated, URL- and HTML-escaped
+# list whose rich-text fields (description, qualifications, ...) start with
+# "!*!" and appear twice each. Field order is tenant-configured, so nothing
+# here relies on position: the rich-text fields become the description, the
+# title comes from the "Submission for the position: ... (Job Number: ...)"
+# label, and the location is the first "US-GA-Atlanta"-shaped field
+# (verified 2026-10-12 on Hyatt, whose renders were coming back without the
+# description and storing the site's 170-character meta description).
+_INITIAL_HISTORY_RE = re.compile(r'id="initialHistory"\s+value="([^"]*)"')
+_RICH_TEXT_PREFIX = "!*!"
+_SUBMISSION_TITLE_RE = re.compile(r"Submission for the position: (.+?) - \(Job Number: [^)]+\)")
+
+
+def _location_of(fields: list[str]) -> str | None:
+    """Taleo writes a location broadest-first and hyphenated, in a
+    tenant-chosen shape ("US-GA-Atlanta", "Oklahoma-Edmond", "New
+    Mexico-Mckinley-Gallup-Rio West Mall NM"). Each hyphenated field is
+    rewritten narrowest-first ("Edmond, Oklahoma") and the first one the geo
+    resolver places in a country wins — which also skips lookalikes such as
+    "Full-time"."""
+    for field in fields:
+        parts = [part.strip() for part in field.split("-") if part.strip()]
+        if len(parts) < 2 or len(field) > 80:
+            continue
+        candidate = field if len(parts[0]) <= 2 else ", ".join(reversed(parts[:3]))
+        if geo.resolve_country_for_locations([candidate]):
+            return candidate
+    return None
+
+
+def _from_initial_history(html: str) -> ExtractedJobFields | None:
+    match = _INITIAL_HISTORY_RE.search(html)
+    if match is None:
+        return None
+    fields = [unquote(unescape(raw)).replace("\\:", ":") for raw in match.group(1).split("!|!")]
+    rich = list(dict.fromkeys(f[len(_RICH_TEXT_PREFIX):] for f in fields if f.startswith(_RICH_TEXT_PREFIX)))
+    description = html_to_formatted_text("".join(rich)) if rich else None
+    if not description:
+        return None
+    title = next((m.group(1) for f in fields if (m := _SUBMISSION_TITLE_RE.search(f))), None)
+    return ExtractedJobFields(title=clean_text(title), description=description, location=_location_of(fields))
+
+
+def _scan_from_raw_page(url: str) -> ScanResult | None:
+    try:
+        page = base.fetch_html(url)
+    except httpx.HTTPError:
+        return None
+    fields = _from_initial_history(page.text)
+    if fields is None:
+        return None
+    salary_min, salary_max, salary_currency = base.salary_from_text(fields.description)
+    return ScanResult(
+        success=True,
+        title=fields.title,
+        description=fields.description,
+        location=fields.location,
+        salary_min=salary_min,
+        salary_max=salary_max,
+        salary_currency=salary_currency,
+        raw_html_excerpt=page.text[:20_000],
+        full_html=page.text,
+    )
+
+
 def scan_job_url(url: str) -> ScanResult | None:
     if _match(url) is None:
         return None
     job_id_values = parse_qs(urlsplit(url).query).get("job")
     if not job_id_values:
         return None
+
+    from_raw = _scan_from_raw_page(url)
+    if from_raw is not None:
+        return from_raw
 
     html = fetch_rendered_html(url)
     if html is None:

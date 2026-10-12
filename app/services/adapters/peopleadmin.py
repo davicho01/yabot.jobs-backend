@@ -1,7 +1,11 @@
 import re
 
-from app.models.enums import AtsType
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry
+import httpx
+
+from app.models.enums import AtsType, EmploymentType
+from app.services.adapters import base
+from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, ScanResult, get_with_retry
+from app.services.adapters.text import clean_text, html_to_formatted_text
 
 _PEOPLEADMIN_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _PEOPLEADMIN_URL_RE = re.compile(r"([a-zA-Z0-9-]+\.peopleadmin\.com)", re.IGNORECASE)
@@ -41,6 +45,67 @@ def _board_key(url: str) -> str | None:
     return match.group(1) if match else None
 
 
+# A posting page has no JSON-LD and no useful meta description (a generic
+# scan stored nothing, or one short field — verified 2026-10-12 on Utah, ECU,
+# Winthrop and Sam Houston). The posting is a server-rendered <th>/<td>
+# table whose labels each institution names itself ("Details", "Primary
+# Purpose of Position", "Duties and Responsibilities", ...), so the
+# description is every substantial field in page order under its own label,
+# minus the equal-opportunity boilerplate every posting repeats.
+_POSTING_URL_RE = re.compile(r"[a-zA-Z0-9-]+\.peopleadmin\.com/postings/\d+", re.IGNORECASE)
+_ROW_RE = re.compile(r"<th[^>]*>(.*?)</th>\s*<td[^>]*>(.*?)</td>", re.IGNORECASE | re.DOTALL)
+_TITLE_RE = re.compile(r"<h2[^>]*>(.*?)</h2>", re.IGNORECASE | re.DOTALL)
+_MIN_FIELD_CHARS = 60
+_BOILERPLATE_LABEL_RE = re.compile(r"(?i)\b(eeo|non-?discrimination|equal (employment )?opportunity)\b")
+_LOCATION_LABEL_RE = re.compile(r"(?i)\b(city|location|campus)\b")
+_POSTED_LABEL_RE = re.compile(r"(?i)\b(open|posting|posted) date\b")
+
+
+def _rows(html: str) -> list[tuple[str, str]]:
+    return [(clean_text(label) or "", raw) for label, raw in _ROW_RE.findall(html)]
+
+
+def _description_of(rows: list[tuple[str, str]]) -> str | None:
+    parts = []
+    for label, raw in rows:
+        if _BOILERPLATE_LABEL_RE.search(label) or len(clean_text(raw) or "") < _MIN_FIELD_CHARS:
+            continue
+        parts.append(f"<h3>{label}</h3>{raw}" if label else raw)
+    return html_to_formatted_text("".join(parts))
+
+
+def _field(rows: list[tuple[str, str]], label_re: re.Pattern[str]) -> str | None:
+    return next((clean_text(raw) for label, raw in rows if label_re.search(label) and clean_text(raw)), None)
+
+
+def scan_job_url(url: str) -> ScanResult | None:
+    if not _POSTING_URL_RE.search(url):
+        return None
+    try:
+        page = base.fetch_html(url)
+    except httpx.HTTPError as exc:
+        return ScanResult(success=False, error=str(exc))
+    html = page.text
+    rows = _rows(html)
+    description = _description_of(rows) or base.fallback_description(html)
+    title_match = _TITLE_RE.search(html)
+    posted = _field(rows, _POSTED_LABEL_RE)
+    salary_min, salary_max, salary_currency = base.salary_from_text(description)
+    return ScanResult(
+        success=True,
+        title=(clean_text(title_match.group(1)) if title_match else None) or base.fallback_title(html),
+        description=description,
+        location=_field(rows, _LOCATION_LABEL_RE),
+        employment_type=EmploymentType.UNKNOWN,
+        salary_min=salary_min,
+        salary_max=salary_max,
+        salary_currency=salary_currency,
+        posted_at=base.parse_month_day_year(posted, month_style="%m/%d/%Y"),
+        raw_html_excerpt=html[:20_000],
+        full_html=html,
+    )
+
+
 # No to_board_url — {tenant}.peopleadmin.com is already the canonical
 # shared host, board_url is stored verbatim.
 ADAPTER = AtsAdapter(
@@ -48,4 +113,5 @@ ADAPTER = AtsAdapter(
     match=_match,
     fetch_jobs=_fetch_jobs,
     board_key=_board_key,
+    scan_job_url=scan_job_url,
 )

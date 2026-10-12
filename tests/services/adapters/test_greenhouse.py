@@ -103,3 +103,71 @@ def test_extract_none_when_nothing_matches():
 ])
 def test_is_error_redirect(url, expected):
     assert greenhouse.is_error_redirect(url) == expected
+
+
+# ------------------------------------------------- reading jobs from the API
+
+API_JOB = {
+    "title": "Risk & Controls Manager",
+    "company_name": "Consensys",
+    "location": {"name": "Remote"},
+    "first_published": "2026-09-24T00:00:00Z",
+    "content": "&lt;p&gt;" + "Own the risk program. " * 20 + "&lt;/p&gt;",
+}
+
+
+@pytest.fixture
+def api(monkeypatch):
+    """Fakes Greenhouse's job API; a page fetch fails loudly so a test proves
+    the API path was used. Returns the requested API URLs."""
+    requested = []
+
+    def fake_get_with_retry(url, params=None, timeout=None):
+        requested.append(url)
+        return FakeResponse(json_data=API_JOB)
+
+    def no_page_fetch(url):
+        raise AssertionError(f"page fetched: {url}")
+
+    monkeypatch.setattr(greenhouse, "get_with_retry", fake_get_with_retry)
+    monkeypatch.setattr(greenhouse.base, "fetch_html", no_page_fetch)
+    return requested
+
+
+@pytest.mark.parametrize("url", [
+    "https://job-boards.greenhouse.io/consensys/jobs/8207369",
+    "https://boards.greenhouse.io/consensys/jobs/8207369",
+    "https://job-boards.eu.greenhouse.io/consensys/jobs/8207369",
+])
+def test_hosted_job_is_read_from_the_api(api, url):
+    result = greenhouse.scan_job_url(url)
+
+    assert api == ["https://boards-api.greenhouse.io/v1/boards/consensys/jobs/8207369"]
+    assert result.success and result.title == "Risk & Controls Manager"
+    assert "Own the risk program." in result.description and len(result.description) > 300
+    assert (result.location, str(result.posted_at)) == ("Remote", "2026-09-24")
+
+
+def test_company_page_uses_the_crawl_sources_board(api):
+    with greenhouse.base.scan_board_hint("https://job-boards.greenhouse.io/flyzipline"):
+        result = greenhouse.scan_job_url("https://www.zipline.com/open-roles/7816737003?gh_jid=7816737003")
+
+    assert api == ["https://boards-api.greenhouse.io/v1/boards/flyzipline/jobs/7816737003"]
+    assert result.success
+
+
+def test_api_miss_falls_back_to_the_page(monkeypatch):
+    monkeypatch.setattr(greenhouse, "get_with_retry", lambda *a, **k: FakeResponse(status_code=404))
+    monkeypatch.setattr(greenhouse.httpx, "get", lambda *a, **k: FakeResponse(status_code=404))
+    fetched = []
+
+    def fake_fetch(url):
+        fetched.append(url)
+        return greenhouse.base.FetchedPage(text="<title>Data Engineer</title>", url=url)
+
+    monkeypatch.setattr(greenhouse.base, "fetch_html", fake_fetch)
+
+    result = greenhouse.scan_job_url("https://job-boards.greenhouse.io/consensys/jobs/1")
+
+    assert fetched == ["https://job-boards.greenhouse.io/consensys/jobs/1"]
+    assert result.success and result.title == "Data Engineer"

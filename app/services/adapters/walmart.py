@@ -64,6 +64,9 @@ def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company b
 # server-side as JSON in a `<script id=__NEXT_DATA__>` tag — no separate API
 # call needed (verified live: R-1075582 and a random sample of other
 # requisition IDs across both the Walmart and Sam's Club brands).
+_JOB_NOT_FOUND_PATH = "/job-not-found"
+
+
 def _extract_job_data(html: str) -> dict[str, Any] | None:
     match = _NEXT_DATA_RE.search(html)
     if match is None:
@@ -178,6 +181,12 @@ def scan_job_url(url: str) -> ScanResult | None:
         page = base.fetch_html(url)
     except httpx.HTTPError as exc:
         return ScanResult(success=False, error=str(exc))
+
+    if _JOB_NOT_FOUND_PATH in page.url:
+        # A removed posting redirects here (verified 2026-10-12: all three
+        # sampled empty-description Walmart jobs did) — the posting is gone,
+        # not a page we failed to read.
+        return ScanResult(success=False, error="Walmart redirected to its job-not-found page.", expired=True)
 
     html = page.text
     job_data = _extract_job_data(html)

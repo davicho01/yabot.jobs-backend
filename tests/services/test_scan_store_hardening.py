@@ -179,7 +179,7 @@ def test_apply_scan_result_records_the_latest_scans_browser_use(scan_db, make_so
 
 @pytest.fixture
 def lane_env(monkeypatch):
-    monkeypatch.setattr(jobs, "scan_job_url", lambda url: ScanResult(success=True, title="ok"))
+    monkeypatch.setattr(jobs, "scan_job_url", lambda url, board_url=None: ScanResult(success=True, title="ok"))
     monkeypatch.setattr(jobs.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(jobs, "enqueue_source_scan", lambda source_id, lanes=1: None)
 

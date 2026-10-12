@@ -10,6 +10,7 @@ from app.services.adapters.base import ScanResult
 from app.services.adapters.text import clean_text as _clean_text
 from app.services.adapters.text import html_to_formatted_text as _html_to_formatted_text
 from app.services.company_logos import hiring_org_url
+from app.services.scan_completeness import incomplete_reasons
 
 _TRACKING_PARAM_PREFIXES = ("utm_",)
 _TRACKING_PARAMS = {"gclid", "fbclid", "ref", "igshid"}
@@ -43,7 +44,7 @@ def domain_of(normalized_url: str) -> str:
     return urlsplit(normalized_url).netloc
 
 
-def scan_job_url(url: str) -> ScanResult:
+def scan_job_url(url: str, *, board_url: str | None = None) -> ScanResult:
     """Fetch a job posting page and pull structured job info out of it.
 
     Tries each registered ATS adapter's own scan_job_url in turn (see
@@ -53,10 +54,13 @@ def scan_job_url(url: str) -> ScanResult:
     JobPosting JSON-LD, so they don't need platform-specific scan logic at
     all — Lever, Ashby, BambooHR, ...) falls through to the generic
     JSON-LD/Open-Graph default below.
+
+    board_url is the crawl source's board, when the job came from one —
+    available to adapters as base.scan_board_url() (see its comment).
     """
     browser_fetch.reset_render_attempted()
     result = None
-    with base.scan_page_cache():
+    with base.scan_page_cache(), base.scan_board_hint(board_url):
         for adapter in ADAPTERS:
             if adapter.scan_job_url is None:
                 continue
@@ -67,6 +71,10 @@ def scan_job_url(url: str) -> ScanResult:
             result = _default_scan_job_url(url)
     result = _mark_gone(result)
     result.scanned_via_browser = browser_fetch.render_attempted()
+    if result.success:
+        # Every adapter's result and the generic fallback pass through here,
+        # so this one check covers all platforms.
+        result.incomplete_reasons = incomplete_reasons(result)
     return result
 
 

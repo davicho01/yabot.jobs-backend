@@ -37,6 +37,7 @@ from app.services.job_queue import enqueue_scan, enqueue_source_scan
 from app.services.job_scanner import ScanResult, domain_of, normalize_url, scan_job_url, url_hash
 from app.services.llm_client import LlmError
 from app.services.scan_claims import claim_next_url, has_unclaimed_pending, sources_with_pending_scans
+from app.services.scan_completeness import INCOMPLETE_SCAN_ERROR_PREFIX, is_complete_description
 from app.schemas.job import JobDetailRead, SearchAreaRead
 
 logger = logging.getLogger("app.jobs")
@@ -624,7 +625,7 @@ def process_scan_job(db: Session, url_id: uuid.UUID) -> None:
         if source is not None:
             url_row.crawl_source_id = source.id
 
-    _apply_scan_result(db, url_row, scan_job_url(url_row.url))
+    _apply_scan_result(db, url_row, scan_job_url(url_row.url, board_url=_source_board_url(db, url_row)))
 
 
 def _backoff_seconds(attempts: int) -> float:
@@ -649,6 +650,20 @@ def _mark_scanned(posting: JobPosting, now: datetime) -> None:
         posting.first_scanned_at = now
 
 
+def _schedule_retry(url_row: JobPostingUrl, now: datetime) -> None:
+    """Count a failed (or incomplete) scan attempt: FAILED with the next
+    backoff window, or NEEDS_REVIEW once scan_retry_max_attempts is reached."""
+    url_row.scan_attempts += 1
+    if url_row.scan_attempts >= settings.scan_retry_max_attempts:
+        # Given up: a human has to rescan it (which resets scan_attempts)
+        # for it to be eligible again — see rescan_job_url/rescan_crawl_source.
+        url_row.scan_status = ScanStatus.NEEDS_REVIEW
+        url_row.next_retry_at = None
+    else:
+        url_row.scan_status = ScanStatus.FAILED
+        url_row.next_retry_at = now + timedelta(seconds=_backoff_seconds(url_row.scan_attempts))
+
+
 def _apply_scan_result(db: Session, url_row: JobPostingUrl, result: ScanResult) -> None:
     now = datetime.now(timezone.utc)
     url_row.scan_error = _strip_nul(result.error)
@@ -656,7 +671,24 @@ def _apply_scan_result(db: Session, url_row: JobPostingUrl, result: ScanResult) 
     url_row.scan_claimed_at = None
     url_row.scanned_via_browser = result.scanned_via_browser
 
-    if result.success:
+    if result.success and result.incomplete_reasons:
+        # The page answered but the job content is missing or a teaser (see
+        # app.services.scan_completeness). The URL is retried like a failed
+        # scan and ends in needs_review if it never completes. A posting that
+        # already has a complete description from an earlier scan is kept and
+        # stays searchable, same as for a failed rescan; otherwise what this
+        # scan got is stored but hidden (extraction_status mirrors the URL's
+        # failed/needs_review), until a later scan completes it.
+        url_row.scan_error = _strip_nul(f"{INCOMPLETE_SCAN_ERROR_PREFIX}{'; '.join(result.incomplete_reasons)}")
+        _schedule_retry(url_row, now)
+        posting = db.scalar(select(JobPosting).where(JobPosting.url_id == url_row.id))
+        if posting is None or not is_complete_description(posting.description):
+            posting = _upsert_posting(db, url_row, result, now)
+            posting.extraction_status = url_row.scan_status
+        logger.info(
+            "Incomplete scan of url_id=%s (%s): %s", url_row.id, url_row.domain, "; ".join(result.incomplete_reasons)
+        )
+    elif result.success:
         url_row.scan_status = ScanStatus.SUCCESS
         url_row.scan_attempts = 0
         url_row.next_retry_at = None
@@ -673,15 +705,7 @@ def _apply_scan_result(db: Session, url_row: JobPostingUrl, result: ScanResult) 
             # than waiting for crawls to stop listing it (and for a
             # user-submitted URL, no crawl ever would).
             url_row.closed_at = now
-        url_row.scan_attempts += 1
-        if url_row.scan_attempts >= settings.scan_retry_max_attempts:
-            # Given up: a human has to rescan it (which resets scan_attempts)
-            # for it to be eligible again — see rescan_job_url/rescan_crawl_source.
-            url_row.scan_status = ScanStatus.NEEDS_REVIEW
-            url_row.next_retry_at = None
-        else:
-            url_row.scan_status = ScanStatus.FAILED
-            url_row.next_retry_at = now + timedelta(seconds=_backoff_seconds(url_row.scan_attempts))
+        _schedule_retry(url_row, now)
         # A failed re-scan (transient WAF block, timeout, ...) must not
         # clobber a posting that already has good data from a previous
         # successful scan - same reasoning rescan_job_url already applies.
@@ -716,6 +740,7 @@ def run_source_lane(db: Session, source_id: uuid.UUID) -> int:
     """
     deadline = time.monotonic() + settings.scan_lane_deadline_seconds
     scanned = 0
+    board_url = db.scalar(select(CrawlSource.board_url).where(CrawlSource.id == source_id))
     logger.info("Lane started for source_id=%s.", source_id)
 
     while True:
@@ -725,7 +750,7 @@ def run_source_lane(db: Session, source_id: uuid.UUID) -> int:
 
         fetch_started = time.monotonic()
         try:
-            result = scan_job_url(claimed.url)
+            result = scan_job_url(claimed.url, board_url=board_url)
         except Exception as exc:
             # One page that blows up must not stall the rest of the source
             # (or, left PENDING, be reclaimed and blow up again after the
@@ -927,9 +952,17 @@ def rescan_job_url(db: Session, url_row: JobPostingUrl) -> JobPostingUrl:
     rather than picking up where the automatic sweep left off.
     """
     url_row.scan_attempts = 0
-    result = scan_job_url(url_row.url)
+    result = scan_job_url(url_row.url, board_url=_source_board_url(db, url_row))
     _apply_scan_result(db, url_row, result)
     return url_row
+
+
+def _source_board_url(db: Session, url_row: JobPostingUrl) -> str | None:
+    """The board URL of the crawl source this URL came from, if any — passed
+    to the scanner as a hint (see base.scan_board_url)."""
+    if url_row.crawl_source_id is None:
+        return None
+    return db.scalar(select(CrawlSource.board_url).where(CrawlSource.id == url_row.crawl_source_id))
 
 
 def flag_job_url(
@@ -1084,8 +1117,15 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
         posting.title_key = normalize_title(posting.title)
         posting.primary_posting_id = find_duplicate_primary(db, posting)
         # The official site's copy of a job wins over one found first
-        # elsewhere: it becomes the canonical row, the other its duplicate.
-        if official and posting.primary_posting_id and not _posting_is_official(db, posting.primary_posting_id):
+        # elsewhere: it becomes the canonical row, the other its duplicate —
+        # unless this scan is incomplete, which gets hidden (see
+        # _apply_scan_result) and must not take the complete copy with it.
+        if (
+            official
+            and not result.incomplete_reasons
+            and posting.primary_posting_id
+            and not _posting_is_official(db, posting.primary_posting_id)
+        ):
             claim_primary(db, posting, posting.primary_posting_id)
         # The company's logo domain (see app.services.company_logos) — every
         # scan/rescan may bring a better signal than the last one had.

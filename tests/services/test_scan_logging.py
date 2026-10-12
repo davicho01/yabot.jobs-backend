@@ -57,7 +57,7 @@ def test_each_function_entry_point_turns_info_logging_on(module_name, runtime_pr
 
 @pytest.fixture
 def lane_logs(monkeypatch, caplog):
-    monkeypatch.setattr(jobs, "scan_job_url", lambda url: ScanResult(success=True))
+    monkeypatch.setattr(jobs, "scan_job_url", lambda url, board_url=None: ScanResult(success=True))
     monkeypatch.setattr(jobs.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(jobs, "enqueue_source_scan", lambda source_id, lanes=1: None)
     monkeypatch.setattr(jobs, "_upsert_posting", lambda *args, **kwargs: None)
