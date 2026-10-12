@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 
 import app.models as m
 from app.db.base import Base
-from app.models.enums import ScanStatus
+from app.models.enums import JobSector, ScanStatus
 from app.services.saved_search_alerts import MAX_DIGEST_ITEMS, sweep_saved_searches
 
 _url_counter = itertools.count()
@@ -47,7 +47,13 @@ def _make_user(db, *, email_alerts_enabled: bool = True) -> m.User:
 
 
 def _make_scanned_posting(
-    db, *, scanned_at: datetime, title="Engineer", company="Acme", first_scanned_at: datetime | None = None
+    db,
+    *,
+    scanned_at: datetime,
+    title="Engineer",
+    company="Acme",
+    first_scanned_at: datetime | None = None,
+    sector=JobSector.UNKNOWN,
 ) -> m.JobPosting:
     n = next(_url_counter)
     url = m.JobPostingUrl(
@@ -65,6 +71,7 @@ def _make_scanned_posting(
         extraction_status=ScanStatus.SUCCESS,
         scanned_at=scanned_at,
         first_scanned_at=first_scanned_at or scanned_at,  # a new job unless told otherwise
+        sector=sector,
     )
     db.add(posting)
     db.commit()
@@ -237,3 +244,30 @@ def test_sweep_alerts_a_new_posting_completed_by_a_later_retry(send, db):
 
     assert sweep_saved_searches(db, now=now) == 1
     send.assert_called_once()
+
+
+@patch("app.services.saved_search_alerts.send_saved_search_digest_email")
+def test_sweep_limits_a_sector_search_to_that_sector(send, db):
+    now = datetime.now(timezone.utc)
+    user = _make_user(db)
+    _make_saved_search(db, user, sector=JobSector.HEALTHCARE, created_at=now - timedelta(days=1))
+    _make_scanned_posting(db, scanned_at=now, title="Registered Nurse", sector=JobSector.HEALTHCARE)
+    _make_scanned_posting(db, scanned_at=now, title="Backend Engineer", sector=JobSector.ENGINEERING_TECH)
+
+    assert sweep_saved_searches(db, now=now) == 1
+    assert [d.posting.title for d in send.call_args.kwargs["matches"]] == ["Registered Nurse"]
+    assert "sector=healthcare" in send.call_args.kwargs["board_url"]
+
+
+@patch("app.services.saved_search_alerts.send_saved_search_digest_email")
+def test_sweep_without_a_sector_covers_every_sector_and_links_to_all(send, db):
+    now = datetime.now(timezone.utc)
+    user = _make_user(db)
+    _make_saved_search(db, user, created_at=now - timedelta(days=1))
+    _make_scanned_posting(db, scanned_at=now, title="Registered Nurse", sector=JobSector.HEALTHCARE)
+    _make_scanned_posting(db, scanned_at=now, title="Backend Engineer", sector=JobSector.ENGINEERING_TECH)
+
+    assert sweep_saved_searches(db, now=now) == 1
+    assert len(send.call_args.kwargs["matches"]) == 2
+    # No sector param would open the board on its tech default.
+    assert "sector=all" in send.call_args.kwargs["board_url"]

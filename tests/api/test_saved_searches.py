@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 import app.models as m
 from app.api.routes.saved_searches import create_saved_search, delete_saved_search, list_saved_searches
@@ -31,6 +32,18 @@ def test_create_saved_search_stores_the_given_filters(db):
         100000,
     )
     assert created.last_alerted_at is None  # never swept yet
+    assert created.sector is None  # every sector, not the board's tech default
+
+
+def test_create_saved_search_stores_a_sector(db):
+    created = create_saved_search(SavedSearchCreate(sector="healthcare"), current_user=_user(), db=db)
+
+    assert created.sector == "healthcare"
+
+
+def test_saved_search_rejects_an_unknown_sector():
+    with pytest.raises(ValidationError):
+        SavedSearchCreate(sector="all")
 
 
 def test_list_saved_searches_is_scoped_to_the_current_user_newest_first(db):
