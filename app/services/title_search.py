@@ -62,6 +62,7 @@ LEVEL_PHRASES: dict[str, str] = {
     "senior": "senior", "sr": "senior", "snr": "senior", "lead": "senior", "tech lead": "senior", "team lead": "senior",
     "staff": "staff", "senior staff": "staff", "senior lead": "staff", "sr lead": "staff",
     "principal": "principal", "senior principal": "principal", "distinguished": "principal", "fellow": "principal",
+    "associate principal": "staff",  # the rung below principal, not a junior associate
     "chief architect": "principal",
     # Management
     "manager": "manager", "supervisor": "manager", "assistant manager": "manager",
@@ -76,13 +77,23 @@ LEVEL_PHRASES: dict[str, str] = {
     "cio": "executive", "ciso": "executive", "cmo": "executive", "cpo": "executive", "president": "executive",
 }
 
-# Grade numerals ("Engineer II", "Analyst 3") — only read as a level after
-# another word, so a query that is just "2" or a title starting "3D …" isn't.
+# Grade numerals ("Engineer II", "Analyst 3") — only read as a level right
+# after a job word, so a tech version ("Vue 3", "Python 3") or a title
+# starting "3D …" isn't.
 NUMERAL_LEVELS: dict[str, str] = {
     "i": "junior", "1": "junior",
     "ii": "mid", "2": "mid",
     "iii": "senior", "3": "senior",
     "iv": "staff", "4": "staff",
+}
+_GRADED_WORDS = {
+    "engineer", "engineers", "developer", "analyst", "scientist", "technician", "specialist", "administrator",
+    "architect", "consultant", "associate", "programmer", "designer", "tester", "officer", "coordinator",
+    "representative", "level", "grade", "sde", "swe", "dev", "technologist", "researcher", "scheduler",
+    "support", "operator", "simulation", "advisor", "professional", "planner", "engineering",
+    # "ENGINEER MECHANICAL 3": a discipline after the noun, then the grade
+    "mechanical", "electrical", "electromechanical", "industrial", "civil", "chemical", "structural", "software",
+    "systems", "hardware", "test", "manufacturing", "process", "quality",
 }
 
 # --- Roles ------------------------------------------------------------------
@@ -197,6 +208,10 @@ ROLE_PHRASES: dict[str, str] = {
 # neither expand nor get split into misleading parts.
 LITERAL_PHRASES = {
     "account manager", "case manager", "care manager", "relationship manager", "property manager",
+    # Individual-contributor jobs named "… manager" (the manager level means
+    # managing people — prod sample, 2026-10-12)
+    "success manager", "customer success manager", "technical success manager", "technical account manager",
+    "partner manager", "community manager", "release manager", "engagement manager",
     "security officer", "security guard", "security specialist",
     "front end cashier", "front end associate", "front end supervisor", "front end mechanic",
     "staff nurse", "staff accountant", "staff pharmacist", "staff rn", "staff attorney",
@@ -325,7 +340,7 @@ def _read(tokens: list[str], sector: str | None) -> _Reading:
             break
         else:
             token = tokens[i]
-            if i > 0 and token in NUMERAL_LEVELS:
+            if i > 0 and token in NUMERAL_LEVELS and tokens[i - 1] in _GRADED_WORDS:
                 levels.append((NUMERAL_LEVELS[token], True))
             elif token not in _STOPWORDS:
                 residual.append(token)
