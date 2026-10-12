@@ -1,7 +1,9 @@
-"""One-shot fan-out for the daily discovery crawl.
+"""One-shot fan-out for the discovery crawl.
 
-Reads every active, currently-unclaimed CrawlSource and publishes one Pub/Sub
-message per source to the crawl-source-requests topic, then exits —
+Reads the active, currently-unclaimed CrawlSources that are due (each source
+has its own adaptive crawl interval — see app.services.crawl_schedule) and
+publishes one Pub/Sub message per source to the crawl-source-requests topic,
+at most settings.crawl_dispatch_batch_size per run, then exits —
 crawl_worker.py does the actual per-source discovery work. Keeping dispatch
 and processing separate means many companies/boards can be crawled in
 parallel by running multiple crawl_worker.py processes, instead of one
@@ -28,7 +30,8 @@ Usage: python crawl_dispatcher.py
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import or_, select
+from sqlalchemy import case, func, or_, select
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.log_config import configure_logging
@@ -43,33 +46,80 @@ configure_logging()
 logger = logging.getLogger("app.crawl_dispatcher")
 
 
+def _due_sources(db: Session, now: datetime) -> list[CrawlSource]:
+    """Active official sources that are unclaimed and due (see
+    app.services.crawl_schedule), most overdue first, at most
+    settings.crawl_dispatch_batch_size of them — the rest wait for the next
+    run, so a backlog (Monday morning, a first rollout) is spread out instead
+    of bursting crawl-worker and Cloud SQL.
+
+    Due means next_crawl_at has passed (NULL: never scheduled), or the last
+    crawl is older than the current maximum interval — so lowering
+    settings.crawl_max_interval_minutes takes effect right away instead of
+    waiting out next_crawl_at values set under the old maximum.
+    """
+    claim_cutoff = now - timedelta(seconds=settings.crawl_claim_ttl_seconds)
+    max_interval_cutoff = now - timedelta(minutes=settings.crawl_max_interval_minutes)
+    # Only companies' own sites are crawled: a job board (is_official
+    # false) re-lists other companies' jobs, which their official sites
+    # already give us first-hand (see app.services.company_names).
+    return list(
+        db.scalars(
+            select(CrawlSource)
+            .where(
+                CrawlSource.status == CrawlSourceStatus.ACTIVE,
+                CrawlSource.is_official.is_(True),
+                or_(CrawlSource.crawl_claimed_at.is_(None), CrawlSource.crawl_claimed_at <= claim_cutoff),
+                or_(
+                    CrawlSource.next_crawl_at.is_(None),
+                    CrawlSource.next_crawl_at <= now,
+                    CrawlSource.last_crawled_at <= max_interval_cutoff,
+                ),
+            )
+            .order_by(CrawlSource.next_crawl_at.asc().nulls_first())
+            .limit(settings.crawl_dispatch_batch_size)
+        )
+    )
+
+
+def _log_interval_distribution(db: Session) -> None:
+    """One line for tuning the schedule: how many active sources sit at each
+    crawl interval."""
+    interval = CrawlSource.crawl_interval_minutes
+    tier = case(
+        (interval <= 120, "<=2h"),
+        (interval <= 720, "<=12h"),
+        (interval <= 1440, "<=1d"),
+        else_=">1d",
+    )
+    counts = dict(
+        db.execute(
+            select(tier, func.count())
+            .where(CrawlSource.status == CrawlSourceStatus.ACTIVE, CrawlSource.is_official.is_(True))
+            .group_by(tier)
+        ).all()
+    )
+    logger.info("Crawl interval distribution: %s", counts)
+
+
 def main() -> None:
-    # yabot-jobs-browser (the shared headless-Chromium rendering service
-    # several ATS adapters need — see app.services.browser_fetch) sits at
-    # min-instances=0 between dispatch cycles to avoid paying for warm
-    # Chromium instances 24/7 — see gcp_admin.warm_up_browser_scaler's own
-    # docstring for why this has to happen here (and in
-    # retry_failed_scans.py) rather than relying on browser_scaler.py alone.
-    warm_up_browser_scaler()
-
-    ensure_topic()
-
     now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(seconds=settings.crawl_claim_ttl_seconds)
 
     db = SessionLocal()
     try:
-        # Only companies' own sites are crawled: a job board (is_official
-        # false) re-lists other companies' jobs, which their official sites
-        # already give us first-hand (see app.services.company_names).
-        sources = db.scalars(
-            select(CrawlSource).where(
-                CrawlSource.status == CrawlSourceStatus.ACTIVE,
-                CrawlSource.is_official.is_(True),
-                or_(CrawlSource.crawl_claimed_at.is_(None), CrawlSource.crawl_claimed_at <= cutoff),
-            )
-        ).all()
-        logger.info("Dispatching crawl for %d unclaimed active source(s).", len(sources))
+        sources = _due_sources(db, now)
+        logger.info("Dispatching crawl for %d due source(s).", len(sources))
+        if sources:
+            # yabot-jobs-browser (the shared headless-Chromium rendering
+            # service several ATS adapters and many job pages need — see
+            # app.services.browser_fetch) sits at min-instances=0 between
+            # dispatch cycles to avoid paying for warm Chromium instances
+            # 24/7 — see gcp_admin.warm_up_browser_scaler's own docstring for
+            # why this has to happen here (and in retry_failed_scans.py)
+            # rather than relying on browser_scaler.py alone. Skipped when
+            # nothing is due: no crawls, no scans to warm up for.
+            warm_up_browser_scaler()
+            ensure_topic()
         for source in sources:
             # Claimed (and committed) *before* publishing, not after: if
             # publishing then fails, the source just waits out the TTL
@@ -96,6 +146,8 @@ def main() -> None:
             logger.info("Woke scan lanes for %d source(s) with pending URLs.", woken)
         except Exception:
             logger.exception("Sweep for pending scans failed.")
+
+        _log_interval_distribution(db)
     finally:
         db.close()
 

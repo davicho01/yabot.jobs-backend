@@ -6,8 +6,8 @@ NEEDS_REVIEW instead — a dead end until a human rescans it — and is never pi
 up here.
 
 Deployed with its own hourly Cloud Scheduler trigger, separate from
-crawl_dispatcher.py's daily discovery cadence — a FAILED row's backoff windows
-are as short as an hour, far finer-grained than discovery needs to run.
+crawl_dispatcher.py's discovery cadence (weekday business hours only) — a
+FAILED row's backoff windows are as short as an hour and run around the clock.
 
 This script doesn't know or care how it's invoked — point any scheduler at it
 (cron, GCP Cloud Scheduler + a Cloud Run Job, GitHub Actions, etc.) with

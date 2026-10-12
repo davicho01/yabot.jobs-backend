@@ -88,6 +88,20 @@ class Settings(BaseSettings):
     # is never mistaken for one whose message/worker was lost.
     crawl_claim_ttl_seconds: float = 600.0
 
+    # Adaptive crawl schedule (see app.services.crawl_schedule): each source's
+    # interval halves after a crawl that found new jobs and grows 1.5x after
+    # one that didn't, clamped to this range. Chosen 2026-10-12 from prod
+    # posting rates: 2h-3d is ~11k crawls/weekday, ~67 min average discovery
+    # delay. Override via env vars on crawl-worker and the crawl-dispatcher
+    # job; the DB allows 5-4320 (see CrawlSource), so no migration is needed.
+    # crawl-dispatch must run at least as often as the minimum.
+    crawl_min_interval_minutes: int = 120
+    crawl_max_interval_minutes: int = 4320
+    # Most sources crawl_dispatcher.py publishes per run (~1.5x the expected
+    # per-run load), so a backlog (Monday morning, a first rollout) is spread
+    # across runs instead of bursting.
+    crawl_dispatch_batch_size: int = 600
+
     # Retry backoff for a FAILED scan (see app.services.jobs.wake_retryable_failed_scans
     # and retry_failed_scans.py, its hourly-cron entrypoint). Each consecutive failure
     # multiplies the previous wait, capped at scan_retry_max_seconds: base * multiplier
@@ -102,8 +116,10 @@ class Settings(BaseSettings):
 
     # How long a crawl-sourced URL can go unlisted on its board before it
     # counts as closed (see app.services.jobs.record_board_presence). Only a
-    # healthy crawl ever closes anything, and crawl-dispatch runs 2x/day, so
-    # 36h means a job has to be missing from about three crawls in a row.
+    # healthy crawl ever closes anything. This is the floor: a source crawled
+    # less often waits 3x its own crawl interval instead (see
+    # app.services.crawl_schedule.closed_after_hours), so a job always has to
+    # be missing from about three crawls in a row.
     job_closed_after_unseen_hours: float = 36.0
 
     # S3-compatible object storage for uploaded resumes / generated tailored

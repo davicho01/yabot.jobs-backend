@@ -175,9 +175,9 @@ def test_bulk_register_discovered_urls_creates_a_pending_posting_per_new_url(sca
     source = make_source()
     urls = [f"https://example.com/jobs/{i}" for i in range(5)]
 
-    failed = bulk_register_discovered_urls(scan_db, urls, source.id)
+    failed, created = bulk_register_discovered_urls(scan_db, urls, source.id)
 
-    assert failed == 0
+    assert (failed, created) == (0, 5)
     url_rows = scan_db.scalars(select(m.JobPostingUrl)).all()
     assert {row.url for row in url_rows} == set(urls)
     assert all(row.crawl_source_id == source.id for row in url_rows)
@@ -197,9 +197,9 @@ def test_bulk_register_discovered_urls_is_a_no_op_for_already_known_urls(scan_db
     )
     scan_db.commit()
 
-    failed = bulk_register_discovered_urls(scan_db, [raw_url], source.id)
+    failed, created = bulk_register_discovered_urls(scan_db, [raw_url], source.id)
 
-    assert failed == 0
+    assert (failed, created) == (0, 0)
     assert scan_db.scalar(select(func.count()).select_from(m.JobPostingUrl)) == 1
     assert scan_db.scalar(select(func.count()).select_from(m.JobPosting)) == 0
 
@@ -208,18 +208,18 @@ def test_bulk_register_discovered_urls_dedupes_repeats_within_the_same_batch(sca
     source = make_source()
     raw_url = "https://example.com/jobs/repeated"
 
-    failed = bulk_register_discovered_urls(scan_db, [raw_url, raw_url, raw_url], source.id)
+    failed, created = bulk_register_discovered_urls(scan_db, [raw_url, raw_url, raw_url], source.id)
 
-    assert failed == 0
+    assert (failed, created) == (0, 1)
     assert scan_db.scalar(select(func.count()).select_from(m.JobPostingUrl)) == 1
 
 
 def test_bulk_register_discovered_urls_counts_unparseable_urls_without_aborting_the_batch(scan_db, make_source):
     source = make_source()
 
-    failed = bulk_register_discovered_urls(scan_db, [None, "https://example.com/jobs/good"], source.id)
+    failed, created = bulk_register_discovered_urls(scan_db, [None, "https://example.com/jobs/good"], source.id)
 
-    assert failed == 1
+    assert (failed, created) == (1, 1)
     url_rows = scan_db.scalars(select(m.JobPostingUrl)).all()
     assert [row.url for row in url_rows] == ["https://example.com/jobs/good"]
 

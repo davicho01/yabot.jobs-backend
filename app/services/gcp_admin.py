@@ -162,8 +162,9 @@ _SECTOR_WARMUP_MIN_INSTANCES = 4
 def warm_up_browser_scaler() -> None:
     """Warm up yabot-jobs-browser (and yabot-jobs-sector) immediately and turn
     browser_scaler.py's tick back on, for any caller whose own work might need a browser render
-    (see app.services.browser_fetch) — crawl_dispatcher.py's 3x/day and
-    manually-triggered runs, and retry_failed_scans.py's hourly sweep, both
+    (see app.services.browser_fetch) — crawl_dispatcher.py's scheduled
+    (whenever anything is due) and manually-triggered runs, and
+    retry_failed_scans.py's hourly sweep, both
     call this at the top of their own main(). Without it, a scan that falls
     between crawl_dispatcher.py runs hits a cold (min-instances=0) browser
     with nothing warming it back up — verified live 2026-09-28: an IBM scan

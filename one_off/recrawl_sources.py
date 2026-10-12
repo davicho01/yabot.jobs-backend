@@ -1,4 +1,4 @@
-"""One-off re-fan-out of the daily discovery crawl for a subset of sources.
+"""One-off re-fan-out of the discovery crawl for a subset of sources.
 
 Same mechanism as crawl_dispatcher.py — publishes one Pub/Sub message per
 matching active CrawlSource, which crawl_worker.py then processes through

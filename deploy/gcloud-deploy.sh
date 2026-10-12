@@ -228,7 +228,7 @@ gcloud run jobs deploy backfill-country \
 # ---------------------------------------------------------------------------
 # 3c. generate-job-pages-backfill — Cloud Run Job, one-off: renders every
 #     per-job SEO page (/job/{url_id}, app.services.static_job_pages) at
-#     once. The twice-daily generate-static-job-pages function (§10) keeps
+#     once. The scheduled generate-static-job-pages function (§10) keeps
 #     them up to date incrementally afterwards, but a first full render of
 #     every live job won't fit in its 540s timeout. Also the way to force a
 #     re-render after a template change, though bumping
@@ -312,9 +312,10 @@ gcloud run services update worker \
 # Instance caps: worker 30, crawl-worker 10 (since 2026-10-02; were 55/35 by
 # hand, 60/20 here). Every instance holds a Cloud SQL connection and the
 # instance (db-custom-1-3840) has max_connections=100. At 55/35, every
-# twice-daily crawl burst (crawl-dispatch, 1pm/9pm ET) ran it out of
+# twice-daily crawl burst (crawl-dispatch, then at 1pm/9pm ET) ran it out of
 # connections (1,838 refused on 2026-10-01's 1pm burst); 30 + 10 is ~50 at
-# full burst, leaving the API, MCP and scheduled functions room.
+# full burst, leaving the API, MCP and scheduled functions room. Since
+# 2026-10-12 crawls are spread over 30-minute dispatch runs instead.
 # --max-instances caps each *revision*: a deploy runs two for a few minutes
 # (the old one draining in-flight requests while the new one scales up),
 # which is how 55-instance caps hit 101-111 active instances. Avoid
@@ -379,18 +380,21 @@ gcloud run jobs add-iam-policy-binding crawl-dispatcher \
   --member="serviceAccount:${PROJECT_ID}@appspot.gserviceaccount.com" \
   --role="roles/run.invoker"
 
-# 2x/day, 1pm and 9pm America/New_York: postings trickle in through business
-# hours (~9am-6pm local, so ~9am-9pm ET once PT is folded in), so a morning
-# run would mostly just re-serve the prior night's crawl. 1pm catches the
-# ET/CT morning wave; 9pm catches the rest of the day including PT (whose
-# posting activity has already tailed off by 9pm ET = 6pm PT). Weekdays only
-# (Mon-Fri): no collection runs on weekends.
+# Every 30 minutes, 7am-10pm America/New_York, weekdays only (no collection
+# runs on weekends). Each run only crawls the sources that are due: every
+# source has its own adaptive interval (2h-3d by default, see
+# app.services.crawl_schedule and settings.crawl_min/max_interval_minutes),
+# short for boards that keep posting and long for quiet ones, and a run
+# dispatches at most settings.crawl_dispatch_batch_size of them. This replaced
+# crawling every source at 1pm and 9pm (2026-10-12): those bursts ran Cloud SQL
+# out of connections, and the busiest boards overflowed their 500-URL listing
+# between crawls. Run at least as often as the minimum interval.
 # --oauth-service-account-email (not --oidc-...) because the target is the
 # Run Admin REST API, not the job's own service URL.
 
 gcloud scheduler jobs create http crawl-dispatch-hourly \
   --location="$REGION" \
-  --schedule="0 13,21 * * 1-5" \
+  --schedule="*/30 7-22 * * 1-5" \
   --time-zone="America/New_York" \
   --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/crawl-dispatcher:run" \
   --http-method=POST \
@@ -403,7 +407,7 @@ gcloud scheduler jobs create http crawl-dispatch-hourly \
 #     always-on min-instances guess — see browser_scaler.py's own docstring.
 #
 #     crawl_dispatcher.py resumes browser-scaler-tick at the top of its own
-#     main() (whether that run came from the 3x/day schedule above or a
+#     main() (whether that run came from the schedule above or a
 #     manual `gcloud run jobs execute crawl-dispatcher`); browser_scaler.py
 #     pauses it again itself once it observes crawl-worker and worker have
 #     both been idle for a full lookback window — crawl_dispatcher.py
@@ -488,14 +492,11 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
 #    respect (HTTP-triggered, no-allow-unauthenticated, OIDC-invoked by
 #    Scheduler, Cloud SQL attached to the underlying Cloud Run service
 #    afterward since `gcloud functions deploy` has no --set-cloudsql-instances
-#    flag). 2x/day, an hour after each crawl-dispatch run (2pm/10pm
-#    America/New_York, one hour after the 1pm/9pm dispatch above) rather
-#    than hourly: new postings only actually show up in bursts right after a
-#    dispatch now that crawl-dispatch itself only runs 2x/day (see that
-#    section above), so an hourly sweep was mostly finding nothing new.
-#    Verified live 2026-09-28 (back when dispatch ran at 9am): new rows
-#    stopped appearing ~25 minutes after dispatch, so the 1-hour buffer
-#    before this alerts run has margin to spare.
+#    flag). 2x/day (2pm/10pm America/New_York). That timing was chosen as
+#    an hour after the old 1pm/9pm crawl-dispatch bursts; since 2026-10-12
+#    crawl-dispatch runs every 30 minutes and new postings land throughout
+#    the day, so alerts simply batch whatever was found since the last run.
+#    Run it more often if alerts should arrive sooner.
 # ---------------------------------------------------------------------------
 
 gcloud functions deploy saved-search-alerts \
@@ -632,17 +633,16 @@ gcloud scheduler jobs create http retry-failed-scans-hourly \
 #     every respect except what it talks to: it writes straight into the
 #     *frontend's* S3 bucket/CloudFront distribution
 #     (SEO_PAGES_BUCKET/SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID above), not
-#     Postgres/Pub/Sub. 2x/day, same time as saved-search-alerts-hourly
-#     (2pm/10pm America/New_York, one hour after the 1pm/9pm crawl-dispatch
-#     above) — was every 30 minutes on its own independent cadence (see
-#     generate_static_job_pages.py's own docstring for the original
-#     freshness/cost reasoning), but that predates crawl-dispatch itself
-#     dropping to 2x/day: postings now only actually land in bursts right
-#     after a dispatch, so a 30-minute sweep was mostly re-rendering
-#     unchanged pages. No point regenerating the static pages more often
-#     than alerts re-scan for new rows. Verified live 2026-09-28 (back when
-#     dispatch ran at 9am): new rows stopped appearing ~25 minutes after
-#     dispatch, so the 1-hour buffer before this run has margin to spare.
+#     Postgres/Pub/Sub. Every 2 hours, 9am-11pm America/New_York, weekdays
+#     (since 2026-10-12): crawl-dispatch now runs every 30 minutes and each
+#     source is crawled on its own adaptive interval (2h minimum), so new
+#     postings land throughout the day instead of in two bursts. Every 2
+#     hours matches that minimum, and the 11pm run picks up the last
+#     crawls of the day (dispatch stops at 10:30pm). Was 2x/day (2pm/10pm,
+#     an hour after the old 1pm/9pm dispatch) and every 30 minutes before
+#     that; each run regenerates today's pages and re-renders only job
+#     pages whose content changed, and invalidations are collapsed to a few
+#     wildcards per run (static_pages.collapse_invalidation_paths).
 #
 #     IMPORTANT: the yabot-jobs-backend IAM user (whose key/secret are
 #     already in the resume-storage-access-key/resume-storage-secret-key
@@ -681,7 +681,7 @@ gcloud functions add-invoker-policy-binding generate-static-job-pages \
 
 gcloud scheduler jobs create http generate-static-job-pages-30min \
   --location="$REGION" \
-  --schedule="0 14,22 * * 1-5" \
+  --schedule="0 9-23/2 * * 1-5" \
   --time-zone="America/New_York" \
   --uri="$GENERATE_STATIC_JOB_PAGES_FUNCTION_URL" \
   --http-method=POST \
@@ -695,7 +695,7 @@ gcloud scheduler jobs create http generate-static-job-pages-30min \
 #     Looks for the official careers site of companies whose jobs were only
 #     found elsewhere (see app.services.official_sites): a small batch per
 #     run, so a 4am America/New_York daily run is plenty and stays clear of
-#     the 1pm/9pm crawl dispatch. Uses logo.dev's brand search for a
+#     crawl dispatch (7am-10:30pm). Uses logo.dev's brand search for a
 #     company's domain, hence its key. Gets only what it uses plus the
 #     settings app.core.config requires to start — not COMMON_ENV/
 #     COMMON_SECRETS (no browser-fetch, sector API or LLM; it fetches with

@@ -21,7 +21,7 @@ logger = logging.getLogger("app.crawl_sources")
 
 def register_discovered_board(db: Session, url: str, *, needs_review: bool = False) -> CrawlSource | None:
     """Best-effort: note the board a submitted job URL belongs to, so the
-    daily crawler picks up that company's future postings too, and so the
+    crawler picks up that company's future postings too, and so the
     submitted URL itself can be attributed back to that board (see caller:
     get_or_create_job_posting sets JobPostingUrl.crawl_source_id from the
     row returned here). Never raises — a job submission must never fail
