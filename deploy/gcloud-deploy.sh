@@ -226,6 +226,27 @@ gcloud run jobs deploy backfill-country \
   --labels=function=backfill-country
 
 # ---------------------------------------------------------------------------
+# 3b'. redo-dedup — Cloud Run Job, one-off. Same image/secrets/env, command
+#     `python -m one_off.redo_dedup` — re-groups existing postings under the
+#     current dedup rule (app.services.job_dedup; see the script's docstring).
+#     Execute by hand, --dry-run first, then one company, then everything.
+#     --args replaces the deployed args, so pass the module too:
+#       gcloud run jobs execute redo-dedup --region="$REGION" --args=-m,one_off.redo_dedup,--dry-run --wait
+#       gcloud run jobs execute redo-dedup --region="$REGION" --args=-m,one_off.redo_dedup,--company-key,autozone --wait
+#       gcloud run jobs execute redo-dedup --region="$REGION" --wait
+# ---------------------------------------------------------------------------
+
+gcloud run jobs deploy redo-dedup \
+  --image="$IMAGE_TAG" \
+  --region="$REGION" \
+  --command=python --args=-m,one_off.redo_dedup \
+  --set-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION" \
+  --set-env-vars="$COMMON_ENV" \
+  --set-secrets="$COMMON_SECRETS" \
+  --task-timeout=3600 \
+  --labels=function=redo-dedup
+
+# ---------------------------------------------------------------------------
 # 3c. generate-job-pages-backfill — Cloud Run Job, one-off: renders every
 #     per-job SEO page (/job/{url_id}, app.services.static_job_pages) at
 #     once. The scheduled generate-static-job-pages function (§10) keeps

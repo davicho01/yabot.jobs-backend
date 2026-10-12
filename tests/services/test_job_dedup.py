@@ -1,6 +1,10 @@
-from difflib import SequenceMatcher
+from datetime import datetime, timezone
 
-from app.services.job_dedup import _TITLE_SIMILARITY_THRESHOLD, _metro_level_codes, normalize_company_name, normalize_title
+from app.models import JobPosting
+from app.services import jobs
+from app.services.adapters.base import ScanResult
+from app.services.job_dedup import location_key, normalize_company_name, normalize_title, same_place
+from app.services.scan_completeness import incomplete_reasons
 
 
 def test_normalize_company_name_strips_legal_suffixes_and_punctuation():
@@ -37,43 +41,87 @@ def test_normalize_title_none_and_blank():
     assert normalize_title("") is None
 
 
-def test_title_similarity_threshold_separates_distinct_seniorities():
-    # The exact scenario find_duplicate_primary must not collapse: two real,
-    # different roles at the same company should score below the threshold.
-    a = normalize_title("Software Engineer")
-    b = normalize_title("Senior Software Engineer")
-    similarity = SequenceMatcher(None, a, b).ratio()
-    assert similarity < _TITLE_SIMILARITY_THRESHOLD
+def test_reworded_punctuation_normalizes_to_the_same_title_key():
+    # Titles now match exactly, so rewordings that only differ in punctuation
+    # must still produce one key.
+    assert normalize_title("Senior Product Manager, Growth") == normalize_title("Senior Product Manager - Growth")
 
 
-def test_title_similarity_threshold_matches_the_same_role_reworded():
-    a = normalize_title("Senior Product Manager, Growth")
-    b = normalize_title("Senior Product Manager - Growth")
-    similarity = SequenceMatcher(None, a, b).ratio()
-    assert similarity >= _TITLE_SIMILARITY_THRESHOLD
+def test_location_key_ignores_order_case_and_repeats():
+    assert location_key(["Newark, DE", "Jersey City, NJ"]) == location_key(["jersey city,  nj", "Newark, DE", "Newark, DE"])
+    assert location_key([]) == ()
+    assert location_key(None) == ()
 
 
-def test_metro_level_codes_excludes_bare_state_codes():
-    # Regression: verified live against this product's own data — Amazon
-    # posts an identical "Infra Delivery Install Technician" title at dozens
-    # of distinct PA facilities. Berwick (metro 14100) and Fairless Hills
-    # (metro 37980) are genuinely different openings, but both file under the
-    # bare state code "PA" too (see app.services.geo.resolve_area_codes) —
-    # before this filter existed, that shared state code alone was enough to
-    # wrongly merge them. Only the 5-digit metro/micro code should count.
-    assert _metro_level_codes(["14100", "PA"]) == {"14100"}
-    assert _metro_level_codes(["37980", "PA"]) == {"37980"}
-    assert _metro_level_codes(["14100", "PA"]) & _metro_level_codes(["37980", "PA"]) == set()
+AUSTIN = [[30.2672, -97.7431]]
+NYC = [[40.7128, -74.006]]
 
 
-def test_metro_level_codes_state_only_or_empty_yields_no_codes():
-    # A posting with no specific city (just a state, or nothing extracted at
-    # all) has no positive location evidence to match on — find_duplicate_primary
-    # treats that as "don't merge" rather than guessing.
-    assert _metro_level_codes(["PA"]) == set()
-    assert _metro_level_codes([]) == set()
-    assert _metro_level_codes(None) == set()
+def test_same_site_same_location_is_the_same_place():
+    # CVS-style repeats: two requisitions for one store.
+    store = ["05044 - South Carolina CVS Pharmacy, L.L.C., United States of America"]
+    assert same_place(store, [], "cvs.wd1.myworkdayjobs.com", list(store), [], "cvs.wd1.myworkdayjobs.com")
 
 
-def test_metro_level_codes_matches_when_the_same_metro_recurs():
-    assert _metro_level_codes(["14100", "PA"]) & _metro_level_codes(["14100", "PA"]) == {"14100"}
+def test_same_site_different_store_in_one_metro_is_not():
+    # Regression from prod (2026-10-12): Target's Bridgehampton and Staten
+    # Island stores were merged for sharing the NYC metro.
+    assert not same_place(
+        ["2102 Montauk Hwy, Bridgehampton,NY"], NYC, "target.wd5.myworkdayjobs.com",
+        ["1520 Forest Ave, Staten Island,NY"], NYC, "target.wd5.myworkdayjobs.com",
+    )
+
+
+def test_across_sites_a_shared_city_is_the_same_place():
+    assert same_place(["Austin, TX"], AUSTIN, "boards.greenhouse.io", ["Austin, Texas, United States"], AUSTIN, "acme.com")
+
+
+def test_across_sites_different_cities_are_not():
+    assert not same_place(["Austin, TX"], AUSTIN, "boards.greenhouse.io", ["New York, NY"], NYC, "acme.com")
+
+
+def test_no_location_is_never_the_same_place():
+    assert not same_place([], [], "a.com", [], [], "a.com")
+    assert not same_place(None, None, "a.com", ["Austin, TX"], AUSTIN, "b.com")
+
+
+# ------------------------------------------------- through a real scan write
+
+FULL = "We are hiring. " * 30
+
+
+def _scan(scan_db, url_row, title="Engineer", location="Austin, TX") -> JobPosting:
+    result = ScanResult(success=True, title=title, company_name="Acme", location=location, description=FULL)
+    result.incomplete_reasons = incomplete_reasons(result)
+    jobs._apply_scan_result(scan_db, url_row, result)
+    scan_db.commit()
+    return scan_db.query(JobPosting).filter_by(url_id=url_row.id).one()
+
+
+def test_scan_links_a_repeat_at_the_same_location(scan_db, make_url):
+    first = _scan(scan_db, make_url(None))
+    second = _scan(scan_db, make_url(None))
+    assert second.primary_posting_id == first.id
+
+
+def test_scan_keeps_part_time_and_full_time_apart(scan_db, make_url):
+    # Regression from prod (2026-10-12): the 0.85 fuzzy match merged these.
+    _scan(scan_db, make_url(None), title="Part Sales Manager – Part Time")
+    full_time = _scan(scan_db, make_url(None), title="Part Sales Manager – Full Time")
+    assert full_time.primary_posting_id is None
+
+
+def test_scan_keeps_different_stores_apart(scan_db, make_url):
+    _scan(scan_db, make_url(None), location="Bridgehampton, NY")
+    other_store = _scan(scan_db, make_url(None), location="Staten Island, NY")
+    assert other_store.primary_posting_id is None
+
+
+def test_scan_never_links_to_a_closed_listing(scan_db, make_url):
+    closed_row = make_url(None)
+    _scan(scan_db, closed_row)
+    closed_row.closed_at = datetime.now(timezone.utc)
+    scan_db.commit()
+
+    reposted = _scan(scan_db, make_url(None))
+    assert reposted.primary_posting_id is None
