@@ -97,10 +97,12 @@ class Settings(BaseSettings):
     # crawl-dispatch must run at least as often as the minimum.
     crawl_min_interval_minutes: int = 120
     crawl_max_interval_minutes: int = 4320
-    # Most sources crawl_dispatcher.py publishes per run (~1.5x the expected
-    # per-run load), so a backlog (Monday morning, a first rollout) is spread
-    # across runs instead of bursting.
-    crawl_dispatch_batch_size: int = 600
+    # Most sources crawl_dispatcher.py publishes per run, so a backlog (Monday
+    # morning, a first rollout) is spread across runs instead of bursting.
+    # Was 600: the first run on 2026-10-12 (a weekend's worth of new jobs)
+    # hit 99 of 100 Cloud SQL connections and ~3 minutes of dropped
+    # connections, while later runs stayed at 40-52.
+    crawl_dispatch_batch_size: int = 300
 
     # Retry backoff for a FAILED scan (see app.services.jobs.wake_retryable_failed_scans
     # and retry_failed_scans.py, its hourly-cron entrypoint). Each consecutive failure
