@@ -38,6 +38,7 @@ _BOARD_PARAM_NAMES = {
     "company": "company",
     "posted_within_days": "posted",
     "workplace_type": "workplace",
+    "sector": "sector",
     "salary_min": "salaryMin",
     "salary_max": "salaryMax",
 }
@@ -51,6 +52,9 @@ def _saved_search_board_url(saved_search: SavedSearch) -> str:
         for field, url_name in _BOARD_PARAM_NAMES.items()
         if (value := getattr(saved_search, field)) is not None and value != ""
     }
+    # A null sector means every sector here, but no sector param on the board
+    # means its Engineering & Technology default — so spell "all" out.
+    params.setdefault("sector", "all")
     query = urlencode(params)
     base = f"{settings.frontend_base_url}/jobs"
     return f"{base}?{query}" if query else base
@@ -98,6 +102,7 @@ def _sweep_one(db: Session, saved_search: SavedSearch, now: datetime) -> bool:
         company=saved_search.company,
         posted_within_days=saved_search.posted_within_days,
         workplace_type=saved_search.workplace_type,
+        sector=saved_search.sector,
         salary_min=saved_search.salary_min,
         salary_max=saved_search.salary_max,
     )

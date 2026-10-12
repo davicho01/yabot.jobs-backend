@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from app.models.enums import WorkplaceType
+from app.models.enums import JobSector, WorkplaceType
 
 
 class SavedSearchCreate(BaseModel):
@@ -18,6 +18,7 @@ class SavedSearchCreate(BaseModel):
     company: str | None = None
     posted_within_days: int | None = None
     workplace_type: WorkplaceType | None = None
+    sector: JobSector | None = None
     salary_min: int | None = None
     salary_max: int | None = None
 
@@ -34,6 +35,7 @@ class SavedSearchRead(BaseModel):
     company: str | None
     posted_within_days: int | None
     workplace_type: str | None
+    sector: str | None
     salary_min: int | None
     salary_max: int | None
     created_at: datetime

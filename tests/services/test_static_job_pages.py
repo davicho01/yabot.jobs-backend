@@ -632,6 +632,22 @@ class TestHubs:
         assert ("Engineering & Technology jobs in Raleigh, NC", "jobs/us/locations/raleigh-nc/engineering-tech") in links
         assert plan.country_links()["locations"][0][1] in plan.pages
 
+    def test_board_links_name_a_sector_since_the_board_defaults_to_tech(self):
+        from app.services import static_hub_pages as hubs
+
+        live = self._jobs(5) + self._jobs(5, company_key="remoteco", workplace_type=WorkplaceType.REMOTE, metros=(), location=None)
+        plan = hubs.plan_hubs(live)
+
+        def board(path):
+            return plan.pages[path].board[1]
+
+        assert "sector=all" in board("jobs/us/companies/bandwidth")
+        assert "sector=all" in board("jobs/us/locations/raleigh-nc")
+        assert "sector=all" in board("jobs/us/locations/north-carolina")
+        assert "sector=all" in board("jobs/us/locations/remote")
+        assert "sector=engineering_tech" in board("jobs/us/locations/raleigh-nc/engineering-tech")
+        assert "sector=engineering_tech" in board("jobs/us/locations/remote/engineering-tech")
+
     def test_a_multi_metro_job_counts_toward_each_metro(self):
         from app.services import static_hub_pages as hubs
 

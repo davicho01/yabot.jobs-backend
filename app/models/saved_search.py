@@ -42,6 +42,10 @@ class SavedSearch(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     company: Mapped[str | None] = mapped_column(String(255))
     posted_within_days: Mapped[int | None] = mapped_column(Integer)
     workplace_type: Mapped[str | None] = mapped_column(String(20))
+    # Null means every sector — not the board's Engineering & Technology
+    # default (that default lives only in the frontend), so searches saved
+    # before this column existed keep alerting on everything they did.
+    sector: Mapped[str | None] = mapped_column(String(30))
     salary_min: Mapped[int | None] = mapped_column(Integer)
     salary_max: Mapped[int | None] = mapped_column(Integer)
 

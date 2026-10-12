@@ -146,6 +146,8 @@ def _url(path: str) -> str:
 
 
 def _board(**params: str) -> str:
+    # Pass sector= every time: with no sector param the board defaults to
+    # Engineering & Technology, so "all" has to be explicit.
     return f"{settings.seo_pages_base_url}/jobs?{urlencode(params)}"
 
 
@@ -211,7 +213,7 @@ def plan_hubs(live: Iterable[LinkJob]) -> HubPlan:
             count=len(jobs),
             sections=_by_sector(_newest_first(jobs)[:COMPANY_MAX_JOBS]),
             link_lists=[("Locations", [(city, "") for city in cities])] if cities else [],
-            board=(f"Search all {name} jobs on Yabot", _board(company=name)),
+            board=(f"Search all {name} jobs on Yabot", _board(company=name, sector="all")),
         )
         plan._company_paths[key] = path
 
@@ -252,7 +254,7 @@ def plan_hubs(live: Iterable[LinkJob]) -> HubPlan:
                 count=len(group),
                 sections=[Section(heading=f"{sector_name} jobs", jobs=_newest_first(group)[:METRO_SECTOR_MAX_JOBS], total=len(group))],
                 link_lists=[("Nearby", [(f"All jobs in {area.name}", _url(path)), (f"{sector_name} jobs across the US", _url(f"{HUB_ROOT}/{slug}"))])],
-                board=(f"Search {sector_name} jobs in {area.name}", _board(metro=area.slug)),
+                board=(f"Search {sector_name} jobs in {area.name}", _board(metro=area.slug, sector=group[0].sector)),
             )
 
         def more_link(slug, name, count, code=code, area=area):
@@ -271,7 +273,7 @@ def plan_hubs(live: Iterable[LinkJob]) -> HubPlan:
             count=len(jobs),
             sections=_by_sector(jobs, more_link),
             link_lists=[("Cities in this area", [(city, "") for city in cities])] if cities else [],
-            board=(f"Search all jobs in {area.name}", _board(metro=area.slug)),
+            board=(f"Search all jobs in {area.name}", _board(metro=area.slug, sector="all")),
         )
 
     for code, path in plan._metro_paths.items():
@@ -297,7 +299,7 @@ def plan_hubs(live: Iterable[LinkJob]) -> HubPlan:
             count=len(jobs),
             sections=_by_sector(jobs),
             link_lists=[("Metro areas", [(f"{name} ({count:,})", url) for name, url, count in metros_here])] if metros_here else [],
-            board=(f"Search all jobs in {area.name}", _board(metro=area.slug)),
+            board=(f"Search all jobs in {area.name}", _board(metro=area.slug, sector="all")),
         )
 
     # --- remote -------------------------------------------------------------
@@ -324,7 +326,7 @@ def plan_hubs(live: Iterable[LinkJob]) -> HubPlan:
                 trail=_trail(("Remote jobs", _url(remote_path)), (sector_name, None)),
                 count=len(group),
                 sections=[Section(heading=f"Remote {sector_name} jobs", jobs=_newest_first(group)[:METRO_SECTOR_MAX_JOBS], total=len(group))],
-                board=(f"Search remote {sector_name} jobs", _board(workplace="remote")),
+                board=(f"Search remote {sector_name} jobs", _board(workplace="remote", sector=group[0].sector)),
             )
         plan._remote_paths[None] = remote_path
 
@@ -340,7 +342,7 @@ def plan_hubs(live: Iterable[LinkJob]) -> HubPlan:
             trail=_trail(("Remote jobs", None)),
             count=len(remote),
             sections=_by_sector(remote, remote_more),
-            board=("Search all remote jobs", _board(workplace="remote")),
+            board=("Search all remote jobs", _board(workplace="remote", sector="all")),
         )
 
     return plan
