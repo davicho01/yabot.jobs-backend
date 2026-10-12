@@ -1,8 +1,12 @@
+import json
 import re
 from datetime import date
 from urllib.parse import urljoin
 
+import httpx
+
 from app.models.enums import AtsType, EmploymentType
+from app.services.adapters import base
 from app.services.adapters.base import AtsAdapter, ExtractedJobFields, ScanResult, limit_job_urls
 from app.services.browser_fetch import fetch_rendered_html
 from app.services.adapters.text import clean_text, html_to_formatted_text
@@ -121,9 +125,75 @@ def extract(html: str) -> ExtractedJobFields:
     )
 
 
+# The plain job-detail page carries the whole posting after all, as the
+# JSON argument of `new US.Opportunity.CandidateOpportunityDetail({...})`
+# in an inline script (verified 2026-10-12 in Chrome: the page makes no
+# data request of its own, the script builds the UI from this). Reading it
+# needs no browser render, which was failing for ~280 open jobs.
+_OPPORTUNITY_MARKER = "CandidateOpportunityDetail("
+
+
+def _opportunity_of(html: str) -> dict | None:
+    marker = html.find(_OPPORTUNITY_MARKER)
+    start = html.find("{", marker) if marker != -1 else -1
+    if start == -1:
+        return None
+    try:
+        data, _ = json.JSONDecoder().raw_decode(html, start)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) and data.get("Title") else None
+
+
+def _opportunity_location(data: dict) -> str | None:
+    texts = []
+    for loc in data.get("Locations") or []:
+        address = (loc or {}).get("Address") or {}
+        parts = [
+            address.get("City"),
+            (address.get("State") or {}).get("Code") or (address.get("State") or {}).get("Name"),
+            (address.get("Country") or {}).get("Name"),
+        ]
+        text = ", ".join(p.strip() for p in parts if isinstance(p, str) and p.strip())
+        if text and text not in texts:
+            texts.append(text)
+    return "; ".join(texts) or None
+
+
+def _scan_from_raw_page(url: str) -> ScanResult | None:
+    try:
+        page = base.fetch_html(url)
+    except httpx.HTTPError:
+        return None
+    data = _opportunity_of(page.text)
+    if data is None:
+        return None
+    if data.get("OpportunityIsClosed"):
+        return ScanResult(success=False, error="UltiPro marks this opportunity closed.", expired=True)
+    description = html_to_formatted_text(data.get("Description"))
+    salary_min, salary_max, salary_currency = base.salary_from_text(description)
+    full_time = data.get("FullTime")
+    return ScanResult(
+        success=True,
+        title=clean_text(data.get("Title")),
+        description=description,
+        location=_opportunity_location(data),
+        employment_type=(
+            EmploymentType.FULL_TIME if full_time is True else EmploymentType.PART_TIME if full_time is False else EmploymentType.UNKNOWN
+        ),
+        salary_min=salary_min,
+        salary_max=salary_max,
+        salary_currency=salary_currency,
+        posted_at=base.posting_date(data.get("PostedDate")),
+    )
+
+
 def scan_job_url(url: str) -> ScanResult | None:
     if _match(url) is None or not _JOB_DETAIL_RE.search(url):
         return None
+    from_raw = _scan_from_raw_page(url)
+    if from_raw is not None:
+        return from_raw
     html = fetch_rendered_html(url, wait_for_selector='[data-automation="job-description"]', pierce_shadow=True)
     if html is None:
         return ScanResult(success=False, error=f"Failed to render {url} (browser fetch unavailable or timed out)")

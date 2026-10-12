@@ -32,7 +32,16 @@ _BBY_WIDGET_CLASS = "bby-career-job-details"
 # render also hit the browser service's networkidle timeout). The
 # description's own block is only added once the data is in (template:
 # ng-if="::c.data.job.job_description_dv" on .job-html.iframe-container).
-_BBY_DESCRIPTION_SELECTOR = f".{_BBY_WIDGET_CLASS} .iframe-container"
+# A removed posting never gets that block: instead the page shows "The job
+# posting you are looking for has expired or the position has already been
+# filled." in a .cs-alert-message (verified 2026-10-12 in Chrome, on a
+# sampled teaser job — while a live one rendered a 3,104-character
+# description in the selector above). Waiting on either one means a removed
+# posting ends the wait right away and is closed, instead of timing out and
+# being stored as the og:description teaser.
+_BBY_EXPIRED_SELECTOR = ".cs-alert-message"
+_BBY_RENDER_SELECTOR = f".{_BBY_WIDGET_CLASS} .iframe-container, {_BBY_EXPIRED_SELECTOR}"
+_BBY_EXPIRED_RE = re.compile(r"has expired or the position has already been filled", re.IGNORECASE)
 _BBY_DATE_RE = re.compile(r"\b(\d{2}-[A-Za-z]{3}-\d{4})\b")
 _BBY_JOB_DESCRIPTION_HEADING_RE = re.compile(r"^#{0,6}\s*Job Description\s*$", re.MULTILINE)
 _BBY_OVERVIEW_HEADING_RE = re.compile(r"^#{0,6}\s*Overview\s*$", re.MULTILINE)
@@ -154,7 +163,9 @@ def scan_job_url(url: str) -> ScanResult | None:
     employment_type = EmploymentType.UNKNOWN
     posted_at: date | None = None
 
-    rendered = fetch_rendered_html(url, wait_for_selector=_BBY_DESCRIPTION_SELECTOR)
+    rendered = fetch_rendered_html(url, wait_for_selector=_BBY_RENDER_SELECTOR)
+    if rendered is not None and _BBY_EXPIRED_RE.search(rendered) and _BBY_WIDGET_CLASS not in rendered:
+        return ScanResult(success=False, error="Best Buy says this posting has expired or been filled.", expired=True)
     if rendered is not None:
         rendered_description, employment_type_raw, rendered_location, rendered_posted_at = _extract_from_rendered(
             rendered
