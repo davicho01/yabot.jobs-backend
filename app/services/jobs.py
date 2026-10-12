@@ -356,12 +356,21 @@ def _parse_discovered_urls(raw_urls: list[str]) -> tuple[dict[str, tuple[str, st
 
 
 def record_board_presence(
-    db: Session, crawl_source_id: uuid.UUID, raw_urls: list[str], *, healthy: bool, now: datetime | None = None
+    db: Session,
+    crawl_source_id: uuid.UUID,
+    raw_urls: list[str],
+    *,
+    healthy: bool,
+    now: datetime | None = None,
+    closed_after_hours: float | None = None,
 ) -> int:
     """After a crawl of `crawl_source_id`, stamp last_seen_at on every URL its
     board listed (reopening any that had been closed), and — only when
     `healthy` — close the source's open URLs the board hasn't listed for
-    job_closed_after_unseen_hours. Returns how many were closed.
+    `closed_after_hours` (default job_closed_after_unseen_hours; the crawl
+    worker passes one scaled to the source's own crawl interval, see
+    app.services.crawl_schedule.closed_after_hours). Returns how many were
+    closed.
 
     `healthy` is the caller's judgement that this crawl saw the whole board
     (see crawl_worker._crawl_source): a broken adapter or a truncated
@@ -398,7 +407,7 @@ def record_board_presence(
         )
     if not healthy:
         return 0
-    cutoff = now - timedelta(hours=settings.job_closed_after_unseen_hours)
+    cutoff = now - timedelta(hours=closed_after_hours or settings.job_closed_after_unseen_hours)
     unseen = (
         JobPostingUrl.crawl_source_id == crawl_source_id,
         JobPostingUrl.closed_at.is_(None),
@@ -429,7 +438,7 @@ def record_board_presence(
     return result.rowcount or 0
 
 
-def bulk_register_discovered_urls(db: Session, raw_urls: list[str], crawl_source_id: uuid.UUID) -> int:
+def bulk_register_discovered_urls(db: Session, raw_urls: list[str], crawl_source_id: uuid.UUID) -> tuple[int, int]:
     """Crawl-worker version of get_or_create_job_posting for a whole board at
     once: registers every URL a crawl discovered with a small, fixed number
     of round-trips instead of one SELECT+INSERT+COMMIT per URL.
@@ -461,19 +470,20 @@ def bulk_register_discovered_urls(db: Session, raw_urls: list[str], crawl_source
     would need its own, separate test setup for no real benefit over
     letting this one rare case fall back to a whole-batch retry.
 
-    Returns how many URLs failed to normalize/hash, for the caller's
-    last_error reporting.
+    Returns (failed, created): how many URLs failed to normalize/hash, for
+    the caller's last_error reporting, and how many were genuinely new, for
+    the source's adaptive crawl schedule (see app.services.crawl_schedule).
     """
     parsed, failed = _parse_discovered_urls(raw_urls)
     if not parsed:
-        return failed
+        return failed, 0
 
     existing_hashes = set(
         db.scalars(select(JobPostingUrl.url_hash).where(JobPostingUrl.url_hash.in_(parsed.keys())))
     )
     new_items = {h: v for h, v in parsed.items() if h not in existing_hashes}
     if not new_items:
-        return failed
+        return failed, 0
 
     new_url_rows = [
         JobPostingUrl(
@@ -489,7 +499,7 @@ def bulk_register_discovered_urls(db: Session, raw_urls: list[str], crawl_source
     db.flush()  # assigns each row's id
     db.add_all(JobPosting(url_id=row.id, extraction_status=ScanStatus.PENDING) for row in new_url_rows)
     db.flush()
-    return failed
+    return failed, len(new_url_rows)
 
 
 def _enforce_submission_rate_limit(db: Session, user_id: uuid.UUID, now: datetime | None = None) -> None:

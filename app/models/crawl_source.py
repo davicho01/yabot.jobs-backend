@@ -14,6 +14,13 @@ DEFAULT_MAX_CONCURRENT_SCANS = 3
 MIN_CONCURRENT_SCANS = 1
 MAX_CONCURRENT_SCANS = 5
 
+# Bounds the database allows for crawl_interval_minutes. Deliberately wider
+# than the configured range (settings.crawl_min/max_interval_minutes), so
+# moving that range is a config change, never a migration.
+DEFAULT_CRAWL_INTERVAL_MINUTES = 720
+MIN_CRAWL_INTERVAL_MINUTES = 5
+MAX_CRAWL_INTERVAL_MINUTES = 4320
+
 
 class CrawlSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A company/board the daily discovery crawler checks for new postings.
@@ -48,6 +55,11 @@ class CrawlSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             f"max_concurrent_scans BETWEEN {MIN_CONCURRENT_SCANS} AND {MAX_CONCURRENT_SCANS}",
             name="max_concurrent_scans_range",
         ),
+        CheckConstraint(
+            f"crawl_interval_minutes BETWEEN {MIN_CRAWL_INTERVAL_MINUTES} AND {MAX_CRAWL_INTERVAL_MINUTES}",
+            name="crawl_interval_minutes_range",
+        ),
+        Index("ix_crawl_sources_status_next_crawl_at", "status", "next_crawl_at"),
     )
 
     # The company's official name: every job from this source shows it (or
@@ -88,6 +100,18 @@ class CrawlSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # *dispatch* messages themselves from piling up, not the scans within
     # one already-dispatched crawl.
     crawl_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Adaptive crawl schedule (see app.services.crawl_schedule): how long to
+    # wait between this source's crawls, shrinking while its board keeps
+    # posting new jobs and growing while it doesn't, and when it's next due.
+    # crawl_dispatcher.py only picks sources whose next_crawl_at has passed
+    # (NULL means due now).
+    crawl_interval_minutes: Mapped[int] = mapped_column(
+        Integer,
+        default=DEFAULT_CRAWL_INTERVAL_MINUTES,
+        server_default=str(DEFAULT_CRAWL_INTERVAL_MINUTES),
+        nullable=False,
+    )
+    next_crawl_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Politeness cap: how many of this source's job pages may be fetched at
     # the same time (see app.services.scan_claims). Lower it for a site that
     # is sensitive to load, raise it (max 5) for one that can take more.

@@ -24,7 +24,7 @@ def _run_crawl(monkeypatch, scan_db, source, urls):
                 )
             )
         db.flush()
-        return 0
+        return 0, len(raw_urls)
 
     monkeypatch.setattr(crawl_worker, "list_job_urls", lambda ats_type, board_url: urls)
     monkeypatch.setattr(crawl_worker, "bulk_register_discovered_urls", fake_bulk_register)
@@ -63,7 +63,7 @@ def test_crawl_still_records_its_stats_when_waking_lanes_fails(monkeypatch, scan
                 )
             )
         db.flush()
-        return 0
+        return 0, len(raw_urls)
 
     monkeypatch.setattr(crawl_worker, "bulk_register_discovered_urls", fake_bulk_register)
 
@@ -119,3 +119,35 @@ def test_crawl_clears_the_dispatch_claim_even_when_listing_jobs_fails(monkeypatc
 
     scan_db.expire_all()
     assert scan_db.get(type(source), source.id).crawl_claimed_at is None
+
+
+def test_crawl_that_found_new_jobs_shortens_the_interval(monkeypatch, scan_db, make_source):
+    source = make_source()
+    source.crawl_interval_minutes = 720
+    scan_db.commit()
+
+    _run_crawl(monkeypatch, scan_db, source, ["https://example.com/jobs/new"])
+
+    scan_db.expire_all()
+    refreshed = scan_db.get(type(source), source.id)
+    assert refreshed.crawl_interval_minutes == 360
+    assert refreshed.next_crawl_at is not None
+
+
+def test_failed_listing_keeps_the_interval(monkeypatch, scan_db, make_source):
+    source = make_source()
+    source.crawl_interval_minutes = 720
+    scan_db.commit()
+
+    def broken(ats_type, board_url):
+        raise RuntimeError("ATS API down")
+
+    monkeypatch.setattr(crawl_worker, "list_job_urls", broken)
+
+    crawl_worker._crawl_source(scan_db, source.id)
+    scan_db.commit()
+
+    scan_db.expire_all()
+    refreshed = scan_db.get(type(source), source.id)
+    assert refreshed.crawl_interval_minutes == 720
+    assert refreshed.next_crawl_at is not None

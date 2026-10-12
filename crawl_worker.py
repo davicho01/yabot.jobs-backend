@@ -41,6 +41,7 @@ from app.db.session import SessionLocal
 from app.models.crawl_source import CrawlSource
 from app.services.ats_adapters import list_job_urls
 from app.services.coverage_monitor import update_coverage
+from app.services.crawl_schedule import closed_after_hours, schedule_next_crawl
 from app.services.crawl_queue import ensure_topic_and_subscription, subscriber_client, subscription_path
 from app.services.job_queue import enqueue_source_scan
 from app.services.jobs import bulk_register_discovered_urls, record_board_presence
@@ -67,7 +68,8 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
         logger.warning("Failed to list jobs for %s: %s", source.name, exc)
         source.last_error = str(exc)
         source.last_crawled_at = datetime.now(timezone.utc)
-        source.crawl_claimed_at = None  # done with this attempt; dispatchable again next cycle
+        source.crawl_claimed_at = None  # done with this attempt; dispatchable again once due
+        schedule_next_crawl(source, source.last_crawled_at, 0, listing_failed=True)
         return
 
     # Read up front: the rollback in the failure path below expires every
@@ -80,8 +82,9 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
     # thousands of URLs; that used to mean thousands of sequential
     # round-trips to Cloud SQL in a single invocation.
     registered = True
+    created = 0
     try:
-        failed = bulk_register_discovered_urls(db, urls, source_id)
+        failed, created = bulk_register_discovered_urls(db, urls, source_id)
     except Exception as exc:
         # Same reasoning as the old per-URL loop's except: don't let this
         # crawl's stats update below be skipped just because registration
@@ -96,20 +99,29 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
         return
     source.last_crawled_at = datetime.now(timezone.utc)
     source.last_error = f"{failed} of {len(urls)} discovered URL(s) failed to process." if failed else None
-    source.crawl_claimed_at = None  # done; dispatchable again next cycle
+    source.crawl_claimed_at = None  # done; dispatchable again once due
+    previous_interval = source.crawl_interval_minutes
+    # A crawl whose URLs couldn't be registered says nothing about how busy
+    # the board is, so it keeps its interval like a failed listing does.
+    schedule_next_crawl(source, source.last_crawled_at, created, listing_failed=not registered)
+    new_interval = source.crawl_interval_minutes
+    closed_after = closed_after_hours(new_interval)
     update_coverage(source, len(urls))
     # Only a crawl that plausibly saw the whole board may close the jobs it
     # didn't list: a non-empty listing, fully registered, and not below the
     # coverage monitor's baseline (a broken adapter or truncated listing).
     healthy = bool(urls) and registered and not failed and source.coverage_low_streak == 0
     db.commit()  # stats persisted before waking lanes (has_unclaimed_pending ends its transaction)
-    logger.info("Crawled %s: %d job URL(s) discovered (%d failed).", source_name, len(urls), failed)
+    logger.info(
+        "Crawled %s: %d job URL(s) discovered, %d new (%d failed); crawl interval %d -> %d min.",
+        source_name, len(urls), created, failed, previous_interval, new_interval,
+    )
 
     # Its own transaction, after the stats are safely committed: closure
     # tracking is bookkeeping, and a failure here must never roll back the
     # crawl or nack its message into a full re-crawl of the board.
     try:
-        closed = record_board_presence(db, source_id, urls, healthy=healthy)
+        closed = record_board_presence(db, source_id, urls, healthy=healthy, closed_after_hours=closed_after)
         db.commit()
         if closed or not healthy:
             logger.info(

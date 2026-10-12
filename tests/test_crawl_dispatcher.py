@@ -41,7 +41,15 @@ def session_factory(monkeypatch):
 _counter = itertools.count()
 
 
-def _make_source(session_factory, *, status=CrawlSourceStatus.ACTIVE, crawl_claimed_at=None, is_official=True) -> str:
+def _make_source(
+    session_factory,
+    *,
+    status=CrawlSourceStatus.ACTIVE,
+    crawl_claimed_at=None,
+    is_official=True,
+    next_crawl_at=None,
+    last_crawled_at=None,
+) -> str:
     n = next(_counter)
     db = session_factory()
     source = m.CrawlSource(
@@ -51,6 +59,8 @@ def _make_source(session_factory, *, status=CrawlSourceStatus.ACTIVE, crawl_clai
         status=status,
         crawl_claimed_at=crawl_claimed_at,
         is_official=is_official,
+        next_crawl_at=next_crawl_at,
+        last_crawled_at=last_crawled_at,
     )
     db.add(source)
     db.commit()
@@ -150,9 +160,64 @@ def test_multiple_unclaimed_sources_all_get_dispatched(session_factory, monkeypa
 
 
 def test_warms_the_browser_and_resumes_the_scaler_tick(session_factory, monkeypatch):
+    _make_source(session_factory)
+    monkeypatch.setattr(crawl_dispatcher, "enqueue_crawl", lambda sid: None)
     calls = []
     monkeypatch.setattr(crawl_dispatcher, "warm_up_browser_scaler", lambda: calls.append("called"))
 
     crawl_dispatcher.main()
 
     assert calls == ["called"]
+
+
+def test_nothing_due_skips_the_warm_up(session_factory, monkeypatch):
+    _make_source(session_factory, next_crawl_at=datetime.now(timezone.utc) + timedelta(hours=1))
+    calls = []
+    monkeypatch.setattr(crawl_dispatcher, "warm_up_browser_scaler", lambda: calls.append("called"))
+
+    crawl_dispatcher.main()
+
+    assert calls == []
+
+
+def test_only_due_sources_are_dispatched(session_factory, monkeypatch):
+    now = datetime.now(timezone.utc)
+    never_scheduled = _make_source(session_factory)
+    overdue = _make_source(session_factory, next_crawl_at=now - timedelta(minutes=5))
+    _make_source(session_factory, next_crawl_at=now + timedelta(hours=1), last_crawled_at=now - timedelta(hours=1))
+    enqueued = []
+    monkeypatch.setattr(crawl_dispatcher, "enqueue_crawl", lambda sid: enqueued.append(sid))
+
+    crawl_dispatcher.main()
+
+    assert set(enqueued) == {never_scheduled, overdue}
+
+
+def test_last_crawl_older_than_max_interval_is_due(session_factory, monkeypatch):
+    # Lowering crawl_max_interval_minutes must take effect right away, not
+    # after next_crawl_at values set under the old maximum.
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(crawl_dispatcher.settings, "crawl_max_interval_minutes", 1440)
+    stale = _make_source(
+        session_factory, next_crawl_at=now + timedelta(days=1), last_crawled_at=now - timedelta(days=2)
+    )
+    enqueued = []
+    monkeypatch.setattr(crawl_dispatcher, "enqueue_crawl", lambda sid: enqueued.append(sid))
+
+    crawl_dispatcher.main()
+
+    assert enqueued == [stale]
+
+
+def test_batch_cap_dispatches_most_overdue_first(session_factory, monkeypatch):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(crawl_dispatcher.settings, "crawl_dispatch_batch_size", 2)
+    never_scheduled = _make_source(session_factory)
+    oldest = _make_source(session_factory, next_crawl_at=now - timedelta(hours=3))
+    _make_source(session_factory, next_crawl_at=now - timedelta(hours=1))
+    enqueued = []
+    monkeypatch.setattr(crawl_dispatcher, "enqueue_crawl", lambda sid: enqueued.append(sid))
+
+    crawl_dispatcher.main()
+
+    assert enqueued == [never_scheduled, oldest]

@@ -57,6 +57,19 @@ def test_url_missing_for_less_than_the_grace_period_stays_open(scan_db, make_sou
     assert closed == 0
 
 
+def test_slow_source_waits_its_own_closure_window(scan_db, make_source, now):
+    # A source crawled every 3 days must not have jobs closed after the
+    # default 36h, i.e. after a single missed crawl.
+    source = make_source()
+    _register(scan_db, source, URLS, now)
+
+    closed = record_board_presence(
+        scan_db, source.id, URLS[:2], healthy=True, now=now + timedelta(hours=40), closed_after_hours=216
+    )
+
+    assert closed == 0
+
+
 def test_unhealthy_crawl_never_closes_anything(scan_db, make_source, now):
     source = make_source()
     _register(scan_db, source, URLS, now)
@@ -98,7 +111,9 @@ def _crawl(monkeypatch, scan_db, source, urls, when):
     monkeypatch.setattr(
         crawl_worker,
         "record_board_presence",
-        lambda db, source_id, raw_urls, *, healthy: real(db, source_id, raw_urls, healthy=healthy, now=when),
+        lambda db, source_id, raw_urls, *, healthy, closed_after_hours=None: real(
+            db, source_id, raw_urls, healthy=healthy, now=when, closed_after_hours=closed_after_hours
+        ),
     )
     crawl_worker._crawl_source(scan_db, source.id)
 

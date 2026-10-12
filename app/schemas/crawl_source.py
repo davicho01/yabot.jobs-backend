@@ -97,6 +97,9 @@ class CrawlSourceRead(BaseModel):
     coverage_baseline: float | None
     coverage_sample_count: int
     coverage_flagged_at: datetime | None
+    # System-managed adaptive crawl schedule (see app.services.crawl_schedule).
+    crawl_interval_minutes: int
+    next_crawl_at: datetime | None
     created_at: datetime
     # The logo of the company this source is named after (see
     # app.api.routes.crawl_sources.list_crawl_sources); only set in listings.

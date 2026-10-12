@@ -379,18 +379,21 @@ gcloud run jobs add-iam-policy-binding crawl-dispatcher \
   --member="serviceAccount:${PROJECT_ID}@appspot.gserviceaccount.com" \
   --role="roles/run.invoker"
 
-# 2x/day, 1pm and 9pm America/New_York: postings trickle in through business
-# hours (~9am-6pm local, so ~9am-9pm ET once PT is folded in), so a morning
-# run would mostly just re-serve the prior night's crawl. 1pm catches the
-# ET/CT morning wave; 9pm catches the rest of the day including PT (whose
-# posting activity has already tailed off by 9pm ET = 6pm PT). Weekdays only
-# (Mon-Fri): no collection runs on weekends.
+# Every 30 minutes, 7am-10pm America/New_York, weekdays only (no collection
+# runs on weekends). Each run only crawls the sources that are due: every
+# source has its own adaptive interval (2h-3d by default, see
+# app.services.crawl_schedule and settings.crawl_min/max_interval_minutes),
+# short for boards that keep posting and long for quiet ones, and a run
+# dispatches at most settings.crawl_dispatch_batch_size of them. This replaced
+# crawling every source at 1pm and 9pm (2026-10-12): those bursts ran Cloud SQL
+# out of connections, and the busiest boards overflowed their 500-URL listing
+# between crawls. Run at least as often as the minimum interval.
 # --oauth-service-account-email (not --oidc-...) because the target is the
 # Run Admin REST API, not the job's own service URL.
 
 gcloud scheduler jobs create http crawl-dispatch-hourly \
   --location="$REGION" \
-  --schedule="0 13,21 * * 1-5" \
+  --schedule="*/30 7-22 * * 1-5" \
   --time-zone="America/New_York" \
   --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/crawl-dispatcher:run" \
   --http-method=POST \
