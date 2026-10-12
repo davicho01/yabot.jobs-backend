@@ -6,7 +6,9 @@ from xml.etree import ElementTree
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters import base
+from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, ScanResult, get_with_retry
+from app.services.adapters.text import clean_text, extract_balanced_div, html_to_formatted_text
 
 _TALENTBREW_SIGNATURE = "tbcdn.talentbrew.com"
 _TALENTBREW_RECORDS_PER_PAGE = 15
@@ -146,10 +148,70 @@ def _board_key(url: str) -> str | None:
 # (careers.ford.com, ...) with no shared host to statically match — same
 # embedded-only shape as Clinch/Oracle Fusion's white-label tier. board_url
 # is stored verbatim rather than reconstructed; see AtsAdapter's docstring.
+# A TalentBrew job page lives on the company's own domain at
+# /job/{city}/{slug}/{org id}/{job id}. Its JSON-LD is often malformed
+# (verified 2026-10-12: Mayo Clinic's fails to parse partway through), so
+# the generic scanner fell back to the meta teaser ("Learn more about
+# applying for ... at Mayo Clinic"). The posting itself is server-rendered
+# into <div class="ats-description">; title and location are the <h1> and
+# the .job-location element, and the date/organization are still readable
+# as individual JSON-LD fields even when the block as a whole isn't valid.
+_JOB_PATH_RE = re.compile(r"/job/[^/?]+/[^/?]+/\d+/\d+")
+_DESCRIPTION_MARKER = 'class="ats-description'
+# The JSON-LD "title" field is the job title on every tenant checked, while
+# the <h1> is a site banner on some ("Explore roles where you can make an
+# impact" at NetApp) — so the h1 is only the fallback.
+_LD_TITLE_RE = re.compile(r'"title"\s*:\s*"((?:[^"\\]|\\.){1,200})"')
+_H1_RE = re.compile(r"<h1[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
+_LOCATION_RE = re.compile(r'class="job-location[^"]*"[^>]*>(.*?)<', re.IGNORECASE | re.DOTALL)
+_DATE_POSTED_RE = re.compile(r'"datePosted"\s*:\s*"(\d{4}-\d{2}-\d{2})')
+_ORGANIZATION_RE = re.compile(r'"hiringOrganization".{0,200}?"name"\s*:\s*"((?:[^"\\]|\\.)*)"', re.DOTALL)
+
+
+def scan_job_url(url: str) -> ScanResult | None:
+    if not _JOB_PATH_RE.search(urlsplit(url).path):
+        return None
+    try:
+        page = base.fetch_html(url)
+    except httpx.HTTPError as exc:
+        return ScanResult(success=False, error=str(exc))
+    html = page.text
+    blocks = []
+    for marker in re.finditer(re.escape(_DESCRIPTION_MARKER), html):
+        div_start = html.rfind("<div", 0, marker.start())
+        inner = extract_balanced_div(html, div_start) if div_start != -1 else None
+        if inner:
+            blocks.append(inner)
+    if not blocks:
+        return None  # not a TalentBrew page after all: the generic scanner takes it
+    # Some templates have a short metadata block with the same class ahead
+    # of the posting (UnitedHealth Group's: requisition number, category).
+    description = html_to_formatted_text(max(blocks, key=len))
+    title = _LD_TITLE_RE.search(html) or _H1_RE.search(html)
+    location = _LOCATION_RE.search(html)
+    posted = _DATE_POSTED_RE.search(html)
+    organization = _ORGANIZATION_RE.search(html)
+    salary_min, salary_max, salary_currency = base.salary_from_text(description)
+    return ScanResult(
+        success=True,
+        title=(clean_text(title.group(1)) if title else None) or base.fallback_title(html),
+        description=description,
+        company_name=clean_text(organization.group(1)) if organization else None,
+        location=clean_text(location.group(1)) if location else None,
+        salary_min=salary_min,
+        salary_max=salary_max,
+        salary_currency=salary_currency,
+        posted_at=base.posting_date(posted.group(1)) if posted else None,
+        raw_html_excerpt=html[:20_000],
+        full_html=html,
+    )
+
+
 ADAPTER = AtsAdapter(
     AtsType.TALENTBREW,
     fetch_jobs=_fetch_jobs,
     board_key=_board_key,
     embedded_match=_detect_embedded,
+    scan_job_url=scan_job_url,
 )
 

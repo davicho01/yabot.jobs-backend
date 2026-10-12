@@ -238,12 +238,39 @@ def _board_url(board_key: str) -> str:
 # job's full record directly — no board token to already know, just the
 # requesting host's own "domain" tenant identifier (see _candidate_domains
 # above), keyed off the job id already sitting in the URL.
+def _is_eightfold_page(url: str, html: str) -> bool:
+    """A <tenant>.eightfold.ai host is Eightfold by definition; only a
+    vanity-domain page needs the privacy-policy signature to prove it.
+    Custom-branded tenants drop that link (verified 2026-10-12: KDP's
+    kdrp.eightfold.ai jobs were left to the generic scanner and stored as
+    just "Overview: Responsibilities: Qualifications:", while the API
+    returned the full ~9k-character description)."""
+    return urlsplit(url).netloc.lower().endswith(".eightfold.ai") or _EIGHTFOLD_SIGNATURE in html
+
+
+class PositionGone(Exception):
+    """The tenant's own API says the position doesn't exist (removed): a
+    JSON {"status": 404, "error": {"message": "Position not found"}} from
+    the right tenant domain — a wrong domain answers an HTML 404 page
+    instead (both verified 2026-10-12 on kdrp.eightfold.ai), so a bad guess
+    never reads as a removed job. The job page itself still answers 200."""
+
+
+def _position_not_found(response: httpx.Response) -> bool:
+    try:
+        body = response.json()
+    except ValueError:
+        return False
+    error = body.get("error") if isinstance(body, dict) else None
+    return isinstance(error, dict) and str(error.get("message", "")).strip().lower() == "position not found"
+
+
 def _fetch_job_data(url: str, html: str) -> dict[str, Any] | None:
     job_match = _EIGHTFOLD_JOB_URL_RE.search(url)
-    if job_match is None or _EIGHTFOLD_SIGNATURE not in html:
+    host = urlsplit(url).netloc
+    if job_match is None or not _is_eightfold_page(url, html):
         return None
     job_id = job_match.group(1)
-    host = urlsplit(url).netloc
     for domain in _candidate_domains(host, _domain_hint(url)):
         try:
             response = httpx.get(
@@ -253,6 +280,8 @@ def _fetch_job_data(url: str, html: str) -> dict[str, Any] | None:
             )
         except httpx.HTTPError:
             continue
+        if response.status_code == 404 and _position_not_found(response):
+            raise PositionGone(job_id)
         if response.status_code != 200:
             continue
         data = response.json().get("data")
@@ -315,10 +344,13 @@ def scan_job_url(url: str) -> ScanResult | None:
         return ScanResult(success=False, error=str(exc))
 
     html = page.text
-    if _EIGHTFOLD_SIGNATURE not in html:
+    if not _is_eightfold_page(url, html):
         return None  # URL path shape was a coincidence; not actually Eightfold.
 
-    fields = extract(url, html)
+    try:
+        fields = extract(url, html)
+    except PositionGone:
+        return ScanResult(success=False, error="Eightfold says this position no longer exists.", expired=True)
     description = (
         (fields.description if fields else None) or base.fallback_description(html) or base.og_description(html)
     )

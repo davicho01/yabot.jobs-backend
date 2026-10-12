@@ -1,14 +1,68 @@
 from datetime import date
 
+import pytest
+
 from app.services.adapters import ashby
 from tests.conftest import FakeResponse
 
 
-def test_scan_job_url_returns_none_for_hosted_board_url():
-    # jobs.ashbyhq.com/* already publishes real JSON-LD job_scanner's
-    # generic default scanner reads fine on its own — no adapter-specific
-    # scan logic needed (or wanted) for that case.
-    assert ashby.scan_job_url("https://jobs.ashbyhq.com/anrok/d0087910-ab06-4ee7-a6c4-47ab9283780d") is None
+@pytest.fixture(autouse=True)
+def _empty_board_cache():
+    ashby._board_cache.clear()
+    yield
+    ashby._board_cache.clear()
+
+
+HOSTED_ID = "d0087910-ab06-4ee7-a6c4-47ab9283780d"
+HOSTED_URL = f"https://jobs.ashbyhq.com/anrok/{HOSTED_ID}"
+
+
+def test_hosted_posting_is_read_from_the_posting_api(monkeypatch):
+    # The hosted page's JSON-LD isn't always there (live postings came back
+    # as a "Jobs" shell from the generic scanner), so hosted postings are
+    # read from the same API as embeds.
+    board = {"jobs": [{
+        "id": HOSTED_ID, "title": "Software Engineer", "descriptionHtml": "<p>" + "Build tax software. " * 20 + "</p>",
+        "location": "San Francisco", "workplaceType": "Hybrid", "employmentType": "FullTime",
+        "publishedAt": "2026-09-14T00:00:00Z",
+    }]}
+    requested = []
+
+    def fake_get(request_url, timeout=None, **kwargs):
+        requested.append(request_url)
+        if "api.ashbyhq.com" in request_url:
+            return FakeResponse(json_data=board)
+        return FakeResponse(text="<html></html>", url=request_url)
+
+    monkeypatch.setattr(ashby.base.httpx, "get", fake_get)
+    result = ashby.scan_job_url(HOSTED_URL)
+
+    assert result.success and result.title == "Software Engineer"
+    assert "Build tax software." in result.description
+    assert (result.location, str(result.posted_at)) == ("San Francisco", "2026-09-14")
+    assert requested[0] == "https://api.ashbyhq.com/posting-api/job-board/anrok"
+
+
+def test_hosted_posting_missing_from_the_board_is_expired(monkeypatch):
+    monkeypatch.setattr(ashby.base.httpx, "get", lambda url, **kwargs: FakeResponse(json_data={"jobs": []}))
+
+    result = ashby.scan_job_url(HOSTED_URL)
+
+    assert (result.success, result.expired) == (False, True)
+
+
+def test_board_listing_is_reused_across_jobs(monkeypatch):
+    calls = []
+
+    def fake_get(request_url, timeout=None, **kwargs):
+        calls.append(request_url)
+        return FakeResponse(json_data={"jobs": []})
+
+    monkeypatch.setattr(ashby.base.httpx, "get", fake_get)
+    ashby.scan_job_url(HOSTED_URL)
+    ashby.scan_job_url(f"https://jobs.ashbyhq.com/anrok/{'0' * 8}-0000-0000-0000-{'0' * 12}")
+
+    assert calls.count("https://api.ashbyhq.com/posting-api/job-board/anrok") == 1
 
 
 def test_scan_job_url_returns_none_without_embed_job_id():

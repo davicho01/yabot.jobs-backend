@@ -25,6 +25,14 @@ _BBY_URL_RE = re.compile(r"(?:careers|jobs)\.bestbuy\.com", re.IGNORECASE)
 _BBY_SITEMAP_URL = "https://bestbuy.service-now.com/api/93622/seo/sitemap"
 _BBY_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _BBY_WIDGET_CLASS = "bby-career-job-details"
+# What the render waits for. The widget's outer element appears before its
+# job data arrives over ServiceNow's AMB bus, so waiting on it alone returned
+# the page with no description often enough that ~39% of Best Buy jobs were
+# stored with just the og:description teaser (prod audit, 2026-10-12; every
+# render also hit the browser service's networkidle timeout). The
+# description's own block is only added once the data is in (template:
+# ng-if="::c.data.job.job_description_dv" on .job-html.iframe-container).
+_BBY_DESCRIPTION_SELECTOR = f".{_BBY_WIDGET_CLASS} .iframe-container"
 _BBY_DATE_RE = re.compile(r"\b(\d{2}-[A-Za-z]{3}-\d{4})\b")
 _BBY_JOB_DESCRIPTION_HEADING_RE = re.compile(r"^#{0,6}\s*Job Description\s*$", re.MULTILINE)
 _BBY_OVERVIEW_HEADING_RE = re.compile(r"^#{0,6}\s*Overview\s*$", re.MULTILINE)
@@ -146,7 +154,7 @@ def scan_job_url(url: str) -> ScanResult | None:
     employment_type = EmploymentType.UNKNOWN
     posted_at: date | None = None
 
-    rendered = fetch_rendered_html(url, wait_for_selector=f".{_BBY_WIDGET_CLASS}")
+    rendered = fetch_rendered_html(url, wait_for_selector=_BBY_DESCRIPTION_SELECTOR)
     if rendered is not None:
         rendered_description, employment_type_raw, rendered_location, rendered_posted_at = _extract_from_rendered(
             rendered

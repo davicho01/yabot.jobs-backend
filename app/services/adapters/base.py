@@ -369,6 +369,27 @@ def scan_page_cache() -> Iterator[None]:
         _scan_pages.reset(token)
 
 
+# The board URL of the crawl source a scanned job came from, when it has
+# one (set by job_scanner.scan_job_url for the duration of a scan). Lets an
+# adapter whose job URLs don't carry the board — e.g. a company's own page
+# with Greenhouse's ?gh_jid=N — read the job from the platform's API
+# instead of guessing the board from the company's domain.
+_scan_board_url: ContextVar[str | None] = ContextVar("scan_board_url", default=None)
+
+
+@contextmanager
+def scan_board_hint(board_url: str | None) -> Iterator[None]:
+    token = _scan_board_url.set(board_url)
+    try:
+        yield
+    finally:
+        _scan_board_url.reset(token)
+
+
+def scan_board_url() -> str | None:
+    return _scan_board_url.get()
+
+
 def fetch_html(url: str) -> FetchedPage:
     pages = _scan_pages.get()
     if pages is None:

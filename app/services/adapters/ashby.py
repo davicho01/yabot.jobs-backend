@@ -1,4 +1,5 @@
 import re
+import time
 from urllib.parse import quote, unquote, urlsplit
 
 import httpx
@@ -111,11 +112,33 @@ _ASHBY_EMPLOYMENT_TYPE_MAP = {
 }
 
 
-def _fetch_board_job(board_key: str, job_id: str) -> dict | None:
+# The posting API returns a whole board at once, and a scan lane drains one
+# board's jobs one after another — so each board's listing is reused for a
+# few minutes instead of re-downloaded for every job.
+_BOARD_CACHE_SECONDS = 300
+_board_cache: dict[str, tuple[float, list[dict]]] = {}
+
+
+def _board_jobs(board_key: str) -> list[dict]:
+    cached = _board_cache.get(board_key)
+    if cached is not None and time.monotonic() - cached[0] < _BOARD_CACHE_SECONDS:
+        return cached[1]
     response = get_with_retry(_ASHBY_JOBS_URL.format(board_key=quote(board_key, safe="")), timeout=TIMEOUT)
     response.raise_for_status()
     jobs = response.json().get("jobs", [])
-    return next((job for job in jobs if job.get("id") == job_id), None)
+    _board_cache[board_key] = (time.monotonic(), jobs)
+    return jobs
+
+
+def _fetch_board_job(board_key: str, job_id: str) -> dict | None:
+    return next((job for job in _board_jobs(board_key) if job.get("id") == job_id), None)
+
+
+# A hosted posting, jobs.ashbyhq.com/{board}/{job uuid}. Read from the posting
+# API too: the hosted page's JSON-LD isn't always there (verified 2026-10-12:
+# live Form Energy and Cursor postings came back as a "Jobs" shell with no
+# description from the generic scanner), while the API has every listed job.
+_ASHBY_HOSTED_JOB_RE = re.compile(r"jobs\.ashbyhq\.com/([^/?]+)/([0-9a-f]{8}-[0-9a-f-]{27})", re.IGNORECASE)
 
 
 def scan_job_url(url: str) -> ScanResult | None:
@@ -130,14 +153,17 @@ def scan_job_url(url: str) -> ScanResult | None:
     untouched here (return None, same as before this existed) since those
     already publish real JSON-LD the generic scanner reads fine on its own.
     """
-    job_id_match = _ASHBY_EMBED_JOB_ID_RE.search(url)
-    if job_id_match is None:
-        return None
-    job_id = job_id_match.group(1)
-
-    board_key = _detect_embedded(url)
-    if board_key is None:
-        return None
+    hosted = _ASHBY_HOSTED_JOB_RE.search(url)
+    if hosted is not None:
+        board_key, job_id = unquote(hosted.group(1)), hosted.group(2)
+    else:
+        job_id_match = _ASHBY_EMBED_JOB_ID_RE.search(url)
+        if job_id_match is None:
+            return None
+        job_id = job_id_match.group(1)
+        board_key = _detect_embedded(url)
+        if board_key is None:
+            return None
 
     try:
         job = _fetch_board_job(board_key, job_id)

@@ -44,7 +44,7 @@ def domain_of(normalized_url: str) -> str:
     return urlsplit(normalized_url).netloc
 
 
-def scan_job_url(url: str) -> ScanResult:
+def scan_job_url(url: str, *, board_url: str | None = None) -> ScanResult:
     """Fetch a job posting page and pull structured job info out of it.
 
     Tries each registered ATS adapter's own scan_job_url in turn (see
@@ -54,10 +54,13 @@ def scan_job_url(url: str) -> ScanResult:
     JobPosting JSON-LD, so they don't need platform-specific scan logic at
     all — Lever, Ashby, BambooHR, ...) falls through to the generic
     JSON-LD/Open-Graph default below.
+
+    board_url is the crawl source's board, when the job came from one —
+    available to adapters as base.scan_board_url() (see its comment).
     """
     browser_fetch.reset_render_attempted()
     result = None
-    with base.scan_page_cache():
+    with base.scan_page_cache(), base.scan_board_hint(board_url):
         for adapter in ADAPTERS:
             if adapter.scan_job_url is None:
                 continue

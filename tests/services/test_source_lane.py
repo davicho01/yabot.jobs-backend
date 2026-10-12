@@ -23,7 +23,7 @@ def lane_env(monkeypatch, scan_db):
     env = Env()
     env.scanned, env.sleeps, env.wakeups = [], [], []
 
-    def fake_scan(url):
+    def fake_scan(url, board_url=None):
         env.scanned.append(url)
         return env.scan(url)
 

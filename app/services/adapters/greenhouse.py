@@ -21,7 +21,10 @@ from app.services.adapters.base import (
 from app.services.adapters.text import extract_balanced_div, html_to_formatted_text
 
 _GREENHOUSE_JOBS_URL = "https://boards-api.greenhouse.io/v1/boards/{board_key}/jobs"
-_GREENHOUSE_URL_RE = re.compile(r"(?:job-boards|boards)\.greenhouse\.io/([^/?]+)", re.IGNORECASE)
+# EU-hosted boards live on job-boards.eu.greenhouse.io / boards.eu.greenhouse.io
+# (e.g. Fever's) — same template and same API, just a different host.
+_GREENHOUSE_URL_RE = re.compile(r"(?:job-boards|boards)(?:\.eu)?\.greenhouse\.io/([^/?]+)", re.IGNORECASE)
+_GREENHOUSE_JOB_ID_RE = re.compile(r"greenhouse\.io/[^/?]+/jobs/(\d+)", re.IGNORECASE)
 # Some companies white-label Greenhouse onto their own domain (e.g.
 # harness.io/company/jobs/apply?gh_jid=...) via Greenhouse's embeddable JS
 # widget rather than linking out to boards.greenhouse.io directly — the
@@ -273,6 +276,56 @@ def extract(url: str, html: str) -> ExtractedJobFields | None:
     )
 
 
+def _known_board_and_job(url: str) -> tuple[str, str] | None:
+    """(board, job id) when both are known without fetching the page: a
+    Greenhouse-hosted job URL carries both, and a company page's ?gh_jid=N
+    carries the id while the crawl source it came from names the board
+    (base.scan_board_url)."""
+    hosted_id = _GREENHOUSE_JOB_ID_RE.search(url)
+    if hosted_id and _match(url):
+        return _match(url), hosted_id.group(1)
+    gh_jid = _GH_EMBED_JOB_ID_RE.search(url)
+    hint_board = _match(base.scan_board_url() or "")
+    if gh_jid and hint_board:
+        return hint_board, gh_jid.group(1)
+    return None
+
+
+def _scan_from_api(board: str, job_id: str) -> ScanResult | None:
+    """The job straight from Greenhouse's public job API — the full posting,
+    whatever the page around it looks like (verified 2026-10-12: Consensys'
+    job-boards page no longer has the job__description block, and company
+    pages like zipline.com's only carry an SEO teaser, while the API returns
+    the full content for both). None when the API doesn't have it, so the
+    caller falls back to the page."""
+    try:
+        response = get_with_retry(
+            _JOB_API_URL.format(board_key=board, job_id=job_id), params={"content": "true"}, timeout=TIMEOUT
+        )
+        response.raise_for_status()
+        job = response.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    description = _embedded_description_of(job)
+    if not description:
+        return None
+    salary_min, salary_max, salary_currency = base.salary_from_text(description)
+    title = job.get("title")
+    return ScanResult(
+        success=True,
+        title=title if isinstance(title, str) else None,
+        description=description,
+        company_name=job.get("company_name"),
+        location=_embedded_location_of(job),
+        workplace_type=_embedded_workplace_type_of(job),
+        employment_type=EmploymentType.UNKNOWN,
+        salary_min=salary_min,
+        salary_max=salary_max,
+        salary_currency=salary_currency,
+        posted_at=_embedded_posted_at_of(job),
+    )
+
+
 def scan_job_url(url: str) -> ScanResult | None:
     # Cheap, URL-only gate: a real boards.greenhouse.io/job-boards.
     # greenhouse.io link, or a gh_jid already visible in the query string
@@ -283,6 +336,11 @@ def scan_job_url(url: str) -> ScanResult | None:
     # URL scanned.
     if _match(url) is None and _GH_EMBED_JOB_ID_RE.search(url) is None:
         return None
+    known = _known_board_and_job(url)
+    if known is not None:
+        from_api = _scan_from_api(*known)
+        if from_api is not None:
+            return from_api
     try:
         page = base.fetch_html(url)
     except httpx.HTTPError as exc:

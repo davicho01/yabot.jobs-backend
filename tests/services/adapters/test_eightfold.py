@@ -177,3 +177,50 @@ def test_extract_uses_domain_query_param_for_position_details(monkeypatch):
     result = eightfold.extract("https://paypal.eightfold.ai/careers/job/555?domain=paypal.com", _SIGNATURE_HTML)
     assert result.title == "Engineer"
     assert calls == ["paypal.com"]
+
+
+# A custom-branded <tenant>.eightfold.ai page (KDP's) has no privacy-policy
+# signature, and its job API needs the tenant domain (kdrp.com).
+_KDP_URL = "https://kdrp.eightfold.ai/careers/job/1305714803205"
+_BRANDED_HTML = "<title>Merchandiser | Keurig Dr Pepper</title>"
+
+
+def _kdp_api(responses: dict):
+    def fake_get(url, params=None, timeout=None, **kwargs):
+        if "position_details" not in url:
+            return FakeResponse(text=_BRANDED_HTML, url=url)
+        return responses.get(params["domain"], FakeResponse(status_code=404, text="<html>Page Not Found</html>"))
+
+    return fake_get
+
+
+def test_branded_tenant_host_is_scanned_without_the_signature(monkeypatch):
+    job = {"id": 1305714803205, "name": "Merchandiser", "jobDescription": "<p>" + "Stock shelves. " * 30 + "</p>",
+           "location": "Phoenix, Arizona", "creationTs": 1759190400}
+    monkeypatch.setattr(eightfold.httpx, "get", _kdp_api({"kdrp.com": FakeResponse(json_data={"data": job})}))
+    monkeypatch.setattr(eightfold.base, "fetch_html", lambda u: eightfold.base.FetchedPage(text=_BRANDED_HTML, url=u))
+
+    result = eightfold.scan_job_url(_KDP_URL)
+
+    assert result.success and result.title == "Merchandiser"
+    assert "Stock shelves." in result.description and result.location == "Phoenix, Arizona"
+
+
+def test_position_not_found_is_expired(monkeypatch):
+    gone = FakeResponse(status_code=404, json_data={"status": 404, "error": {"message": "Position not found"}})
+    monkeypatch.setattr(eightfold.httpx, "get", _kdp_api({"kdrp.com": gone}))
+    monkeypatch.setattr(eightfold.base, "fetch_html", lambda u: eightfold.base.FetchedPage(text=_BRANDED_HTML, url=u))
+
+    result = eightfold.scan_job_url(_KDP_URL)
+
+    assert (result.success, result.expired) == (False, True)
+
+
+def test_wrong_domain_404_page_is_not_read_as_removed(monkeypatch):
+    # Every candidate domain answers the HTML 404 page: unknown, not gone.
+    monkeypatch.setattr(eightfold.httpx, "get", _kdp_api({}))
+    monkeypatch.setattr(eightfold.base, "fetch_html", lambda u: eightfold.base.FetchedPage(text=_BRANDED_HTML, url=u))
+
+    result = eightfold.scan_job_url(_KDP_URL)
+
+    assert result.expired is False
