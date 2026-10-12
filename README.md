@@ -246,7 +246,7 @@ API:
 `POST /jobs` call runs the URL through the same `detect_ats_source()` used
 above. A URL on a platform we already support silently adds (or reuses) an
 `"active"` `CrawlSource` for that company — so simply submitting one job
-from a new company is enough for the daily crawler to start picking up all
+from a new company is enough for the crawler to start picking up all
 of that company's future postings, no separate `POST /admin/crawl-sources` call
 needed. A URL on a platform we don't recognize is instead recorded as a
 `"pending"` source keyed by domain (one row per unrecognized site, however
@@ -295,11 +295,13 @@ Running this via Docker instead: `docker compose run --rm api python crawl_dispa
 
 Running a crawl pass is idempotent — already-known job URLs are silently
 skipped (same dedup as manual submission), so scheduling it is safe however
-often you like. For daily crawling, point any scheduler at
-`crawl_dispatcher.py` — a plain cron entry works locally/self-hosted:
+often you like. Each run only crawls the sources that are due (each source
+has its own adaptive interval, see `app/services/crawl_schedule.py`), so
+point any scheduler at `crawl_dispatcher.py` and run it at least as often as
+`CRAWL_MIN_INTERVAL_MINUTES` — a plain cron entry works locally/self-hosted:
 
 ```cron
-0 6 * * * cd /path/to/yabot.jobs-backend && /path/to/.venv/bin/python crawl_dispatcher.py
+*/30 7-22 * * 1-5 cd /path/to/yabot.jobs-backend && /path/to/.venv/bin/python crawl_dispatcher.py
 ```
 
 In the cloud, a GCP Cloud Scheduler job triggering a Cloud Run Job (or any

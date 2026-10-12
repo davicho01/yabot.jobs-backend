@@ -352,8 +352,8 @@ def sector_totals(manifest: dict, country_slug: str) -> list[tuple[str, str, int
 
 def build_sitemap_xml(manifest: dict) -> str:
     # Index pages (no date) are re-rendered from the whole manifest on every
-    # generate_for_date run — several times a day per gcloud-deploy.sh's
-    # "0 10-22/6 * * *" schedule — so they're genuinely daily-changing. Day
+    # generate_for_date run — every 2 hours on weekdays per gcloud-deploy.sh's
+    # "0 9-23/2 * * 1-5" schedule — so they're genuinely daily-changing. Day
     # pages only get re-touched while local_day == today (add_to_manifest's
     # docstring: "only today's entry actually changes between runs"); once
     # that date is in the past nothing regenerates it, so it's frozen.

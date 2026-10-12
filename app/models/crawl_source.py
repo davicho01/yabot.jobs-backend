@@ -23,7 +23,7 @@ MAX_CRAWL_INTERVAL_MINUTES = 4320
 
 
 class CrawlSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """A company/board the daily discovery crawler checks for new postings.
+    """A company/board the discovery crawler checks for new postings.
 
     Discovery hits the ATS's own public jobs-list API (see
     app.services.ats_adapters) to get a list of job URLs; each URL is then

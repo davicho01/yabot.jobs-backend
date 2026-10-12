@@ -330,7 +330,8 @@ def get_or_create_job_posting(
 
 
 # record_board_presence: how stale last_seen_at must be before a crawl
-# re-stamps it (crawls run 2x/day, so a regular crawl always does), and the
+# re-stamps it (well under the 36h minimum closure window, so a source
+# crawled as often as every 2h doesn't rewrite every row each crawl), and the
 # mass-closure guard — closing more than this share of a source's open URLs
 # in one crawl (beyond a small absolute floor) is held back as suspicious.
 LAST_SEEN_REFRESH_HOURS = 6
