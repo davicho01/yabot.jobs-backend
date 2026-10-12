@@ -4,7 +4,7 @@ calls sweep_saved_searches on a cadence.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 from sqlalchemy import select
@@ -24,6 +24,9 @@ logger = logging.getLogger("app.saved_search_alerts")
 # How many matching postings to list in one digest email before summarizing
 # the rest — a broad search's first sweep especially could match hundreds.
 MAX_DIGEST_ITEMS = 10
+# A posting only alerts while it's new: first scanned within this many hours
+# (see _sweep_one) — long enough for a new job's retries to complete it.
+NEW_JOB_WINDOW_HOURS = 48
 
 # URL param names Header.tsx/JobBoardPage.tsx read — kept in sync by hand,
 # there being no shared schema between the two repos to derive this from.
@@ -101,10 +104,16 @@ def _sweep_one(db: Session, saved_search: SavedSearch, now: datetime) -> bool:
     # scanned_at, not created_at: what actually makes a posting matchable
     # (title/company/salary/location) only exists once it's scanned, and a
     # crawl-discovered URL can sit PENDING for a while before that happens.
-    # Caveat: a rescan bumps scanned_at on a posting already alerted about,
-    # so it can resurface in a later digest — accepted for now rather than
-    # adding a separate "already notified" table to prevent it.
-    stmt = stmt.where(JobPosting.scanned_at >= since).order_by(*order)
+    # But scanned_at moves on every rescan, so an old job rescanned now (the
+    # 2026-10-12 incomplete-scan backfill retried ~31k of them; a user was
+    # alerted about a posting first found Sep 19) would read as new — so it
+    # must also have been first scanned recently. Not first_scanned_at alone:
+    # that's stamped by the first scan *attempt*, so a new job whose first
+    # scan was incomplete (hidden) and completed on a retry hours later would
+    # never be alerted. Caveat that remains: a recent posting already alerted
+    # about can resurface if it's rescanned within the window.
+    new_since = now - timedelta(hours=NEW_JOB_WINDOW_HOURS)
+    stmt = stmt.where(JobPosting.scanned_at >= since, JobPosting.first_scanned_at >= new_since).order_by(*order)
     url_rows = db.scalars(stmt.options(selectinload(JobPostingUrl.postings))).all()
     if not url_rows:
         return False
