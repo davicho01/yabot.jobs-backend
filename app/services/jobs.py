@@ -32,6 +32,8 @@ from app.services import browser_fetch, geo
 from app.services.geo import resolve_area_codes, resolve_country_for_locations, resolve_places
 from app.services.job_locations import location_matches, radius_search, split_locations
 from app.services.job_sector import apply_sector
+from app.services.job_standard_titles import apply_standard_titles
+from app.services import standard_titles
 from app.services.workplace import infer_workplace_type, reconcile_workplace_type
 from app.services.job_queue import enqueue_scan, enqueue_source_scan
 from app.services.job_scanner import ScanResult, domain_of, normalize_url, scan_job_url, url_hash
@@ -145,7 +147,17 @@ def build_job_search_statement(
         if q:
             include, exclude_terms = parse_search_query(q)
             if include:
-                stmt = stmt.where(JobPosting.title.ilike(f"%{include}%"))
+                # The literal title match, or any posting tagged with the
+                # search's standard titles or their related ones ("swe" also
+                # finds Backend Engineer postings) — see app.services.standard_titles.
+                # A search that isn't a tech title gets none: literal only.
+                titles = standard_titles.related(standard_titles.tag_search(include) or [])
+                stmt = stmt.where(
+                    or_(
+                        JobPosting.title.ilike(f"%{include}%"),
+                        *[JobPosting.standard_titles.contains([title]) for title in titles],
+                    )
+                )
             for term in exclude_terms:
                 stmt = stmt.where(JobPosting.title.not_ilike(f"%{term}%"))
         if location:
@@ -1100,6 +1112,7 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
     # From the stored title/description (not the raw scrape), so the text hash
     # matches what the pending sweep and the backfill compute from the row.
     apply_sector(posting, posting.title, posting.description)
+    apply_standard_titles(posting)
     posting.extracted_fields = _strip_nul(_merge_extracted_fields(result, llm_extraction))
     posting.raw_source = (
         {"html_excerpt": _strip_nul(result.raw_html_excerpt)} if result.raw_html_excerpt else None

@@ -25,4 +25,5 @@ pillow>=11.0  # normalizes crawled company logos (app/services/logo_crawler.py);
 python-multipart>=0.0.12
 onnxruntime>=1.30  # runs the standard-title model in process (app/services/standard_titles.py)
 tokenizers>=0.23  # its tokenizer, without the rest of transformers
+google-cloud-storage>=2.18  # reads that model from GCS on prod
 functions-framework>=3.5  # only used by the crawl-dispatcher/worker/crawl-worker Cloud Function deploys

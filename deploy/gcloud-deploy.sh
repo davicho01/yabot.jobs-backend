@@ -285,8 +285,15 @@ gcloud run deploy api \
   --set-secrets="$COMMON_SECRETS" \
   --min-instances=0 \
   --max-instances=10 \
+  --memory=1Gi \
   --allow-unauthenticated \
   --update-labels=function=api
+
+# api, worker, retry-failed-scans and saved-search-alerts run at 1Gi (worker,
+# retry and alerts with --cpu=1) for the in-process standard-title model
+# (app/services/standard_titles.py), read from GCS: .github/workflows/deploy.yml
+# sets STANDARD_TITLE_MODEL on each. Their runtime service account needs
+# roles/storage.objectViewer on gs://yabotjobs-ml-models.
 
 # ---------------------------------------------------------------------------
 # 5. worker / crawl-worker — Cloud Functions (2nd gen), Pub/Sub-triggered
@@ -320,7 +327,8 @@ gcloud functions deploy worker \
   --trigger-topic=job-scan-requests \
   --set-env-vars="$COMMON_ENV" \
   --set-secrets="$COMMON_SECRETS" \
-  --memory=512Mi \
+  --memory=1Gi \
+  --cpu=1 \
   --timeout=540s \
   --max-instances=30 \
   --update-labels=function=worker
@@ -534,7 +542,8 @@ gcloud functions deploy saved-search-alerts \
   --no-allow-unauthenticated \
   --set-env-vars="$COMMON_ENV" \
   --set-secrets="$COMMON_SECRETS" \
-  --memory=512Mi \
+  --memory=1Gi \
+  --cpu=1 \
   --timeout=540s \
   --update-labels=function=saved-search-alerts
 
@@ -627,7 +636,8 @@ gcloud functions deploy retry-failed-scans \
   --no-allow-unauthenticated \
   --set-env-vars="$COMMON_ENV" \
   --set-secrets="$COMMON_SECRETS" \
-  --memory=512Mi \
+  --memory=1Gi \
+  --cpu=1 \
   --timeout=540s \
   --update-labels=function=retry-failed-scans
 

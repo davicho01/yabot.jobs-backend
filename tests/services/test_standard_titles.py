@@ -18,13 +18,6 @@ TITLES = ["Software Engineer", "Senior Software Engineer", "Backend Engineer", "
 MODEL_DIR = Path(__file__).resolve().parents[2] / "models" / "standard_title"
 
 
-@pytest.fixture
-def fresh_model(monkeypatch):
-    """Forget any loaded model so each test loads from its own folder."""
-    monkeypatch.setattr(standard_titles, "_model", None)
-    monkeypatch.setattr(standard_titles, "_load_failed", False)
-
-
 def test_answer_always_gives_the_top_title():
     scores = np.array([0.05, 0.1, 0.02, 0.01, 0.0])
     assert standard_titles.answer(scores, TITLES, 0.2, 3) == ["Senior Software Engineer"]
@@ -46,18 +39,66 @@ def test_clean_matches_training():
     assert standard_titles._clean("x" * 10, 4) == "xxxx"
 
 
-def test_missing_model_returns_none(fresh_model, monkeypatch, tmp_path):
-    monkeypatch.setattr(settings, "standard_title_model_dir", str(tmp_path / "nope"))
+def test_missing_model_returns_none(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "standard_title_model", str(tmp_path / "nope"))
     assert standard_titles.tag_posting("Software Engineer", "Build things.") is None
     assert standard_titles.tag_search("swe") is None
     assert standard_titles.model_version() is None
 
 
+def test_related_adds_each_titles_related_ones_once():
+    assert standard_titles.related(["Data Engineer", "Analytics Engineer"]) == [
+        "Data Engineer",
+        "Analytics Engineer",
+        "Data Architect",
+        "Data Analyst",
+    ]
+    assert standard_titles.related([]) == []
+
+
+def test_list_has_every_title_its_related_titles_name():
+    titles = set(standard_titles.list_titles())
+    assert len(titles) == 103
+    assert set(standard_titles.related(sorted(titles))) == titles
+
+
+def test_reads_the_model_from_gcs(monkeypatch):
+    """A gs:// location reads each file of the folder into memory by name."""
+    from google.cloud import storage
+
+    read = []
+
+    class FakeBlob:
+        def __init__(self, name):
+            self.name = name
+
+        def download_as_bytes(self):
+            read.append(self.name)
+            return b"{}"
+
+    class FakeClient:
+        def bucket(self, name):
+            assert name == "yabotjobs-ml-models"
+            return type("Bucket", (), {"blob": lambda _self, n: FakeBlob(n)})()
+
+    monkeypatch.setattr(storage, "Client", FakeClient)
+    reader = standard_titles._reader("gs://yabotjobs-ml-models/standard-title/v1/")
+    assert reader("run.json") == b"{}"
+    assert read == ["standard-title/v1/run.json"]
+
+
 @pytest.mark.skipif(not (MODEL_DIR / "run.json").exists(), reason="model not fetched (one_off/fetch_standard_title_model.sh)")
 class TestWithModel:
     @pytest.fixture(autouse=True)
-    def model(self, fresh_model, monkeypatch):
-        monkeypatch.setattr(settings, "standard_title_model_dir", str(MODEL_DIR))
+    def model(self, monkeypatch):
+        monkeypatch.setattr(settings, "standard_title_model", str(MODEL_DIR))
+
+    def test_list_matches_the_models_titles(self):
+        assert standard_titles.list_titles() == json.loads((MODEL_DIR / "run.json").read_text())["titles"]
+
+    def test_a_search_that_isnt_a_tech_title_gets_none(self):
+        assert standard_titles.tag_search("barista") == []
+        assert standard_titles.tag_search("nurse") == []
 
     def test_same_titles_as_the_training_export(self):
         cases = json.loads((MODEL_DIR / "parity_cases.json").read_text())
