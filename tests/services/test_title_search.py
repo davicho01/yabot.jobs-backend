@@ -18,7 +18,7 @@ def test_a_tech_search_also_matches_its_titles_and_their_related_ones(monkeypatc
     monkeypatch.setattr(standard_titles, "tag_search", lambda text: ["Data Engineer"])
     sql, params = _search_sql("data eng -senior")
 
-    assert "job_postings.title ILIKE" in sql and "%data eng%" in params
+    assert "job_postings.title ILIKE" in sql and "%data%" in params and "%eng%" in params  # each word
     # the operator ix_job_postings_standard_titles (GIN, jsonb_path_ops) serves, once per title
     assert sql.count("job_postings.standard_titles @>") == 3
     assert [["Data Engineer"], ["Analytics Engineer"], ["Data Architect"]] == [p for p in params if isinstance(p, list)]

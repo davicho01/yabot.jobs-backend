@@ -344,6 +344,17 @@ def test_build_job_search_statement_excludes_postings_matching_a_dash_term(scan_
     assert [row.id for row in results] == [keep.url_id]
 
 
+def test_build_job_search_statement_matches_every_word_in_any_order(scan_db):
+    lead_cloud = _make_posting(scan_db, title="Lead Cloud Engineer")
+    eng_lead = _make_posting(scan_db, title="Cloud Engineering Lead")
+    _make_posting(scan_db, title="Lead Data Scientist")  # no "engineer"
+
+    stmt, _order, _area = build_job_search_statement(q="lead engineer")
+    results = scan_db.scalars(stmt).all()
+
+    assert {row.id for row in results} == {lead_cloud.url_id, eng_lead.url_id}
+
+
 def test_build_job_search_statement_with_only_an_exclusion_still_filters(scan_db):
     keep = _make_posting(scan_db, title="Staff Engineer")
     _make_posting(scan_db, title="Senior Engineer")
