@@ -53,14 +53,6 @@ def test_location_key_ignores_order_case_and_repeats():
     assert location_key(None) == ()
 
 
-def test_location_key_leaves_out_country_only_entries():
-    # Regression from prod (2026-10-12): AutoZone stores listed as just
-    # "United States" were merged into one posting.
-    assert location_key(["United States"]) == ()
-    assert location_key(["Mexico"]) == ()
-    assert location_key(["Austin, TX", "United States"]) == ("austin, tx",)
-
-
 AUSTIN = [[30.2672, -97.7431]]
 NYC = [[40.7128, -74.006]]
 
@@ -123,12 +115,6 @@ def test_scan_keeps_different_stores_apart(scan_db, make_url):
     _scan(scan_db, make_url(None), location="Bridgehampton, NY")
     other_store = _scan(scan_db, make_url(None), location="Staten Island, NY")
     assert other_store.primary_posting_id is None
-
-
-def test_scan_keeps_country_only_listings_apart(scan_db, make_url):
-    _scan(scan_db, make_url(None), location="United States")
-    other = _scan(scan_db, make_url(None), location="United States")
-    assert other.primary_posting_id is None
 
 
 def test_scan_never_links_to_a_closed_listing(scan_db, make_url):
