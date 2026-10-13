@@ -1,14 +1,18 @@
 import re
+from datetime import date
 from typing import Any
 
 import httpx
 
-from app.models.enums import AtsType, EmploymentType
+from app.models.enums import AtsType, EmploymentType, WorkplaceType
 from app.services.adapters import base
 from app.services.adapters.base import TIMEOUT, AtsAdapter, ScanResult, get_with_retry, limit_job_urls
+from app.services.adapters.text import clean_text
 
 _BAMBOOHR_JOBS_URL = "https://{board_key}.bamboohr.com/careers/list"
 _BAMBOOHR_JOB_URL = "https://{board_key}.bamboohr.com/careers/{job_id}"
+_BAMBOOHR_DETAIL_URL = "https://{board_key}.bamboohr.com/careers/{job_id}/detail"
+_BAMBOOHR_COMPANY_URL = "https://{board_key}.bamboohr.com/careers/company-info"
 _BAMBOOHR_URL_RE = re.compile(r"([a-zA-Z0-9-]+)\.bamboohr\.com", re.IGNORECASE)
 _JOB_ID_RE = re.compile(r"/careers/(\d+)")
 
@@ -19,11 +23,7 @@ def _match(url: str) -> str | None:
 
 
 def _search_postings(board_key: str) -> list[dict[str, Any]]:
-    # Free, public, unauthenticated API — no key required. Also carries
-    # location/employment-status fields the job page itself never exposes
-    # anywhere extractable (no JSON-LD, no embedded page state at all — a
-    # pure client-rendered SPA, verified live) — used by scan_job_url below
-    # too, not just for discovering URLs.
+    # Free, public, unauthenticated API — no key required.
     response = get_with_retry(_BAMBOOHR_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
     response.raise_for_status()
     return response.json().get("result", [])
@@ -65,39 +65,66 @@ def _employment_type_of(posting: dict[str, Any]) -> str:
     return EmploymentType.UNKNOWN
 
 
+# locationType on /careers/{id}/detail and /careers/list (verified live
+# across tenants 2026-10-13): "1" on remote openings with no office
+# location, "2" on ones titled "(Hybrid)", "0" on everything else.
+_WORKPLACE_TYPES = {"0": WorkplaceType.ONSITE, "1": WorkplaceType.REMOTE, "2": WorkplaceType.HYBRID}
+
+
+def _company_name(board_key: str) -> str | None:
+    try:
+        response = get_with_retry(_BAMBOOHR_COMPANY_URL.format(board_key=board_key), timeout=TIMEOUT)
+        response.raise_for_status()
+        return clean_text((response.json().get("result") or {}).get("name"))
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
+def _posted_at_of(job: dict[str, Any]) -> date | None:
+    try:
+        return date.fromisoformat(job.get("datePosted") or "")
+    except ValueError:
+        return None
+
+
 def scan_job_url(url: str) -> ScanResult | None:
+    # The job page is a client-rendered shell whose only description is the
+    # meta/og teaser (~300 characters, cut mid-word), so read the posting
+    # from the JSON the page itself loads instead.
     board_key = _match(url)
     job_id_match = _JOB_ID_RE.search(url)
     if board_key is None or job_id_match is None:
         return None
-    job_id = job_id_match.group(1)
 
+    detail_url = _BAMBOOHR_DETAIL_URL.format(board_key=board_key, job_id=job_id_match.group(1))
     try:
-        page = base.fetch_html(url)
+        response = get_with_retry(detail_url, timeout=TIMEOUT)
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        return ScanResult(success=False, error=str(exc), expired=exc.response.status_code == 404)
     except httpx.HTTPError as exc:
         return ScanResult(success=False, error=str(exc))
-    html = page.text
+    job = (response.json().get("result") or {}).get("jobOpening") or {}
+    status = job.get("jobOpeningStatus")
+    if status and status != "Open":
+        return ScanResult(success=False, error=f"BambooHR job is {status}.", expired=True)
 
-    try:
-        postings = _search_postings(board_key)
-    except httpx.HTTPError:
-        postings = []
-    posting = next((p for p in postings if str(p.get("id")) == job_id), None)
-
-    description = base.fallback_description(html) or base.og_description(html)
-    salary_min, salary_max, salary_currency = base.salary_from_text(description)
+    description = base.html_to_formatted_text(job.get("description"))
+    salary_min, salary_max, salary_currency = base.salary_from_text(job.get("compensation"))
+    if salary_min is None and salary_max is None:
+        salary_min, salary_max, salary_currency = base.salary_from_text(description)
     return ScanResult(
         success=True,
-        title=base.og_title(html) or base.fallback_title(html),
+        title=clean_text(job.get("jobOpeningName")),
         description=description,
-        company_name=base.og_site_name(html),
-        location=_location_of(posting) if posting else None,
-        employment_type=_employment_type_of(posting) if posting else EmploymentType.UNKNOWN,
+        company_name=_company_name(board_key),
+        location=_location_of(job),
+        workplace_type=_WORKPLACE_TYPES.get(job.get("locationType") or "", WorkplaceType.UNKNOWN),
+        employment_type=_employment_type_of(job),
         salary_min=salary_min,
         salary_max=salary_max,
         salary_currency=salary_currency,
-        raw_html_excerpt=html[:20_000],
-        full_html=html,
+        posted_at=_posted_at_of(job),
     )
 
 

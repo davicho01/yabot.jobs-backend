@@ -22,6 +22,7 @@ needs_review with scan_error starting with INCOMPLETE_SCAN_ERROR_PREFIX.
 from __future__ import annotations
 
 from app.core.config import settings
+from app.services.adapters import base
 from app.services.adapters.base import ScanResult
 
 INCOMPLETE_SCAN_ERROR_PREFIX = "Incomplete scan: "
@@ -41,6 +42,28 @@ def description_reasons(description: str | None) -> list[str]:
     return []
 
 
+# Length alone misses a teaser that runs just past the threshold: BambooHR's
+# og:description is ~305 characters, cut mid-word (found 2026-10-13). So a
+# description that is only the page's own meta/og description is incomplete
+# too, whatever its length, up to this cap: past it the tag holds the
+# posting itself rather than a summary of it.
+_TEASER_MAX_CHARS = 1_000
+
+
+def _normalized(text: str | None) -> str:
+    return " ".join((text or "").split())
+
+
+def is_page_teaser(description: str | None, html: str | None) -> bool:
+    description = _normalized(description)
+    if not description or not html or len(description) > _TEASER_MAX_CHARS:
+        return False
+    return description in {_normalized(base.fallback_description(html)), _normalized(base.og_description(html))}
+
+
 def incomplete_reasons(result: ScanResult) -> list[str]:
     """Why a successful scan's content looks incomplete; empty when it's fine."""
-    return description_reasons(result.description)
+    reasons = description_reasons(result.description)
+    if not reasons and is_page_teaser(result.description, result.full_html or result.raw_html_excerpt):
+        reasons.append("description is only the page's meta/og description")
+    return reasons
