@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from app.models.enums import ScanStatus
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
+from app.services.geo import resolve_entry
 
 # Common legal suffixes scraped company names carry inconsistently
 # ("Acme Inc.", "Acme, LLC", "Acme Corp") — stripped so all three match.
@@ -128,8 +129,15 @@ def clean_company_name(name: str | None) -> str | None:
 def location_key(locations: list[str] | None) -> tuple[str, ...]:
     """A posting's locations, case- and whitespace-folded, de-duplicated and
     sorted — so "Jersey City; Newark" and "Newark; Jersey City" compare
-    equal. Empty when the posting names no location."""
-    return tuple(sorted({_WHITESPACE_RE.sub(" ", loc.strip().lower()) for loc in (locations or []) if loc.strip()}))
+    equal. Entries that name only a country ("United States", "Mexico") are
+    left out: prod (2026-10-12) had AutoZone stores listed as just "United
+    States", which says nothing about which store. Empty when the posting
+    names no more specific location."""
+    return tuple(sorted({
+        _WHITESPACE_RE.sub(" ", loc.strip().lower())
+        for loc in (locations or [])
+        if loc.strip() and resolve_entry(loc).geo != "country"
+    }))
 
 
 def _place_set(places: list[list[float]] | None) -> set[tuple[float, float]]:
