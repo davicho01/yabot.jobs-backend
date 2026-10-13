@@ -61,6 +61,18 @@ def test_location_key_leaves_out_country_only_entries():
     assert location_key(["Austin, TX", "United States"]) == ("austin, tx",)
 
 
+def test_location_key_leaves_out_remote_entries_with_no_city_or_state():
+    # Regression from prod (2026-10-13): CACI's "999 REMOTE" listings were
+    # merged on title alone.
+    assert location_key(["999 REMOTE, United States of America"]) == ()
+    assert location_key(["Remote"]) == ()
+    assert location_key(["Remote (Any State)"]) == ()
+    # A remote entry that names a place still counts, as does a store code.
+    assert location_key(["Remote - New York"]) == ("remote - new york",)
+    assert location_key(["Remote - Austin, TX"]) == ("remote - austin, tx",)
+    assert location_key(["05044 - South Carolina CVS Pharmacy"]) == ("05044 - south carolina cvs pharmacy",)
+
+
 AUSTIN = [[30.2672, -97.7431]]
 NYC = [[40.7128, -74.006]]
 
@@ -128,6 +140,12 @@ def test_scan_keeps_different_stores_apart(scan_db, make_url):
 def test_scan_keeps_country_only_listings_apart(scan_db, make_url):
     _scan(scan_db, make_url(None), location="United States")
     other = _scan(scan_db, make_url(None), location="United States")
+    assert other.primary_posting_id is None
+
+
+def test_scan_keeps_remote_only_listings_apart(scan_db, make_url):
+    _scan(scan_db, make_url(None), location="999 REMOTE, United States of America")
+    other = _scan(scan_db, make_url(None), location="999 REMOTE, United States of America")
     assert other.primary_posting_id is None
 
 

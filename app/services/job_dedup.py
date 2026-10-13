@@ -131,13 +131,22 @@ def location_key(locations: list[str] | None) -> tuple[str, ...]:
     sorted — so "Jersey City; Newark" and "Newark; Jersey City" compare
     equal. Entries that name only a country ("United States", "Mexico") are
     left out: prod (2026-10-12) had AutoZone stores listed as just "United
-    States", which says nothing about which store. Empty when the posting
-    names no more specific location."""
+    States", which says nothing about which store. Likewise remote entries
+    that name no city or state ("Remote", "999 REMOTE, United States of
+    America" — CACI's code for remote, which isn't read as a country). Empty
+    when the posting names no more specific location."""
     return tuple(sorted({
         _WHITESPACE_RE.sub(" ", loc.strip().lower())
         for loc in (locations or [])
-        if loc.strip() and resolve_entry(loc).geo != "country"
+        if loc.strip() and _names_a_place(loc)
     }))
+
+
+def _names_a_place(entry: str) -> bool:
+    resolution = resolve_entry(entry)
+    if resolution.geo in ("country", "empty"):
+        return False
+    return not (resolution.workplace == "remote" and resolution.geo == "other")
 
 
 def _place_set(places: list[list[float]] | None) -> set[tuple[float, float]]:
