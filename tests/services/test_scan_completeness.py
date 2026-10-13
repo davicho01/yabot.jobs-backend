@@ -40,6 +40,40 @@ def test_short_description_is_incomplete():
     assert reasons == [f"description is 10 characters (under {settings.scan_min_description_chars})"]
 
 
+def _page(meta=None, og=None) -> str:
+    tags = (f'<meta name="description" content="{meta}">' if meta else "") + (
+        f'<meta property="og:description" content="{og}">' if og else ""
+    )
+    return f"<html><head>{tags}</head><body></body></html>"
+
+
+OG_TEASER = "Location: Midvale, UT. You report to the Software Engineering Manager. " * 4 + "Our Benefits: Comp"  # 305
+
+
+def test_page_teaser_over_the_threshold_is_incomplete():
+    for html in (_page(og=OG_TEASER), _page(meta=OG_TEASER)):
+        result = ScanResult(success=True, title="Engineer", description=OG_TEASER, full_html=html)
+        assert incomplete_reasons(result) == ["description is only the page's meta/og description"]
+
+
+def test_page_teaser_matches_ignoring_whitespace():
+    reflowed = OG_TEASER.replace(". ", ".\n\n")
+    result = ScanResult(success=True, title="Engineer", description=reflowed, raw_html_excerpt=_page(og=OG_TEASER))
+    assert incomplete_reasons(result) == ["description is only the page's meta/og description"]
+
+
+def test_description_longer_than_the_pages_summary_is_complete():
+    longer = OG_TEASER + " " + FULL
+    result = ScanResult(success=True, title="Engineer", description=longer, full_html=_page(og=OG_TEASER))
+    assert incomplete_reasons(result) == []
+
+
+def test_long_meta_description_holding_the_whole_posting_is_complete():
+    posting = "We are hiring. " * 70  # 1,050 characters
+    result = ScanResult(success=True, title="Engineer", description=posting, full_html=_page(meta=posting))
+    assert incomplete_reasons(result) == []
+
+
 def test_threshold_is_configurable(monkeypatch):
     monkeypatch.setattr(settings, "scan_min_description_chars", 50)
     assert incomplete_reasons(ScanResult(success=True, title="Engineer", description=TEASER)) == []
