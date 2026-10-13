@@ -5,7 +5,7 @@ import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import false, func, or_, select, true, update
+from sqlalchemy import and_, false, func, or_, select, true, update
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import Select
@@ -66,10 +66,8 @@ def parse_search_query(q: str) -> tuple[str | None, list[str]]:
     """Splits a search-box query into what a title must contain and what it
     must not. A whitespace-separated token starting with "-" (e.g.
     "-senior") excludes postings whose title contains that word; every other
-    token is rejoined (single-spaced) and matched as one substring, same as
-    a plain query was matched before exclusion existed — so "Software
-    Engineer" still means titles containing that exact phrase, not just
-    containing both words in any order.
+    token is rejoined (single-spaced); a title must contain each of those
+    words, in any order (see build_job_search_statement).
 
     Returns (include, exclude_terms) — include is None when the query is
     exclusions only (e.g. "-senior" alone still narrows the search, just
@@ -150,10 +148,12 @@ def build_job_search_statement(
                 # search's standard titles or their related ones ("swe" also
                 # finds Backend Engineer postings) — see app.services.standard_titles.
                 # A search that isn't a tech title gets none: literal only.
+                # Literal: every word in the title, in any order ("lead engineer"
+                # finds "Lead Cloud Engineer").
                 titles = standard_titles.related(standard_titles.tag_search(include) or [])
                 stmt = stmt.where(
                     or_(
-                        JobPosting.title.ilike(f"%{include}%"),
+                        and_(*[JobPosting.title.ilike(f"%{word}%") for word in include.split()]),
                         *[JobPosting.standard_titles.contains([title]) for title in titles],
                     )
                 )
