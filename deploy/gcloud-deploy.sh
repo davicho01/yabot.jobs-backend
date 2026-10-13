@@ -283,17 +283,19 @@ gcloud run deploy api \
   --add-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION" \
   --set-env-vars="$COMMON_ENV" \
   --set-secrets="$COMMON_SECRETS" \
-  --min-instances=0 \
+  --min-instances=1 \
   --max-instances=10 \
   --memory=1Gi \
   --allow-unauthenticated \
   --update-labels=function=api
 
-# api, worker, retry-failed-scans and saved-search-alerts run at 1Gi (worker,
-# retry and alerts with --cpu=1) for the in-process standard-title model
-# (app/services/standard_titles.py), read from GCS: .github/workflows/deploy.yml
-# sets STANDARD_TITLE_MODEL on each. Their runtime service account needs
-# roles/storage.objectViewer on gs://yabotjobs-ml-models.
+# --min-instances=1: one api instance is kept warm (set on prod; this said 0
+# until 2026-10-13). api and saved-search-alerts run at 1Gi (alerts with
+# --cpu=1) for the in-process standard-title model that translates typed
+# searches (app/services/standard_titles.py), read from GCS:
+# .github/workflows/deploy.yml sets STANDARD_TITLE_MODEL on both. Their runtime
+# service account (the default compute one, a project Editor) can read
+# gs://yabotjobs-ml-models.
 
 # ---------------------------------------------------------------------------
 # 5. worker / crawl-worker — Cloud Functions (2nd gen), Pub/Sub-triggered
@@ -327,8 +329,7 @@ gcloud functions deploy worker \
   --trigger-topic=job-scan-requests \
   --set-env-vars="$COMMON_ENV" \
   --set-secrets="$COMMON_SECRETS" \
-  --memory=1Gi \
-  --cpu=1 \
+  --memory=512Mi \
   --timeout=540s \
   --max-instances=30 \
   --update-labels=function=worker
@@ -636,8 +637,7 @@ gcloud functions deploy retry-failed-scans \
   --no-allow-unauthenticated \
   --set-env-vars="$COMMON_ENV" \
   --set-secrets="$COMMON_SECRETS" \
-  --memory=1Gi \
-  --cpu=1 \
+  --memory=512Mi \
   --timeout=540s \
   --update-labels=function=retry-failed-scans
 

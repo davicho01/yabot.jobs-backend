@@ -91,6 +91,64 @@ class TestApplySector:
         assert posting.sector == JobSector.UNKNOWN
 
 
+TITLES_MODEL = "ettin32m-titles-2026-10-13"
+
+
+def _tech(confidence=0.99, titles=("Backend Engineer",)) -> SectorPrediction:
+    return SectorPrediction("engineering_tech", confidence, MODEL, list(titles) if titles else None, TITLES_MODEL if titles else None)
+
+
+class TestStandardTitles:
+    """The sector service returns a Tech posting's standard titles in the same call."""
+
+    def test_tech_posting_stores_its_titles(self, scan_db, api):
+        api["answers"]["Go Developer"] = _tech()
+        posting = _posting(scan_db, title="Go Developer")
+        job_sector.apply_sector(posting, posting.title, posting.description)
+        assert posting.standard_titles == ["Backend Engineer"]
+        assert posting.standard_title_model == TITLES_MODEL
+
+    def test_below_the_sector_threshold_has_no_titles(self, scan_db, api, monkeypatch):
+        monkeypatch.setattr(settings, "sector_confidence_threshold", 0.7)
+        api["answers"]["Go Developer"] = _tech(confidence=0.5)
+        posting = _posting(scan_db, title="Go Developer")
+        job_sector.apply_sector(posting, posting.title, posting.description)
+        assert posting.sector == JobSector.UNKNOWN
+        assert posting.standard_titles is None and posting.standard_title_model is None
+
+    def test_a_rescan_that_leaves_tech_clears_the_titles(self, scan_db, api):
+        posting = _posting(
+            scan_db, title="Go Developer", standard_titles=["Backend Engineer"], standard_title_model=TITLES_MODEL
+        )
+        job_sector.apply_sector(posting, posting.title, "Now a nursing job.")  # the fake answers healthcare
+        assert posting.standard_titles is None and posting.standard_title_model is None
+
+    def test_a_failed_call_clears_the_titles(self, scan_db, api):
+        api["answers"]["Go Developer"] = None
+        posting = _posting(
+            scan_db, title="Go Developer", standard_titles=["Backend Engineer"], standard_title_model=TITLES_MODEL
+        )
+        job_sector.apply_sector(posting, posting.title, posting.description)
+        assert posting.standard_titles is None and posting.standard_title_model is None
+
+    def test_unchanged_tech_posting_with_titles_skips_the_api(self, scan_db, api):
+        api["answers"]["Go Developer"] = _tech()
+        posting = _posting(scan_db, title="Go Developer")
+        job_sector.apply_sector(posting, posting.title, posting.description)
+        job_sector.apply_sector(posting, posting.title, posting.description)
+        assert api["calls"] == 1
+
+    def test_unchanged_tech_posting_without_titles_is_sent_again(self, scan_db, api):
+        """Classified before the service returned titles: the next rescan tags it."""
+        api["answers"]["Go Developer"] = _tech(titles=None)
+        posting = _posting(scan_db, title="Go Developer")
+        job_sector.apply_sector(posting, posting.title, posting.description)
+        api["answers"]["Go Developer"] = _tech()
+        job_sector.apply_sector(posting, posting.title, posting.description)
+        assert api["calls"] == 2
+        assert posting.standard_titles == ["Backend Engineer"]
+
+
 class TestClassifyPendingSectors:
     def test_classifies_only_pending_postings(self, scan_db, api):
         pending = _posting(scan_db, sector_model=None)
@@ -138,6 +196,21 @@ class TestSectorApiClient:
         monkeypatch.setattr(sector_api.httpx, "post", fake_post)
         assert sector_api.classify_remote("Nurse", "<p>Care</p>") == SectorPrediction("healthcare", 0.97, MODEL)
         assert sent == {"url": "https://sector.example/classify", "json": {"title": "Nurse", "description": "<p>Care</p>"}}
+
+    def test_parses_standard_titles(self, monkeypatch):
+        monkeypatch.setattr(settings, "sector_api_url", "https://sector.example")
+        monkeypatch.setattr(sector_api, "_identity_token_headers", lambda _aud: {})
+        payload = {
+            "sector": "engineering_tech",
+            "confidence": 0.99,
+            "model": MODEL,
+            "standard_titles": ["Backend Engineer", "Software Engineer"],
+            "standard_title_model": TITLES_MODEL,
+        }
+        monkeypatch.setattr(sector_api.httpx, "post", lambda *a, **k: self._Response(payload))
+        assert sector_api.classify_remote("Go Developer", "APIs") == SectorPrediction(
+            "engineering_tech", 0.99, MODEL, ["Backend Engineer", "Software Engineer"], TITLES_MODEL
+        )
 
     @pytest.mark.parametrize(
         "behavior",

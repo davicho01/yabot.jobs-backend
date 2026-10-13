@@ -49,11 +49,12 @@ env:
   # adds/changes this one variable) so a redeploy can never drop it.
   SECTOR_API_URL: https://yabot-jobs-sector-487584214286.us-central1.run.app
   # Standard-title model (app/services/standard_titles.py), trained in
-  # yabot.jobs-ml/standard-title and read into memory on first use by api,
-  # worker, retry-failed-scans and saved-search-alerts — from GCS, since the
-  # functions deploy from source and can't carry the 128 MB file. Those four
-  # run at 1Gi for it (~350 MB with the model loaded). Same --update-env-vars
-  # pattern as SECTOR_API_URL.
+  # yabot.jobs-ml/standard-title: api and saved-search-alerts read it into
+  # memory on first use to translate typed searches into standard titles —
+  # from GCS, since the functions deploy from source and can't carry the
+  # 128 MB file. Both run at 1Gi for it. Postings get their titles from the
+  # sector service instead, in the same call as the sector, so the workers
+  # never load it. Same --update-env-vars pattern as SECTOR_API_URL.
   STANDARD_TITLE_MODEL: gs://yabotjobs-ml-models/standard-title/ettin32m-titles-2026-10-13
 
 jobs:
@@ -199,9 +200,7 @@ jobs:
             --source=. \
             --entry-point=handle_scan_request \
             --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=worker.py \
-            --update-env-vars="SECTOR_API_URL=${SECTOR_API_URL},STANDARD_TITLE_MODEL=${STANDARD_TITLE_MODEL}" \
-            --memory=1Gi \
-            --cpu=1 \
+            --update-env-vars="SECTOR_API_URL=${SECTOR_API_URL}" \
             --max-instances=30 \
             --update-labels=function=worker
 
@@ -366,9 +365,7 @@ jobs:
             --source=. \
             --entry-point=dispatch \
             --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=retry_failed_scans.py \
-            --update-env-vars="SECTOR_API_URL=${SECTOR_API_URL},STANDARD_TITLE_MODEL=${STANDARD_TITLE_MODEL}" \
-            --memory=1Gi \
-            --cpu=1 \
+            --update-env-vars="SECTOR_API_URL=${SECTOR_API_URL}" \
             --trigger-http \
             --no-allow-unauthenticated \
             --update-labels=function=retry-failed-scans

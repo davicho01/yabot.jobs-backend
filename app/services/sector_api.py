@@ -29,6 +29,11 @@ class SectorPrediction:
     sector: str  # one of the model's labels — the JobSector values
     confidence: float  # 0-1, for the model's top sector
     model: str  # model version, e.g. "ettin32m-2026-10-08"
+    # 1-3 standard tech titles, best first, when the top sector is Tech — the
+    # service runs the standard-title model in the same call (see
+    # app.services.job_sector.store_prediction). None otherwise.
+    standard_titles: list[str] | None = None
+    standard_title_model: str | None = None  # e.g. "ettin32m-titles-2026-10-13"
 
 
 def classify_remote(title: str | None, description: str | None) -> SectorPrediction | None:
@@ -44,7 +49,13 @@ def classify_remote(title: str | None, description: str | None) -> SectorPredict
         )
         response.raise_for_status()
         data = response.json()
-        return SectorPrediction(sector=data["sector"], confidence=float(data["confidence"]), model=data["model"])
+        return SectorPrediction(
+            sector=data["sector"],
+            confidence=float(data["confidence"]),
+            model=data["model"],
+            standard_titles=data.get("standard_titles"),
+            standard_title_model=data.get("standard_title_model"),
+        )
     except Exception:  # never raises: network, auth-token, HTTP and response-shape errors alike
         logger.warning("Sector API call failed; posting left pending for the sweep.", exc_info=True)
         return None

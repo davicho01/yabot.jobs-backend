@@ -29,7 +29,6 @@ from app.db.session import SessionLocal
 from app.services.gcp_admin import warm_up_browser_scaler
 from app.services.job_queue import ensure_topic
 from app.services.job_sector import classify_pending_sectors
-from app.services.job_standard_titles import tag_pending_standard_titles
 from app.services.jobs import wake_retryable_failed_scans, wake_sources_with_pending_scans
 
 configure_logging()
@@ -62,9 +61,6 @@ def main() -> None:
         # Kept well inside this function's 540s timeout, after the scan
         # retries above (those are quick; this one waits on the sector API).
         classify_pending_sectors(db, time_budget_seconds=300)
-        # After the sectors, so a posting the sweep above just found to be
-        # Tech gets its titles in the same run. In process (~0.5-1 s each).
-        tag_pending_standard_titles(db, time_budget_seconds=150)
     finally:
         db.close()
 
