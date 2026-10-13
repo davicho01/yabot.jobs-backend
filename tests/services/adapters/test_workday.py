@@ -223,3 +223,26 @@ def test_fetch_jobs_stops_after_500_recent_jobs(monkeypatch):
     assert len(urls) == 500
     assert len(set(urls)) == 500
     assert calls == list(range(0, 500, 20))
+
+
+_JOB_URL = "https://gehc.wd5.myworkdayjobs.com/GEHC_ExternalSite/job/Urumqi/Clinical-Sales-Specialist_R4046079"
+_TEASER_PAGE = '<html><head><meta name="description" content="Clinical Sales Specialist teaser"></head></html>'
+
+
+def _scan_with_api_answer(monkeypatch, response):
+    monkeypatch.setattr(workday.base, "fetch_html", lambda u: type("P", (), {"text": _TEASER_PAGE})())
+    monkeypatch.setattr(workday.httpx, "get", lambda *a, **k: response)
+    return workday.scan_job_url(_JOB_URL)
+
+
+def test_scan_job_url_expires_a_job_the_api_404s(monkeypatch):
+    # Verified live 2026-10-13: such jobs are gone from the board's own
+    # search, while the page still serves JSON-LD and a meta teaser.
+    result = _scan_with_api_answer(monkeypatch, FakeResponse(status_code=404))
+    assert (result.success, result.expired) == (False, True)
+
+
+def test_scan_job_url_api_error_keeps_the_page_fallback_without_expiring(monkeypatch):
+    result = _scan_with_api_answer(monkeypatch, FakeResponse(status_code=500))
+    assert result.success and not result.expired
+    assert result.description == "Clinical Sales Specialist teaser"

@@ -699,6 +699,18 @@ def resolve_country(entry: str) -> str | None:
     return None
 
 
+@lru_cache(maxsize=1)
+def _country_name_by_iso2() -> dict[str, str]:
+    with (_DATA_DIR / "world_countries.tsv").open(encoding="utf-8") as handle:
+        return {row["iso2"].upper(): row["name"] for row in csv.DictReader(handle, delimiter="\t")}
+
+
+def country_name(iso2: str | None) -> str | None:
+    """"DE" -> "Germany", for adapters whose ATS gives only a country code:
+    resolve_country reads names, not a bare code (see its comment on why)."""
+    return _country_name_by_iso2().get((iso2 or "").strip().upper())
+
+
 def resolve_country_for_locations(entries: list[str]) -> str | None:
     """A posting's country. "US" wins if *any* entry resolves to it,
     regardless of position — a posting listing nine offices worldwide plus

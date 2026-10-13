@@ -188,6 +188,12 @@ _JOB_URL_RE = re.compile(
 _JOB_DETAIL_URL = "https://{company}.{instance}.myworkdayjobs.com/wday/cxs/{company}/{site}{job_path}"
 
 
+class _NoSuchJob(Exception):
+    """The wday/cxs job API answered 404: the job is no longer posted.
+    Verified live 2026-10-13 — such jobs were also gone from their board's
+    own search while the page still served JSON-LD and a meta teaser."""
+
+
 def _fetch_job_data(url: str) -> dict[str, Any] | None:
     match = _JOB_URL_RE.search(url)
     if match is None:
@@ -199,6 +205,10 @@ def _fetch_job_data(url: str) -> dict[str, Any] | None:
             timeout=10.0,
         )
         response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise _NoSuchJob(job_path) from exc
+        return None
     except httpx.HTTPError:
         return None
     data = response.json()
@@ -237,7 +247,10 @@ def scan_job_url(url: str) -> ScanResult | None:
     html = page.text
     job_postings = base.extract_json_ld_postings(html)
     job_ld = job_postings[0] if job_postings else None
-    fields = extract(url, html)
+    try:
+        fields = extract(url, html)
+    except _NoSuchJob:
+        return ScanResult(success=False, error="Workday no longer lists this job.", expired=True)
 
     hiring_org = job_ld.get("hiringOrganization") if job_ld else None
     company_name = hiring_org.get("name") if isinstance(hiring_org, dict) else None
