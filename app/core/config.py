@@ -171,6 +171,12 @@ class Settings(BaseSettings):
     # reclassifying anything.
     sector_confidence_threshold: float = 0.7
 
+    # Folder of the standard-title model (app/services/standard_titles.py),
+    # trained in yabot.jobs-ml/standard-title and baked into the image; not in
+    # git (one_off/fetch_standard_title_model.sh puts it here locally). Missing
+    # just means postings stay untagged and search uses the literal match.
+    standard_title_model_dir: str = "models/standard_title"
+
     # logo.dev secret key (sk_...) for automatic company logos — server-side
     # only, used by the logo sync to download each logo once into our own
     # storage (see app.services.logo_dev). Never sent to browsers. Unset

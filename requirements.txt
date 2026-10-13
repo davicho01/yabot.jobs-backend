@@ -23,4 +23,6 @@ python-docx>=1.1
 reportlab>=4.2
 pillow>=11.0  # normalizes crawled company logos (app/services/logo_crawler.py); also a reportlab dependency
 python-multipart>=0.0.12
+onnxruntime>=1.30  # runs the standard-title model in process (app/services/standard_titles.py)
+tokenizers>=0.23  # its tokenizer, without the rest of transformers
 functions-framework>=3.5  # only used by the crawl-dispatcher/worker/crawl-worker Cloud Function deploys

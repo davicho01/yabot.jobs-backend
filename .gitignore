@@ -7,5 +7,7 @@ __pycache__/
 *.egg-info/
 .DS_Store
 .claude/
+# Model files (app/services/standard_titles.py): downloaded into the image at deploy, never in git.
+/models/
 /docs/
 /docs/
