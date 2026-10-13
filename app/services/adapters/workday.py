@@ -189,9 +189,24 @@ _JOB_DETAIL_URL = "https://{company}.{instance}.myworkdayjobs.com/wday/cxs/{comp
 
 
 class _NoSuchJob(Exception):
-    """The wday/cxs job API answered 404: the job is no longer posted.
-    Verified live 2026-10-13 — such jobs were also gone from their board's
-    own search while the page still served JSON-LD and a meta teaser."""
+    """The wday/cxs job API answered 404, or 403 with Workday's own "S22"
+    permission-denied error: the job is no longer posted. Verified live
+    2026-10-13 — such jobs were also gone from their board's own search
+    (GE HealthCare, GE Vernova for 404; Sysco, Genesis Minerals for 403
+    S22) while an open job's API call answered 200. A 403 without that
+    error code may be a block, not a removal, so it isn't read as one."""
+
+
+def _is_removed_job_answer(response: httpx.Response) -> bool:
+    if response.status_code == 404:
+        return True
+    if response.status_code != 403:
+        return False
+    try:
+        body = response.json()
+    except ValueError:
+        return False
+    return isinstance(body, dict) and body.get("errorCode") == "S22"
 
 
 def _fetch_job_data(url: str) -> dict[str, Any] | None:
@@ -206,7 +221,7 @@ def _fetch_job_data(url: str) -> dict[str, Any] | None:
         )
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 404:
+        if _is_removed_job_answer(exc.response):
             raise _NoSuchJob(job_path) from exc
         return None
     except httpx.HTTPError:
