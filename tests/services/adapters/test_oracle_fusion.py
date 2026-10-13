@@ -227,3 +227,26 @@ def test_scan_job_url_claims_vanity_domain_job_url(monkeypatch):
     assert result.location == "Seattle, WA, United States"
     assert result.employment_type == "full_time"
     assert "Lead the lounge team." in result.description
+
+
+_JOB_URL = "https://egug.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/26009316"
+_TEASER_PAGE = '<html><head><meta name="description" content="Lead the lounge team..."></head></html>'
+
+
+def _scan_with_api_answer(monkeypatch, response):
+    monkeypatch.setattr(oracle_fusion.base, "fetch_html", lambda u: type("P", (), {"text": _TEASER_PAGE})())
+    monkeypatch.setattr(oracle_fusion.httpx, "get", lambda *a, **k: response)
+    return oracle_fusion.scan_job_url(_JOB_URL)
+
+
+def test_scan_job_url_expires_a_job_the_api_no_longer_has(monkeypatch):
+    # Verified live 2026-10-13: such jobs are gone from the site's own search,
+    # while the page still serves its meta teaser.
+    result = _scan_with_api_answer(monkeypatch, FakeResponse(json_data={"items": [], "count": 0}))
+    assert (result.success, result.expired) == (False, True)
+
+
+def test_scan_job_url_api_error_keeps_the_page_fallback_without_expiring(monkeypatch):
+    result = _scan_with_api_answer(monkeypatch, FakeResponse(status_code=503))
+    assert result.success and not result.expired
+    assert result.description == "Lead the lounge team..."

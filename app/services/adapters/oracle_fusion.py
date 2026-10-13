@@ -195,6 +195,12 @@ _WORKPLACE_TYPE_MAP = {
 }
 
 
+class _NoSuchJob(Exception):
+    """The requisition API answered, with no items: the job is no longer
+    posted. Verified live 2026-10-13 — such jobs were also gone from the
+    site's own search while their page still served its meta teaser."""
+
+
 def _fetch_job_data(url: str) -> dict[str, Any] | None:
     resolved = _resolve(url)
     if resolved is None:
@@ -213,7 +219,9 @@ def _fetch_job_data(url: str) -> dict[str, Any] | None:
         response.raise_for_status()
     except httpx.HTTPError:
         return None
-    items = response.json().get("items", [])
+    items = response.json().get("items")
+    if items == []:
+        raise _NoSuchJob(job_id)
     return items[0] if items and isinstance(items[0], dict) else None
 
 
@@ -401,7 +409,10 @@ def scan_job_url(url: str) -> ScanResult | None:
         return ScanResult(success=False, error=str(exc))
 
     html = page.text
-    fields = extract(url, html)
+    try:
+        fields = extract(url, html)
+    except _NoSuchJob:
+        return ScanResult(success=False, error="Oracle no longer lists this job.", expired=True)
     description = (
         (fields.description if fields else None) or base.fallback_description(html) or base.og_description(html)
     )
