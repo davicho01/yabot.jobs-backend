@@ -146,11 +146,16 @@ _DIGEST_ROW_HTML = """\
 """
 
 # The company's logo, beside its row — only for rows that have one (see
-# app.services.company_logos); a row without one is just the text cell.
+# app.services.company_logos); a row without one gets an empty spacer cell
+# of the same width, so its text stays in the text column and lines up.
 _DIGEST_LOGO_CELL_HTML = """\
           <td width="40" valign="top" style="width:40px;padding:16px 0 14px;border-top:1px solid #e8e8ed;">
             <img src="{src}" width="28" height="28" alt="{alt}" style="display:block;border-radius:6px;border:1px solid #e8e8ed;">
           </td>
+"""
+
+_DIGEST_LOGO_SPACER_HTML = """\
+          <td width="40" style="width:40px;padding:0;border-top:1px solid #e8e8ed;">&nbsp;</td>
 """
 
 _DIGEST_MORE_ROW_HTML = """\
@@ -223,7 +228,7 @@ def _logo_cell(job: "JobDetailRead") -> str:
     posting = job.posting
     src = posting.company_logo_url
     if src is None:
-        return ""
+        return _DIGEST_LOGO_SPACER_HTML
     return _DIGEST_LOGO_CELL_HTML.format(src=html.escape(src), alt=html.escape(posting.company_name or ""))
 
 
@@ -252,9 +257,12 @@ def send_saved_search_digest_email(
     """
     total = len(matches) + more_count
     plural = "" if total == 1 else "es"
-    search_label = f'"{html.escape(name)}"' if name else "your search"
+    # Names that already start with a quote (e.g. '"engineer" · Remote') aren't
+    # wrapped in another pair.
+    quoted_name = name if name and name.startswith('"') else f'"{name}"'
+    search_label = html.escape(quoted_name) if name else "your search"
     headline = f"{total} new match{plural} for {search_label}"
-    subject = f"{total} new job match{plural} on Yabot Jobs" if not name else f"{total} new match{plural} for \"{name}\""
+    subject = f"{total} new job match{plural} on Yabot Jobs" if not name else f"{total} new match{plural} for {quoted_name}"
 
     rows_html = "".join(
         _DIGEST_ROW_HTML.format(

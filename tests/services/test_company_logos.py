@@ -188,7 +188,11 @@ class TestDigestEmail:
         assert 'src="https://yabot.jobs/logos/acme.com-1.png"' in cell
         assert 'alt="Acme &amp; Co"' in cell
 
-    def test_no_cell_without_a_logo(self):
+    def test_spacer_cell_without_a_logo(self):
+        # Every row keeps two cells, so a logo-less row's text isn't squeezed
+        # into the 40px logo column.
         from app.services.email import _logo_cell
 
-        assert _logo_cell(self._job(None)) == ""
+        cell = _logo_cell(self._job(None))
+        assert 'width="40"' in cell
+        assert "<img" not in cell
