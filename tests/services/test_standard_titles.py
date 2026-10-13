@@ -50,6 +50,12 @@ def test_related_adds_each_titles_related_ones_once():
     assert standard_titles.related([]) == []
 
 
+def test_a_lead_search_does_not_widen_to_senior_and_staff_roles():
+    assert standard_titles.related(["Lead Software Engineer"]) == ["Lead Software Engineer"]
+    # The other way round still holds: a senior search also shows lead roles.
+    assert "Lead Software Engineer" in standard_titles.related(["Senior Software Engineer"])
+
+
 def test_list_has_every_title_its_related_titles_name():
     titles = set(standard_titles.list_titles())
     assert len(titles) == 103
