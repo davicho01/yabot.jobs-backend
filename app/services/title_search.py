@@ -55,7 +55,7 @@ LEVEL_BANDS: dict[str, tuple[str, ...]] = {
 LEVEL_PHRASES: dict[str, str] = {
     # IC ladder
     "intern": "intern", "interns": "intern", "internship": "intern", "co op": "intern", "coop": "intern",
-    "apprentice": "intern", "apprenticeship": "intern", "student": "intern",
+    "apprentice": "intern", "apprenticeship": "intern", "student": "intern", "summer": "intern",
     "junior": "junior", "jr": "junior", "entry level": "junior", "new grad": "junior", "new graduate": "junior",
     "graduate": "junior", "early career": "junior", "associate": "junior", "trainee": "junior",
     "mid": "mid", "mid level": "mid", "intermediate": "mid",
@@ -71,8 +71,11 @@ LEVEL_PHRASES: dict[str, str] = {
     "director": "director", "head of": "director",
     "senior director": "senior_director", "sr director": "senior_director", "executive director": "senior_director",
     "regional director": "senior_director",
-    "vp": "vp", "vice president": "vp", "svp": "vp", "evp": "vp", "avp": "vp",
-    "senior vice president": "vp", "executive vice president": "vp", "assistant vice president": "vp",
+    "vp": "vp", "vice president": "vp", "svp": "vp", "evp": "vp",
+    "senior vice president": "vp", "executive vice president": "vp",
+    # A bank grade for senior individual contributors ("Senior DevOps
+    # Engineer - Assistant Vice President"), not an executive
+    "avp": "senior", "assistant vice president": "senior",
     "chief": "executive", "ceo": "executive", "cto": "executive", "cfo": "executive", "coo": "executive",
     "cio": "executive", "ciso": "executive", "cmo": "executive", "cpo": "executive", "president": "executive",
 }
@@ -107,6 +110,7 @@ ROLE_PHRASES: dict[str, str] = {
     "programmer": "software_general", "application developer": "software_general",
     "applications developer": "software_general", "member of technical staff": "software_general",
     "mts": "software_general", "coder": "software_general", "forward deployed": "software_general",
+    "deployed engineer": "software_general",
     # backend
     "backend": "backend", "back end": "backend", "server side": "backend", "api engineer": "backend",
     "api developer": "backend", "java": "backend", "golang": "backend", "go developer": "backend",
@@ -129,7 +133,8 @@ ROLE_PHRASES: dict[str, str] = {
     "platform engineer": "devops_sre_platform", "platform engineering": "devops_sre_platform",
     "infrastructure engineer": "devops_sre_platform", "infrastructure": "devops_sre_platform",
     "infra engineer": "devops_sre_platform", "cloud engineer": "devops_sre_platform",
-    "cloud infrastructure": "devops_sre_platform", "kubernetes": "devops_sre_platform",
+    "cloud infrastructure": "devops_sre_platform", "cloud architect": "devops_sre_platform",
+    "kubernetes": "devops_sre_platform",
     "k8s": "devops_sre_platform", "build engineer": "devops_sre_platform",
     "release engineer": "devops_sre_platform", "observability": "devops_sre_platform",
     "production engineer": "devops_sre_platform", "mlops": "devops_sre_platform",
@@ -146,6 +151,7 @@ ROLE_PHRASES: dict[str, str] = {
     "big data": "data_engineering", "database engineer": "data_engineering",
     "database administrator": "data_engineering", "dba": "data_engineering", "data platform": "data_engineering",
     "database": "data_engineering", "data integration": "data_engineering", "data modeling": "data_engineering",
+    "data infrastructure": "data_engineering",
     # data_science_analytics
     "data scientist": "data_science_analytics", "data science": "data_science_analytics",
     "data analyst": "data_science_analytics", "data analytics": "data_science_analytics",
@@ -168,7 +174,8 @@ ROLE_PHRASES: dict[str, str] = {
     "devsecops": "security", "security operations": "security", "security engineering": "security",
     "security automation": "security", "security researcher": "security", "iam": "security",
     "identity and access": "security", "incident response": "security", "threat": "security",
-    "vulnerability": "security", "grc": "security",
+    "vulnerability": "security", "grc": "security", "firewall": "security", "pki": "security",
+    "public key infrastructure": "security",
     # it_support_sysadmin
     "help desk": "it_support_sysadmin", "helpdesk": "it_support_sysadmin", "service desk": "it_support_sysadmin",
     "desktop support": "it_support_sysadmin", "it support": "it_support_sysadmin",
@@ -178,6 +185,8 @@ ROLE_PHRASES: dict[str, str] = {
     "it specialist": "it_support_sysadmin", "it": "it_support_sysadmin", "data center": "it_support_sysadmin",
     "network operations": "it_support_sysadmin", "network systems": "it_support_sysadmin",
     "network automation": "it_support_sysadmin", "network support": "it_support_sysadmin",
+    "server administrator": "it_support_sysadmin", "windows administrator": "it_support_sysadmin",
+    "linux administrator": "it_support_sysadmin",
     # technical_support (customer_support in the taxonomy, but searched for by tech people)
     "support engineer": "technical_support", "application support": "technical_support",
     "product support": "technical_support", "technical support": "technical_support",
@@ -191,7 +200,8 @@ ROLE_PHRASES: dict[str, str] = {
     "sap": "business_systems_analyst", "workday": "business_systems_analyst", "netsuite": "business_systems_analyst",
     # Next to tech: product, design, project management
     "product manager": "product_management", "product owner": "product_management",
-    "product management": "product_management", "apm": "product_management",
+    # Not "apm": in tech titles it's mostly application performance monitoring
+    "product management": "product_management",
     "ux": "ux_ui_design", "ui ux": "ux_ui_design", "ux ui": "ux_ui_design", "ux designer": "ux_ui_design",
     "ui designer": "ux_ui_design", "product designer": "ux_ui_design", "interaction designer": "ux_ui_design",
     "user experience": "ux_ui_design", "ux researcher": "ux_ui_design", "user researcher": "ux_ui_design",
@@ -222,11 +232,16 @@ LITERAL_PHRASES = {
     # — for the model to settle; a level typed with them still applies.
     "systems engineer", "system engineer", "solutions engineer", "solution engineer", "sales engineer",
     "customer engineer", "product engineer", "automation engineer", "research engineer", "research scientist",
+    # A company division, not the job ("Senior DFT Design Engineer, Google Cloud")
+    "google cloud",
+    # Sales and writing jobs, not software developers
+    "market developer", "business developer", "content developer",
 }
 
 # Words that only mean something once the board's sector says which field
 # the search is in: "analyst" on Tech means data/BI, anywhere else it's left
-# as a literal word.
+# as a literal word. Only used when nothing clearer named a role, so
+# "Cybersecurity Analyst" is security alone, not security plus data.
 SECTOR_PHRASES: dict[str, dict[str, str]] = {
     "analyst": {"engineering_tech": "data_science_analytics"},
     "test engineer": {"engineering_tech": "qa_test"},
@@ -317,6 +332,7 @@ def _read(tokens: list[str], sector: str | None) -> _Reading:
     level."""
     levels: list[tuple[str, bool]] = []
     roles: list[str] = []
+    sector_roles: list[str] = []
     generic_roles: list[str] = []
     residual: list[str] = []
     i = 0
@@ -333,7 +349,7 @@ def _read(tokens: list[str], sector: str | None) -> _Reading:
             elif kind == _ROLE:
                 roles.append(value)
             elif kind == _SECTOR and sector in value:
-                roles.append(value[sector])
+                sector_roles.append(value[sector])
             else:  # a literal phrase, or a sector word outside its sector
                 residual.append(" ".join(tokens[i : i + size]))
             i += size
@@ -345,7 +361,14 @@ def _read(tokens: list[str], sector: str | None) -> _Reading:
             elif token not in _STOPWORDS:
                 residual.append(token)
             i += 1
-    roles = roles or generic_roles
+    roles = roles or sector_roles or generic_roles
+    # Any more specific role makes the general software one redundant ("Full
+    # Stack Software Engineer" is fullstack, "Software Engineer,
+    # Infrastructure" is devops). software_general searches still find
+    # backend/frontend/fullstack/mobile through ROLE_LINKS, and the rest
+    # through the literal match when the title says "software engineer".
+    if "software_general" in roles and len(set(roles)) > 1:
+        roles = [role for role in roles if role != "software_general"]
     if roles:
         residual = [word for word in residual if word not in _GENERIC_NOUNS]
     return _Reading(levels, roles, residual)
@@ -353,13 +376,16 @@ def _read(tokens: list[str], sector: str | None) -> _Reading:
 
 def _pick_level(levels: list[tuple[str, bool]]) -> str | None:
     """One level from everything a text named: a management level over an IC
-    one ("Lead, Engineering Manager" is a manager), and a word over a grade
-    numeral ("Senior Software Engineer II" is senior)."""
+    one ("Lead, Engineering Manager" is a manager), an internship over any
+    other IC level ("Software Associate (Summer 2027)" is an intern), and a
+    word over a grade numeral ("Senior Software Engineer II" is senior)."""
     if not levels:
         return None
     for level, _ in levels:
         if level in MANAGEMENT:
             return level
+    if any(level == "intern" for level, _ in levels):
+        return "intern"
     for level, numeral in levels:
         if not numeral:
             return level

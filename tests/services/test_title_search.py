@@ -10,8 +10,9 @@ from app.services.title_search import (
     interpret_query,
     matches_title,
     parse_level,
+    title_roles,
 )
-from tests.services.title_search_cases import CASES
+from tests.services.title_search_cases import CASES, TECH
 
 
 def _id(case):
@@ -114,10 +115,50 @@ def test_management_and_ic_never_mix():
         ("Release Manager", None),
         ("Engineering Manager", "manager"),
         ("3D Artist", None),
+        # From the 100-posting accuracy check (2026-10-12)
+        ("Software Developer, Network Software Associate (Summer 2027)", "intern"),
+        ("Senior DevOps Engineer - Assistant Vice President", "senior"),
+        ("AVP, Software Engineer", "senior"),
+        ("Vice President, Engineering", "vp"),
     ],
 )
 def test_parse_level_reads_the_level_a_title_states(title, level):
     assert parse_level(title) == level
+
+
+@pytest.mark.parametrize(
+    ("title", "roles"),
+    [
+        # From the 100-posting accuracy check (2026-10-12)
+        ("Senior Cybersecurity Analyst", {"security"}),
+        ("Senior Cybersecurity Recovery Architect", {"security"}),
+        ("Software Developer, Network Software Associate (Summer 2027)", {"software_general"}),
+        ("Full Stack Software Engineer", {"fullstack"}),
+        ("Lead Software Engineer-Golang", {"backend"}),
+        ("Senior Observability Engineer (Splunk & APM)", {"devops_sre_platform"}),
+        ("Senior DFT Design Engineer, Google Cloud", set()),
+        ("Research Engineer, Data Infrastructure", {"data_engineering"}),
+        ("Windows Server Administrator - Night Shift", {"it_support_sysadmin"}),
+        ("FIREWALL ADMINISTRATOR", {"security"}),
+        ("Deployed Engineer (NYC)", {"software_general"}),
+        # Sector words still apply when nothing clearer is there
+        ("Data Analyst", {"data_science_analytics"}),
+        ("Senior Analyst", {"data_science_analytics"}),
+        ("Engineer III, Software", {"software_general"}),
+        ("Senior Cloud Architect", {"devops_sre_platform"}),
+        # Second round, from a fresh 100 postings
+        ("Sr. Software Engineer, Infrastructure (Remote)", {"devops_sre_platform"}),
+        ("Staff Software Engineer, Machine Learning", {"ml_ai_engineering"}),
+        ("Staff Software Engineer - Database Engineering", {"data_engineering"}),
+        ("Lead Software Engineer - AWS/SRE Engineer", {"devops_sre_platform"}),
+        ("Public Key Infrastructure (PKI) Operations Engineer", {"security"}),
+        ("Market Developer", set()),
+        ("Content Developer I", set()),
+        ("Senior Developer, Growth", {"software_general"}),
+    ],
+)
+def test_title_roles_reads_the_role_a_tech_title_states(title, roles):
+    assert title_roles(title, TECH) == roles
 
 
 def test_quoted_query_is_exact_and_never_expands():
