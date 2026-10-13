@@ -242,6 +242,20 @@ def test_scan_job_url_expires_a_job_the_api_404s(monkeypatch):
     assert (result.success, result.expired) == (False, True)
 
 
+def test_scan_job_url_expires_a_job_the_api_answers_403_s22(monkeypatch):
+    # Verified live 2026-10-13 (Sysco, Genesis Minerals): Workday's own
+    # permission-denied error for a job gone from the board's search.
+    s22 = {"errorCode": "S22", "httpStatus": 403, "message": "permission denied"}
+    result = _scan_with_api_answer(monkeypatch, FakeResponse(json_data=s22, status_code=403))
+    assert (result.success, result.expired) == (False, True)
+
+
+def test_scan_job_url_other_403_is_not_a_removal(monkeypatch):
+    # e.g. a WAF block page: no Workday error code, so don't close the job.
+    result = _scan_with_api_answer(monkeypatch, FakeResponse(text="<html>Access denied</html>", status_code=403))
+    assert not result.expired
+
+
 def test_scan_job_url_api_error_keeps_the_page_fallback_without_expiring(monkeypatch):
     result = _scan_with_api_answer(monkeypatch, FakeResponse(status_code=500))
     assert result.success and not result.expired
