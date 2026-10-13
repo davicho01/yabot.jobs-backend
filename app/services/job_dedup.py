@@ -12,21 +12,20 @@ url_id for applying, scoring, and tailoring.
 Matching is computed once, at write time (in app.services.jobs._upsert_posting
 on every successful scan/rescan), not per-request: company_key/title_key are
 cheap, normalized-for-matching forms of company_name/title (see below), and
-find_duplicate_primary compares only within same-company candidates. At this
-product's scale (a few dozen distinct companies, thousands of postings) that
-keeps the whole thing to stdlib string work — no fuzzy-search Postgres
-extension (pg_trgm) needed.
+find_duplicate_primary compares only same-company, same-title candidates by
+place (see same_place). one_off/redo_dedup.py re-groups existing rows with
+the same rule after it changes.
 """
 
 import re
 import uuid
-from difflib import SequenceMatcher
 
 from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from app.models.enums import ScanStatus
 from app.models.job_posting import JobPosting
+from app.models.job_url import JobPostingUrl
 
 # Common legal suffixes scraped company names carry inconsistently
 # ("Acme Inc.", "Acme, LLC", "Acme Corp") — stripped so all three match.
@@ -126,24 +125,40 @@ def clean_company_name(name: str | None) -> str | None:
     return None
 
 
-# How similar two (already company-matched) titles must be to count as the
-# same role. High enough that "Software Engineer" and "Senior Software
-# Engineer" at the same company don't collapse into one.
-_TITLE_SIMILARITY_THRESHOLD = 0.85
+def location_key(locations: list[str] | None) -> tuple[str, ...]:
+    """A posting's locations, case- and whitespace-folded, de-duplicated and
+    sorted — so "Jersey City; Newark" and "Newark; Jersey City" compare
+    equal. Empty when the posting names no location."""
+    return tuple(sorted({_WHITESPACE_RE.sub(" ", loc.strip().lower()) for loc in (locations or []) if loc.strip()}))
 
 
-def _metro_level_codes(metros: list[str] | None) -> set[str]:
-    """Just the metro/micro-area codes out of a posting's `metros` list — a
-    5-digit Census code, unlike the 2-letter state codes app.services.geo
-    also files it under (see resolve_area_codes). A same-company posting
-    that only shares a *state* isn't the same job: verified live on this
-    product's own data — Amazon's identical "Infra Delivery Install
-    Technician" title recurs at dozens of distinct PA facilities (Berwick,
-    metro 14100; Fairless Hills, metro 37980; ...), each a real, separate
-    opening. Matching on the bare state code merged two of them into one
-    before this filter existed. Search still wants the state-level code (so
-    "Utah" finds everything in it); dedup is precision-first, so it doesn't."""
-    return {code for code in (metros or []) if code.isdigit()}
+def _place_set(places: list[list[float]] | None) -> set[tuple[float, float]]:
+    return {(round(lat, 4), round(lon, 4)) for lat, lon in (places or [])}
+
+
+def same_place(
+    a_locations: list[str] | None,
+    a_places: list[list[float]] | None,
+    a_domain: str,
+    b_locations: list[str] | None,
+    b_places: list[list[float]] | None,
+    b_domain: str,
+) -> bool:
+    """Whether two same-company, same-title postings are at the same place,
+    i.e. the same opening. On one site the locations must match exactly: a
+    board writes its locations one consistent way, so a different string is a
+    different site — prod (2026-10-12) had Target's Bridgehampton and Staten
+    Island stores merged because both fall in the NYC metro, and dozens of
+    Amazon PA facilities share a state. Across two sites the same place is
+    often written differently ("Austin, TX" vs "Austin, Texas, United
+    States"), so a shared city (app.services.geo.resolve_places) counts too.
+    No location at all is never a match: no evidence it's the same opening."""
+    a_key, b_key = location_key(a_locations), location_key(b_locations)
+    if not a_key or not b_key:
+        return False
+    if a_key == b_key:
+        return True
+    return a_domain != b_domain and bool(_place_set(a_places) & _place_set(b_places))
 
 
 # Workday tenants often report the hiring legal entity with its tax ID or
@@ -248,55 +263,48 @@ def normalize_title(title: str | None) -> str | None:
     return value or None
 
 
-def find_duplicate_primary(db: Session, posting: JobPosting) -> uuid.UUID | None:
+def find_duplicate_primary(db: Session, posting: JobPosting, domain: str) -> uuid.UUID | None:
     """The id of an existing canonical JobPosting this one duplicates, or
     None if it's not a match for anything already known (i.e. it should be
     its own canonical). Only matches against already-canonical rows
     (primary_posting_id IS NULL) so groups never chain into a duplicate of a
-    duplicate.
+    duplicate. `domain` is this posting's JobPostingUrl.domain.
 
-    "Same job" = same normalized company, overlapping metro *area* (not just
-    state — see _metro_level_codes), and a fuzzy title match. Company is the
-    cheap pre-filter (this product's company_name cardinality is small, so
-    each bucket is cheap to fuzzy-compare in Python); metro overlap and title
-    similarity narrow it down to the same specific opening, not just the same
-    employer posting the same title at many different locations. A posting
-    with no metro-level location at all never matches via this path — no
-    positive location evidence, so it's left as its own canonical rather than
-    risked against a same-titled-but-different opening elsewhere.
+    "Same job" = same normalized company, the same normalized title, and the
+    same place (see same_place). Titles match exactly, not fuzzily: on prod a
+    0.85 similarity merged "Part Sales Manager – Part Time" with "– Full
+    Time", "Assistant Bakery Manager" with "Assistant Grocery Manager", and
+    Lockheed's "Sr - E3" with "Stf - E4" — the one word that differs is the
+    whole point, and a long shared title outweighs it.
     """
     if posting.company_key is None or posting.title_key is None:
         return None
+    if not location_key(posting.locations):
+        return None
 
-    # Only the 3 columns the comparison below actually needs — not full
-    # JobPosting objects. A company with thousands of postings (this
-    # product's largest crawl source is ~2,400) would otherwise mean
-    # fetching and ORM-hydrating that many rows' full description/
-    # raw_source/extracted_fields on every single scan, most of it never
-    # even looked at.
+    # Only the columns same_place needs — not full JobPosting objects, whose
+    # description/raw_source/extracted_fields would be loaded for nothing.
     candidates = db.execute(
-        select(JobPosting.id, JobPosting.title_key, JobPosting.metros).where(
+        select(JobPosting.id, JobPosting.locations, JobPosting.places, JobPostingUrl.domain)
+        .join(JobPostingUrl, JobPostingUrl.id == JobPosting.url_id)
+        .where(
             JobPosting.company_key == posting.company_key,
+            JobPosting.title_key == posting.title_key,
             JobPosting.primary_posting_id.is_(None),
             JobPosting.id != posting.id,
             # Only a visible canonical: a posting hidden as an incomplete scan
-            # (see app.services.scan_completeness) would otherwise take a
-            # complete duplicate out of search with it.
+            # (see app.services.scan_completeness) or closed on its board would
+            # otherwise take an open, complete duplicate out of search with it.
             JobPosting.extraction_status == ScanStatus.SUCCESS,
+            JobPostingUrl.closed_at.is_(None),
         )
+        .order_by(JobPostingUrl.created_at)
     ).all()
 
-    posting_metro_codes = _metro_level_codes(posting.metros)
-    if not posting_metro_codes:
-        return None
-
-    for candidate_id, candidate_title_key, candidate_metros in candidates:
-        if candidate_title_key is None:
-            continue
-        if not posting_metro_codes & _metro_level_codes(candidate_metros):
-            continue
-        similarity = SequenceMatcher(None, candidate_title_key, posting.title_key).ratio()
-        if similarity >= _TITLE_SIMILARITY_THRESHOLD:
+    for candidate_id, candidate_locations, candidate_places, candidate_domain in candidates:
+        if same_place(
+            posting.locations, posting.places, domain, candidate_locations, candidate_places, candidate_domain
+        ):
             return candidate_id
     return None
 

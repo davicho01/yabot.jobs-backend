@@ -1115,7 +1115,7 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
     if result.success:
         posting.company_key = normalize_company_name(posting.company_name)
         posting.title_key = normalize_title(posting.title)
-        posting.primary_posting_id = find_duplicate_primary(db, posting)
+        posting.primary_posting_id = find_duplicate_primary(db, posting, url_row.domain)
         # The official site's copy of a job wins over one found first
         # elsewhere: it becomes the canonical row, the other its duplicate —
         # unless this scan is incomplete, which gets hidden (see

@@ -3,13 +3,13 @@ from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from sqlalchemy import asc, desc, func, select
+from sqlalchemy import asc, desc, func, or_, select, tuple_
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_admin_user, get_db
 from app.models.company import Company
 from app.models.crawl_source import CrawlSource
-from app.models.enums import FeedbackKind, FeedbackStatus
+from app.models.enums import FeedbackKind, FeedbackStatus, ScanStatus
 from app.models.feedback import Feedback
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
@@ -18,6 +18,9 @@ from app.schemas.admin import (
     AdminCompanyLogoUrl,
     AdminCompanyRead,
     AdminDashboardRead,
+    DuplicateGroupListRead,
+    DuplicateGroupRead,
+    DuplicateMemberRead,
     IncompleteScanDomainCount,
     ScanDayCount,
     ScanHourCount,
@@ -149,6 +152,122 @@ def get_incomplete_scans_by_domain(
         .limit(limit)
     ).all()
     return [{"domain": domain, "count": count} for domain, count in rows]
+
+
+# Just what a duplicate group's row shows — not full JobPosting objects, whose
+# description/raw_source would be loaded for every member for nothing.
+_DUPLICATE_MEMBER_COLUMNS = (
+    JobPosting.id,
+    JobPosting.primary_posting_id,
+    JobPosting.company_key,
+    JobPosting.title_key,
+    JobPosting.company_name,
+    JobPosting.title,
+    JobPosting.location,
+    JobPostingUrl.id.label("url_id"),
+    JobPostingUrl.url,
+    JobPostingUrl.domain,
+    JobPostingUrl.closed_at,
+    JobPostingUrl.last_scanned_at,
+)
+
+
+@router.get("/duplicates", response_model=DuplicateGroupListRead)
+def get_duplicates(
+    kind: Literal["linked", "possible"] = Query("linked"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> DuplicateGroupListRead:
+    """The same job found at more than one URL. `linked` lists the groups
+    cross-source dedup already made (see app.services.job_dedup): a canonical
+    posting and the duplicates pointing at it via primary_posting_id.
+    `possible` lists open, canonical postings that share an exact company_key
+    and title_key but aren't linked — candidates the matcher missed (no
+    metro-level location, or locations that differ). Many of those are real,
+    separate openings at different sites, so members carry their location."""
+    offset = (page - 1) * page_size
+    if kind == "linked":
+        canonical_ids = (
+            select(JobPosting.id)
+            .where(
+                JobPosting.id.in_(select(JobPosting.primary_posting_id).where(JobPosting.primary_posting_id.isnot(None)))
+            )
+            .order_by(JobPosting.company_name, JobPosting.title, JobPosting.id)
+        )
+        total = db.scalar(select(func.count()).select_from(canonical_ids.subquery())) or 0
+        page_ids = list(db.scalars(canonical_ids.limit(page_size).offset(offset)))
+        rows = db.execute(
+            select(*_DUPLICATE_MEMBER_COLUMNS)
+            .join(JobPostingUrl, JobPostingUrl.id == JobPosting.url_id)
+            .where(or_(JobPosting.id.in_(page_ids), JobPosting.primary_posting_id.in_(page_ids)))
+        ).all()
+        group_keys = page_ids
+
+        def group_of(row):
+            return row.primary_posting_id or row.id
+
+    else:
+        candidate = (
+            select(JobPosting.company_key, JobPosting.title_key)
+            .join(JobPostingUrl, JobPostingUrl.id == JobPosting.url_id)
+            .where(
+                JobPosting.primary_posting_id.is_(None),
+                JobPosting.extraction_status == ScanStatus.SUCCESS,
+                JobPosting.company_key.isnot(None),
+                JobPosting.title_key.isnot(None),
+                JobPostingUrl.closed_at.is_(None),
+            )
+        )
+        groups = (
+            candidate.group_by(JobPosting.company_key, JobPosting.title_key)
+            .having(func.count() > 1)
+            .order_by(desc(func.count()), JobPosting.company_key, JobPosting.title_key)
+        )
+        total = db.scalar(select(func.count()).select_from(groups.subquery())) or 0
+        group_keys = [tuple(key) for key in db.execute(groups.limit(page_size).offset(offset)).all()]
+        rows = (
+            db.execute(
+                candidate.with_only_columns(*_DUPLICATE_MEMBER_COLUMNS).where(
+                    tuple_(JobPosting.company_key, JobPosting.title_key).in_(group_keys)
+                )
+            ).all()
+            if group_keys
+            else []
+        )
+
+        def group_of(row):
+            return (row.company_key, row.title_key)
+
+    members_by_group: dict = {key: [] for key in group_keys}
+    for row in rows:
+        members_by_group[group_of(row)].append(row)
+
+    items = []
+    for key in group_keys:
+        members = sorted(members_by_group[key], key=lambda row: (row.primary_posting_id is not None, row.domain))
+        head = members[0]
+        items.append(
+            DuplicateGroupRead(
+                company_name=head.company_name,
+                title=head.title,
+                members=[
+                    DuplicateMemberRead(
+                        url_id=row.url_id,
+                        posting_id=row.id,
+                        url=row.url,
+                        domain=row.domain,
+                        title=row.title,
+                        location=row.location,
+                        is_primary=row.primary_posting_id is None,
+                        closed=row.closed_at is not None,
+                        last_scanned_at=row.last_scanned_at,
+                    )
+                    for row in members
+                ],
+            )
+        )
+    return DuplicateGroupListRead(items=items, total=total, page=page, page_size=page_size)
 
 
 @router.delete("/listings/{url_id}", status_code=status.HTTP_204_NO_CONTENT)

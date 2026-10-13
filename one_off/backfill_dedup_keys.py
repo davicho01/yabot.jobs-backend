@@ -73,7 +73,7 @@ def main() -> None:
             posting.title_key = title_key
             db.flush()  # so this row's keys are visible to later rows' dedup queries below
 
-            primary_id = find_duplicate_primary(db, posting)
+            primary_id = find_duplicate_primary(db, posting, posting.url.domain)
             posting.primary_posting_id = primary_id
             db.commit()
 
