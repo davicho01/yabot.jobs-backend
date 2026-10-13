@@ -35,6 +35,13 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
         # Serves the pending-sector sweep (job_sector.classify_pending_sectors):
         # only the few rows whose sector API call failed, not the whole table.
         Index("ix_job_postings_sector_pending", "id", postgresql_where=text("sector_model IS NULL")),
+        # Serves title search's standard-title match (`standard_titles @> '["Software Engineer"]'`).
+        Index(
+            "ix_job_postings_standard_titles",
+            "standard_titles",
+            postgresql_using="gin",
+            postgresql_ops={"standard_titles": "jsonb_path_ops"},
+        ),
         # Also: ix_job_postings_locations_trgm, a pg_trgm GIN index on
         # CAST(locations AS TEXT) serving location_matches — created only in
         # migration c7d3e8a1f5b2, since an expression index with Postgres-only
@@ -113,6 +120,14 @@ class JobPosting(UUIDPrimaryKeyMixin, Base):
     # Hash of the title + description `sector` was computed from: a rescan
     # with the same text skips the API call (see job_sector.input_hash).
     sector_input_hash: Mapped[str | None] = mapped_column(String(16))
+    # 1-3 standard tech titles ("Senior Software Engineer", ...) for Tech
+    # postings only, from our own model — the sector service returns them in
+    # the same call as the sector (see app.services.job_sector), so they share
+    # sector_input_hash. Title search also matches postings tagged with the
+    # searched title or its related titles. NULL = not Tech, or not tagged yet.
+    standard_titles: Mapped[list[str] | None] = mapped_column(JSONB)
+    # Which model version tagged it (e.g. "ettin32m-titles-2026-10-13").
+    standard_title_model: Mapped[str | None] = mapped_column(String(40))
 
     salary_min: Mapped[int | None] = mapped_column(Integer)
     salary_max: Mapped[int | None] = mapped_column(Integer)

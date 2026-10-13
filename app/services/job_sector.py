@@ -47,25 +47,35 @@ def sector_for(prediction: SectorPrediction) -> JobSector:
 
 
 def store_prediction(posting: JobPosting, prediction: SectorPrediction | None, text_hash: str) -> bool:
-    """Write a prediction onto the posting (None = pending). Returns whether it was classified."""
+    """Write a prediction onto the posting (None = pending). Returns whether it was classified.
+
+    Also its standard titles (JobPosting.standard_titles), which the service
+    returns in the same call for a Tech posting: kept only when the sector
+    shown is Tech (so not below the confidence threshold), cleared otherwise."""
     if prediction is None:  # pending: the sweep retries it
         posting.sector = JobSector.UNKNOWN
         posting.sector_model = posting.sector_confidence = posting.sector_input_hash = None
+        posting.standard_titles = posting.standard_title_model = None
         return False
     posting.sector = sector_for(prediction)
     posting.sector_model = prediction.model
     posting.sector_confidence = prediction.confidence
     posting.sector_input_hash = text_hash
+    tagged = posting.sector == JobSector.ENGINEERING_TECH and bool(prediction.standard_titles)
+    posting.standard_titles = prediction.standard_titles if tagged else None
+    posting.standard_title_model = prediction.standard_title_model if tagged else None
     return True
 
 
 def apply_sector(posting: JobPosting, title: str | None, description: str | None) -> None:
-    """Set the posting's sector during a scan. Unchanged text keeps the sector
-    it already has; otherwise the service is called, and a failed call leaves
-    the posting pending."""
+    """Set the posting's sector (and standard titles) during a scan. Unchanged
+    text keeps what it already has, unless it's a Tech posting still without
+    titles (classified before the service returned them); otherwise the
+    service is called, and a failed call leaves the posting pending."""
     text_hash = input_hash(title, description)
     if posting.sector_model is not None and posting.sector_input_hash == text_hash:
-        return
+        if posting.sector != JobSector.ENGINEERING_TECH or posting.standard_title_model is not None:
+            return
     store_prediction(posting, classify_remote(title, description), text_hash)
 
 

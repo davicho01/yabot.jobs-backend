@@ -283,10 +283,19 @@ gcloud run deploy api \
   --add-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION" \
   --set-env-vars="$COMMON_ENV" \
   --set-secrets="$COMMON_SECRETS" \
-  --min-instances=0 \
+  --min-instances=1 \
   --max-instances=10 \
+  --memory=1Gi \
   --allow-unauthenticated \
   --update-labels=function=api
+
+# --min-instances=1: one api instance is kept warm (set on prod; this said 0
+# until 2026-10-13). api and saved-search-alerts run at 1Gi (alerts with
+# --cpu=1) for the in-process standard-title model that translates typed
+# searches (app/services/standard_titles.py), read from GCS:
+# .github/workflows/deploy.yml sets STANDARD_TITLE_MODEL on both. Their runtime
+# service account (the default compute one, a project Editor) can read
+# gs://yabotjobs-ml-models.
 
 # ---------------------------------------------------------------------------
 # 5. worker / crawl-worker — Cloud Functions (2nd gen), Pub/Sub-triggered
@@ -534,7 +543,8 @@ gcloud functions deploy saved-search-alerts \
   --no-allow-unauthenticated \
   --set-env-vars="$COMMON_ENV" \
   --set-secrets="$COMMON_SECRETS" \
-  --memory=512Mi \
+  --memory=1Gi \
+  --cpu=1 \
   --timeout=540s \
   --update-labels=function=saved-search-alerts
 

@@ -48,6 +48,14 @@ env:
   # Set on every deploy of api/worker/retry-failed-scans (--update-env-vars only
   # adds/changes this one variable) so a redeploy can never drop it.
   SECTOR_API_URL: https://yabot-jobs-sector-487584214286.us-central1.run.app
+  # Standard-title model (app/services/standard_titles.py), trained in
+  # yabot.jobs-ml/standard-title: api and saved-search-alerts read it into
+  # memory on first use to translate typed searches into standard titles —
+  # from GCS, since the functions deploy from source and can't carry the
+  # 128 MB file. Both run at 1Gi for it. Postings get their titles from the
+  # sector service instead, in the same call as the sector, so the workers
+  # never load it. Same --update-env-vars pattern as SECTOR_API_URL.
+  STANDARD_TITLE_MODEL: gs://yabotjobs-ml-models/standard-title/ettin32m-titles-2026-10-13
 
 jobs:
   test:
@@ -143,7 +151,7 @@ jobs:
           version: latest
 
       - name: Deploy api
-        run: gcloud run deploy api --image="${{ needs.build.outputs.image_tag }}" --region="$REGION" --project="$PROJECT_ID" --update-labels=function=api --update-env-vars="SECTOR_API_URL=${SECTOR_API_URL}"
+        run: gcloud run deploy api --image="${{ needs.build.outputs.image_tag }}" --region="$REGION" --project="$PROJECT_ID" --update-labels=function=api --update-env-vars="SECTOR_API_URL=${SECTOR_API_URL},STANDARD_TITLE_MODEL=${STANDARD_TITLE_MODEL}" --memory=1Gi
 
   # Cloud Functions redeploy from source, not the container image built
   # above — each of these seven jobs checks out the repo itself and only
@@ -287,6 +295,9 @@ jobs:
             --source=. \
             --entry-point=dispatch \
             --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=saved_search_alerts.py \
+            --update-env-vars="STANDARD_TITLE_MODEL=${STANDARD_TITLE_MODEL}" \
+            --memory=1Gi \
+            --cpu=1 \
             --update-labels=function=saved-search-alerts
 
   deploy-follow-up-reminders:
