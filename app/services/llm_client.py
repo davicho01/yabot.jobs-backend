@@ -28,6 +28,10 @@ _OPENAI_COMPATIBLE_BASE_URLS: dict[str, str | None] = {
     LlmProvider.MISTRAL: "https://api.mistral.ai/v1",
 }
 
+# Response cap unless the caller asks for more. Fits every provider's
+# models; a bigger cap is rejected by models that allow less output.
+DEFAULT_MAX_TOKENS = 8192
+
 # Both SDKs default to a 10-minute timeout with 2 retries. This timeout only
 # covers silence on the connection, though: an overloaded DeepSeek holds the
 # request open and sends blank keep-alive lines, each of which resets it —
@@ -63,6 +67,7 @@ def call_llm(
     base_url: str | None,
     prompt: str,
     deadline_seconds: float | None = None,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
 ) -> str:
     """Send `prompt` to the given provider/model and return the raw text response.
 
@@ -70,15 +75,24 @@ def call_llm(
     retries included — has taken that long, however the provider is
     stalling. The call runs on a daemon thread so it can be abandoned; it's
     left to finish or fail on its own, and its result is dropped.
+
+    `max_tokens` caps the response; a thinking model's reasoning counts
+    toward it too.
     """
+
+    def call() -> str:
+        return _call(
+            provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt, max_tokens=max_tokens
+        )
+
     if deadline_seconds is None:
-        return _call(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
+        return call()
 
     outcome: dict[str, Any] = {}
 
     def run() -> None:
         try:
-            outcome["text"] = _call(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
+            outcome["text"] = call()
         except BaseException as exc:  # handed back to the caller below
             outcome["error"] = exc
 
@@ -93,13 +107,19 @@ def call_llm(
     return outcome["text"]
 
 
-def _call(*, provider: str, model: str | None, api_key: str, base_url: str | None, prompt: str) -> str:
+def _call(
+    *, provider: str, model: str | None, api_key: str, base_url: str | None, prompt: str, max_tokens: int
+) -> str:
     if provider == LlmProvider.ANTHROPIC:
-        return _call_anthropic(model=model or _DEFAULT_ANTHROPIC_MODEL, api_key=api_key, prompt=prompt)
-    return _call_openai_compatible(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
+        return _call_anthropic(
+            model=model or _DEFAULT_ANTHROPIC_MODEL, api_key=api_key, prompt=prompt, max_tokens=max_tokens
+        )
+    return _call_openai_compatible(
+        provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt, max_tokens=max_tokens
+    )
 
 
-def _call_anthropic(*, model: str, api_key: str, prompt: str) -> str:
+def _call_anthropic(*, model: str, api_key: str, prompt: str, max_tokens: int) -> str:
     client = anthropic.Anthropic(api_key=api_key, timeout=_TIMEOUT_SECONDS, max_retries=_MAX_RETRIES)
     try:
         response = client.messages.create(
@@ -111,7 +131,7 @@ def _call_anthropic(*, model: str, api_key: str, prompt: str) -> str:
             # downstream as an opaque "Unterminated string" JSON parse
             # error instead of a clear token-limit message (see the
             # stop_reason=="max_tokens" check below for that case now).
-            max_tokens=8192,
+            max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
         )
     except anthropic.APIStatusError as exc:
@@ -130,7 +150,7 @@ def _call_anthropic(*, model: str, api_key: str, prompt: str) -> str:
 
 
 def _call_openai_compatible(
-    *, provider: str, model: str | None, api_key: str, base_url: str | None, prompt: str
+    *, provider: str, model: str | None, api_key: str, base_url: str | None, prompt: str, max_tokens: int
 ) -> str:
     if not model:
         raise LlmError(f"No model configured for provider '{provider}'.")
@@ -144,7 +164,7 @@ def _call_openai_compatible(
     # Explicit cap for the same reason as Anthropic's above: a full tailored
     # resume/cover letter JSON response can be long, and a too-small default
     # would truncate it mid-string rather than fail with a clear reason.
-    kwargs = {"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": 8192}
+    kwargs = {"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens}
     try:
         try:
             response = client.chat.completions.create(**kwargs, response_format={"type": "json_object"})
