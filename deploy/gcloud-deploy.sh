@@ -410,8 +410,8 @@ gcloud run jobs add-iam-policy-binding crawl-dispatcher \
   --member="serviceAccount:${PROJECT_ID}@appspot.gserviceaccount.com" \
   --role="roles/run.invoker"
 
-# Every 30 minutes, 7am-10pm America/New_York, weekdays only (no collection
-# runs on weekends). Each run only crawls the sources that are due: every
+# Every 30 minutes, 8am-8:30pm America/New_York, weekdays only (no collection
+# runs on weekends; was 7am-10:30pm until 2026-10-14). Each run only crawls the sources that are due: every
 # source has its own adaptive interval (2h-3d by default, see
 # app.services.crawl_schedule and settings.crawl_min/max_interval_minutes),
 # short for boards that keep posting and long for quiet ones, and a run
@@ -424,7 +424,7 @@ gcloud run jobs add-iam-policy-binding crawl-dispatcher \
 
 gcloud scheduler jobs create http crawl-dispatch-hourly \
   --location="$REGION" \
-  --schedule="*/30 7-22 * * 1-5" \
+  --schedule="*/30 8-20 * * 1-5" \
   --time-zone="America/New_York" \
   --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/crawl-dispatcher:run" \
   --http-method=POST \
@@ -522,14 +522,14 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
 #    respect (HTTP-triggered, no-allow-unauthenticated, OIDC-invoked by
 #    Scheduler, Cloud SQL attached to the underlying Cloud Run service
 #    afterward since `gcloud functions deploy` has no --set-cloudsql-instances
-#    flag). Every 30 minutes, 8am-11:30pm America/New_York, weekdays (since
-#    2026-10-12), matching crawl-dispatch's own 30-minute cadence: new
-#    postings land throughout the day, so alerts go out within half an hour.
-#    Each saved search only gets jobs scanned since its own last_alerted_at,
-#    so running more often never sends duplicates (was hourly earlier that
-#    day, and before that 2x/day, 2pm/10pm, an hour after the old 1pm/9pm
-#    crawl-dispatch bursts). The Scheduler job keeps its "-hourly" name:
-#    renaming means deleting and recreating it.
+#    flag). Every hour, 8am-9pm America/New_York, weekdays (since
+#    2026-10-14; every 30 minutes until 11:30pm from 2026-10-12, which was
+#    too many emails): new postings land throughout the day, so alerts go
+#    out within an hour, and the 9pm run covers the last crawls (dispatch
+#    stops at 8:30pm). Each saved search only gets jobs scanned since its own
+#    last_alerted_at, so the cadence never sends duplicates (was hourly
+#    before 2026-10-12 too, and before that 2x/day, 2pm/10pm, an hour after
+#    the old 1pm/9pm crawl-dispatch bursts).
 # ---------------------------------------------------------------------------
 
 gcloud functions deploy saved-search-alerts \
@@ -561,7 +561,7 @@ gcloud functions add-invoker-policy-binding saved-search-alerts \
 
 gcloud scheduler jobs create http saved-search-alerts-hourly \
   --location="$REGION" \
-  --schedule="*/30 8-23 * * 1-5" \
+  --schedule="0 8-21 * * 1-5" \
   --time-zone="America/New_York" \
   --uri="$SAVED_SEARCH_ALERTS_FUNCTION_URL" \
   --http-method=POST \
@@ -667,12 +667,13 @@ gcloud scheduler jobs create http retry-failed-scans-hourly \
 #     every respect except what it talks to: it writes straight into the
 #     *frontend's* S3 bucket/CloudFront distribution
 #     (SEO_PAGES_BUCKET/SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID above), not
-#     Postgres/Pub/Sub. Every 2 hours, 9am-11pm America/New_York, weekdays
-#     (since 2026-10-12): crawl-dispatch now runs every 30 minutes and each
-#     source is crawled on its own adaptive interval (2h minimum), so new
-#     postings land throughout the day instead of in two bursts. Every 2
-#     hours matches that minimum, and the 11pm run picks up the last
-#     crawls of the day (dispatch stops at 10:30pm). Was 2x/day (2pm/10pm,
+#     Postgres/Pub/Sub. Every 2 hours, 9am-9pm America/New_York, weekdays
+#     (since 2026-10-14; 9am-11pm from 2026-10-12): crawl-dispatch runs
+#     every 30 minutes and each source is crawled on its own adaptive
+#     interval (2h minimum), so new postings land throughout the day
+#     instead of in two bursts. Every 2 hours matches that minimum, and the
+#     9pm run picks up the last crawls of the day (dispatch stops at
+#     8:30pm). Was 2x/day (2pm/10pm,
 #     an hour after the old 1pm/9pm dispatch) and every 30 minutes before
 #     that; each run regenerates today's pages and re-renders only job
 #     pages whose content changed, and invalidations are collapsed to a few
@@ -715,7 +716,7 @@ gcloud functions add-invoker-policy-binding generate-static-job-pages \
 
 gcloud scheduler jobs create http generate-static-job-pages-30min \
   --location="$REGION" \
-  --schedule="0 9-23/2 * * 1-5" \
+  --schedule="0 9-21/2 * * 1-5" \
   --time-zone="America/New_York" \
   --uri="$GENERATE_STATIC_JOB_PAGES_FUNCTION_URL" \
   --http-method=POST \

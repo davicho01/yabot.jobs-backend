@@ -171,3 +171,15 @@ def test_api_miss_falls_back_to_the_page(monkeypatch):
 
     assert fetched == ["https://job-boards.greenhouse.io/consensys/jobs/1"]
     assert result.success and result.title == "Data Engineer"
+
+
+def test_unresolved_company_page_is_left_to_the_generic_scanner(monkeypatch):
+    # No board hint and nothing on the page names the board: only the SEO
+    # teaser is left, so the generic scanner (JSON-LD) gets the page instead.
+    monkeypatch.setattr(greenhouse, "get_with_retry", lambda *a, **k: FakeResponse(status_code=404))
+    page = '<title>Senior Software Engineer</title><meta property="og:description" content="Teamwork makes the stream work.">'
+    monkeypatch.setattr(
+        greenhouse.base, "fetch_html", lambda url: greenhouse.base.FetchedPage(text=page, url=url)
+    )
+
+    assert greenhouse.scan_job_url("https://www.weareroku.com/jobs/senior-software-engineer?gh_jid=8223793") is None
