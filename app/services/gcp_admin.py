@@ -99,6 +99,15 @@ def get_instance_count(service_name: str, *, lookback_minutes: int = 5) -> int:
     return int(series[0]["points"][0]["value"]["int64Value"])
 
 
+# Service-level min instances (Service.scaling), not the revision template's
+# (template.scaling): changing the template creates a new revision, which
+# cold-starts its whole warm floor. Verified 2026-10-15: on 10-14 the scaler
+# made 179 yabot-jobs-sector and 164 yabot-jobs-browser revisions, and sector
+# had 1,239 cold starts (~21s each) for 27.6k requests. The template's own
+# min stays 0 (deploys pass --min-instances=0): Cloud Run applies the higher
+# of the two.
+
+
 def get_min_instances(service_name: str) -> int:
     response = httpx.get(
         f"https://run.googleapis.com/v2/projects/{_project_id()}/locations/{_REGION}/services/{service_name}",
@@ -106,20 +115,20 @@ def get_min_instances(service_name: str) -> int:
         timeout=30.0,
     )
     response.raise_for_status()
-    return int(response.json().get("template", {}).get("scaling", {}).get("minInstanceCount", 0))
+    return int(response.json().get("scaling", {}).get("minInstanceCount", 0))
 
 
 def set_min_instances(service_name: str, count: int) -> bool:
-    """PATCH `service_name`'s min-instances to `count`, skipping the call
-    (and the new revision it would create) if it's already there. Returns
-    whether it actually changed anything."""
+    """PATCH `service_name`'s service-level min-instances to `count`, skipping
+    the call if it's already there. Returns whether it actually changed
+    anything."""
     if get_min_instances(service_name) == count:
         return False
     response = httpx.patch(
         f"https://run.googleapis.com/v2/projects/{_project_id()}/locations/{_REGION}/services/{service_name}",
         headers=_headers(),
-        params={"updateMask": "template.scaling.minInstanceCount"},
-        json={"template": {"scaling": {"minInstanceCount": count}}},
+        params={"updateMask": "scaling.minInstanceCount"},
+        json={"scaling": {"minInstanceCount": count}},
         timeout=30.0,
     )
     response.raise_for_status()
