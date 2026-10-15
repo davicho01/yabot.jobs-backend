@@ -4,11 +4,25 @@ from unittest.mock import Mock
 from app.services import resume_llm
 
 
-def tailor(fitness_score=None, resume="Python developer", job="Python required"):
+def tailor(fitness_score=None, resume="Python developer", job="Python required", provider="openai"):
     return resume_llm.generate_tailored_resume_with_llm(
-        resume, job, provider="openai", model="test-model", api_key="test-key", base_url=None,
+        resume, job, provider=provider, model="test-model", api_key="test-key", base_url=None,
         fitness_score=fitness_score,
     )
+
+
+def test_tailor_gives_deepseek_room_to_think_before_the_resume(monkeypatch):
+    call = Mock(return_value=json.dumps({"summary": "", "sections": []}))
+    monkeypatch.setattr(resume_llm, "call_llm", call)
+    tailor(provider="deepseek")
+    assert call.call_args.kwargs["max_tokens"] == 32768
+
+
+def test_tailor_keeps_the_default_cap_for_other_providers(monkeypatch):
+    call = Mock(return_value=json.dumps({"summary": "", "sections": []}))
+    monkeypatch.setattr(resume_llm, "call_llm", call)
+    tailor(provider="openai")
+    assert call.call_args.kwargs["max_tokens"] == resume_llm.DEFAULT_MAX_TOKENS
 
 
 def test_tailor_prompt_notes_no_fitness_assessment_when_none_given(monkeypatch):

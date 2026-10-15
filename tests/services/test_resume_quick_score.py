@@ -34,6 +34,7 @@ def test_quick_score_prompt_formats_inputs_and_preserves_response_contract(monke
     assert call.call_args.kwargs | {"prompt": None} == {
         "provider": "openai", "model": "test-model", "api_key": "test-key",
         "base_url": None, "prompt": None, "deadline_seconds": resume_llm.QUICK_SCORE_DEADLINE_SECONDS,
+        "max_tokens": resume_llm.DEFAULT_MAX_TOKENS,
     }
     assert result.overall_score == 79  # trusted directly from the model
     assert result.matched_keywords == response["matched_keywords"]

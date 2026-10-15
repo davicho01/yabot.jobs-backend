@@ -50,6 +50,7 @@ def test_evaluation_prompt_formats_inputs_and_preserves_response_contract(monkey
     assert call.call_args.kwargs | {"prompt": None} == {
         "provider": "openai", "model": "test-model", "api_key": "test-key",
         "base_url": None, "prompt": None, "deadline_seconds": None,
+        "max_tokens": resume_llm.DEFAULT_MAX_TOKENS,
     }
     assert result.category_scores == [
         {

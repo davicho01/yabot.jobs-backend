@@ -4,7 +4,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.services.llm_client import LlmError, call_llm
+from app.models.enums import LlmProvider
+from app.services.llm_client import DEFAULT_MAX_TOKENS, LlmError, call_llm
 from app.services.prompts import (
     COVER_LETTER_PROMPT,
     EVALUATION_PROMPT,
@@ -54,6 +55,12 @@ _FORMAT_ATTEMPTS = 3
 QUICK_SCORE_DEADLINE_SECONDS = 60
 TAILOR_DEADLINE_SECONDS = 120
 
+# DeepSeek's models think by default, and the thinking counts toward the
+# response cap: thinking plus a whole tailored resume ran past the default
+# 8192 and was cut off. Other providers keep the default — some of their
+# models reject a cap this big.
+_TAILOR_MAX_TOKENS_BY_PROVIDER = {LlmProvider.DEEPSEEK: 32768}
+
 
 def _call_llm_json(
     *,
@@ -63,6 +70,7 @@ def _call_llm_json(
     base_url: str | None,
     prompt: str,
     deadline_seconds: float | None = None,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
 ) -> dict[str, Any]:
     """call_llm + _parse_response, re-asking when the reply isn't a JSON object.
     A call that fails outright (including passing deadline_seconds) isn't
@@ -75,6 +83,7 @@ def _call_llm_json(
             base_url=base_url,
             prompt=prompt,
             deadline_seconds=deadline_seconds,
+            max_tokens=max_tokens,
         )
         try:
             return _parse_response(raw)
@@ -374,6 +383,7 @@ def generate_tailored_resume_with_llm(
         base_url=base_url,
         prompt=prompt,
         deadline_seconds=TAILOR_DEADLINE_SECONDS,
+        max_tokens=_TAILOR_MAX_TOKENS_BY_PROVIDER.get(provider, DEFAULT_MAX_TOKENS),
     )
 
     return TailoredResumeContent(
