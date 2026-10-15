@@ -1,4 +1,5 @@
 import itertools
+from datetime import date, datetime, timezone
 
 import pytest
 from sqlalchemy import create_engine
@@ -73,3 +74,47 @@ def test_total_is_capped_past_the_count_window_and_grows_with_the_page(db, monke
     # Page 4's window (6 + 4) covers all 10.
     fourth = _list(db, page=4)
     assert (fourth.total, fourth.total_is_capped) == (10, False)
+
+
+def test_newest_posted_first_falling_back_to_first_scan_day_when_no_posted_date(db):
+    postings = [
+        # (title, posted_at, first_scanned_at)
+        ("Old post, scanned today", date(2026, 9, 1), datetime(2026, 10, 15, 12, tzinfo=timezone.utc)),
+        ("No date, scanned Oct 10", None, datetime(2026, 10, 10, 12, tzinfo=timezone.utc)),
+        ("Posted Oct 12", date(2026, 10, 12), datetime(2026, 10, 12, 9, tzinfo=timezone.utc)),
+        ("Posted Oct 12, scanned later", date(2026, 10, 12), datetime(2026, 10, 13, 9, tzinfo=timezone.utc)),
+    ]
+    for n, (title, posted_at, first_scanned_at) in enumerate(postings):
+        url_row = m.JobPostingUrl(
+            url=f"https://example.com/jobs/order-{n}",
+            normalized_url=f"https://example.com/jobs/order-{n}",
+            url_hash=f"order-hash-{n}",
+            domain="example.com",
+        )
+        db.add(url_row)
+        db.flush()
+        db.add(
+            m.JobPosting(
+                url_id=url_row.id,
+                title=title,
+                extraction_status=ScanStatus.SUCCESS,
+                posted_at=posted_at,
+                first_scanned_at=first_scanned_at,
+            )
+        )
+    db.commit()
+
+    result = _list(db, q="post", page_size=10)
+
+    assert [item.posting.title for item in _list(db, page_size=10).items] == [
+        "Posted Oct 12, scanned later",
+        "Posted Oct 12",
+        "No date, scanned Oct 10",
+        "Old post, scanned today",
+    ]
+    # A filtered search sorts the same way.
+    assert [item.posting.title for item in result.items] == [
+        "Posted Oct 12, scanned later",
+        "Posted Oct 12",
+        "Old post, scanned today",
+    ]
