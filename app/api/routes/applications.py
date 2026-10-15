@@ -12,6 +12,7 @@ from app.models.job_posting import JobPosting
 from app.models.resume import Resume
 from app.models.user import User
 from app.schemas.application import ApplicationBulkUpdate, ApplicationCreate, ApplicationRead, ApplicationUpdate
+from app.services.auto_score import latest_runs_by_job
 from app.services.jobs import find_existing_application, get_or_create_job_posting
 
 router = APIRouter(prefix="/applications", tags=["applications"])
@@ -43,6 +44,11 @@ def list_applications(
         .options(*_APPLICATION_READ_RELATIONS)
         .order_by(UserJobApplication.created_at.desc())
     ).all()
+    # Each card's latest auto-score run, fetched here in one query so the
+    # page doesn't ask per card (read off the ORM object by ApplicationRead).
+    runs = latest_runs_by_job(db, current_user.id, [application.job_posting_id for application in applications])
+    for application in applications:
+        application.auto_score = runs.get(application.job_posting_id)
     return applications
 
 
