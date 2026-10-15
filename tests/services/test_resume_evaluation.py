@@ -49,7 +49,7 @@ def test_evaluation_prompt_formats_inputs_and_preserves_response_contract(monkey
     assert '{{' not in prompt  # template JSON braces must be escaped for .format()
     assert call.call_args.kwargs | {"prompt": None} == {
         "provider": "openai", "model": "test-model", "api_key": "test-key",
-        "base_url": None, "prompt": None,
+        "base_url": None, "prompt": None, "deadline_seconds": None,
     }
     assert result.category_scores == [
         {

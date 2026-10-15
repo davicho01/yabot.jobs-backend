@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -16,6 +17,8 @@ from app.services.prompts import (
     TAILOR_PROMPT,
 )
 
+logger = logging.getLogger("app.resume_llm")
+
 _CODE_FENCE_RE = re.compile(r"^```[a-zA-Z]*\n?|```$", re.MULTILINE)
 
 # Generous relative to a typical resume/job-description once extracted to
@@ -26,10 +29,60 @@ _MAX_TEXT_CHARS = 20_000
 
 def _parse_response(raw: str) -> dict[str, Any]:
     text = _CODE_FENCE_RE.sub("", raw.strip()).strip()
-    data = json.loads(text)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        # Models sometimes wrap the object in prose ("Here's the evaluation:
+        # {...}") — fall back to the outermost {...} before giving up.
+        start, end = text.find("{"), text.rfind("}")
+        if start == -1 or end <= start:
+            raise
+        data = json.loads(text[start : end + 1])
     if not isinstance(data, dict):
         raise LlmError("Expected a JSON object from the model.")
     return data
+
+
+# Total tries for a response that comes back in the wrong format — a fresh
+# sample usually parses. Transport errors (429/5xx/connection) are already
+# retried inside the provider SDKs, so only format failures retry here.
+_FORMAT_ATTEMPTS = 3
+
+# Hard caps on a single call (see call_llm's deadline_seconds) for the steps
+# auto score runs, so a stalled provider fails the step instead of hanging
+# it. Tailoring writes a whole resume, so it gets longer.
+QUICK_SCORE_DEADLINE_SECONDS = 60
+TAILOR_DEADLINE_SECONDS = 120
+
+
+def _call_llm_json(
+    *,
+    provider: str,
+    model: str | None,
+    api_key: str,
+    base_url: str | None,
+    prompt: str,
+    deadline_seconds: float | None = None,
+) -> dict[str, Any]:
+    """call_llm + _parse_response, re-asking when the reply isn't a JSON object.
+    A call that fails outright (including passing deadline_seconds) isn't
+    re-asked — only one that answered in the wrong shape."""
+    for attempt in range(1, _FORMAT_ATTEMPTS + 1):
+        raw = call_llm(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            prompt=prompt,
+            deadline_seconds=deadline_seconds,
+        )
+        try:
+            return _parse_response(raw)
+        except (json.JSONDecodeError, LlmError) as exc:
+            if attempt == _FORMAT_ATTEMPTS:
+                raise LlmError(f"Model response was not valid JSON after {attempt} tries: {exc}") from exc
+            logger.warning("LLM response not valid JSON (try %d/%d), retrying: %s", attempt, _FORMAT_ATTEMPTS, exc)
+    raise AssertionError("unreachable")
 
 
 def _as_str_list(value: Any) -> list[str]:
@@ -64,11 +117,7 @@ def review_resume_with_llm(
     resume_text: str, *, provider: str, model: str | None, api_key: str, base_url: str | None
 ) -> ResumeReviewResult:
     prompt = REVIEW_PROMPT.format(resume_text=resume_text[:_MAX_TEXT_CHARS])
-    raw = call_llm(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
-    try:
-        data = _parse_response(raw)
-    except json.JSONDecodeError as exc:
-        raise LlmError(f"Model response was not valid JSON: {exc}") from exc
+    data = _call_llm_json(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
     return ResumeReviewResult(
         strengths=_as_str_list(data.get("strengths")),
         weaknesses=_as_str_list(data.get("weaknesses")),
@@ -170,11 +219,14 @@ def quick_score_resume_with_llm(
     prompt = QUICK_SCORE_PROMPT.format(
         resume_text=resume_text[:_MAX_TEXT_CHARS], job_description=job_description[:_MAX_TEXT_CHARS]
     )
-    raw = call_llm(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
-    try:
-        data = _parse_response(raw)
-    except json.JSONDecodeError as exc:
-        raise LlmError(f"Model response was not valid JSON: {exc}") from exc
+    data = _call_llm_json(
+        provider=provider,
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        prompt=prompt,
+        deadline_seconds=QUICK_SCORE_DEADLINE_SECONDS,
+    )
 
     try:
         score = max(0, min(100, int(data.get("overall_score"))))
@@ -219,11 +271,7 @@ def evaluate_resume_with_llm(
         job_description=job_description[:_MAX_TEXT_CHARS],
         overall_score=overall_score,
     )
-    raw = call_llm(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
-    try:
-        data = _parse_response(raw)
-    except json.JSONDecodeError as exc:
-        raise LlmError(f"Model response was not valid JSON: {exc}") from exc
+    data = _call_llm_json(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
 
     # category_scores is reconciled to sum to exactly `overall_score` — see
     # _as_category_scores_list — rather than trusted verbatim from the model.
@@ -319,11 +367,14 @@ def generate_tailored_resume_with_llm(
         job_description=job_description[:_MAX_TEXT_CHARS],
         fitness_assessment=_format_fitness_assessment(fitness_score),
     )
-    raw = call_llm(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
-    try:
-        data = _parse_response(raw)
-    except json.JSONDecodeError as exc:
-        raise LlmError(f"Model response was not valid JSON: {exc}") from exc
+    data = _call_llm_json(
+        provider=provider,
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        prompt=prompt,
+        deadline_seconds=TAILOR_DEADLINE_SECONDS,
+    )
 
     return TailoredResumeContent(
         summary=data.get("summary") if isinstance(data.get("summary"), str) else "",
@@ -345,11 +396,7 @@ def extract_resume_structure_with_llm(
     this app's own structured documents.
     """
     prompt = RESUME_STRUCTURE_PROMPT.format(resume_text=resume_text[:_MAX_TEXT_CHARS])
-    raw = call_llm(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
-    try:
-        data = _parse_response(raw)
-    except json.JSONDecodeError as exc:
-        raise LlmError(f"Model response was not valid JSON: {exc}") from exc
+    data = _call_llm_json(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
 
     return TailoredResumeContent(
         summary=data.get("summary") if isinstance(data.get("summary"), str) else "",
@@ -378,11 +425,7 @@ def extract_resume_roles_with_llm(
     react-query cache already avoids repeat calls within one page session.
     """
     prompt = RESUME_ROLES_PROMPT.format(resume_text=resume_text[:_MAX_TEXT_CHARS])
-    raw = call_llm(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
-    try:
-        data = _parse_response(raw)
-    except json.JSONDecodeError as exc:
-        raise LlmError(f"Model response was not valid JSON: {exc}") from exc
+    data = _call_llm_json(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
 
     return ResumeRolesResult(roles=_as_str_list(data.get("roles")), raw_response=data)
 
@@ -418,11 +461,7 @@ def apply_skill_additions_with_llm(
         resume_text=resume_text[:_MAX_TEXT_CHARS],
         skill_additions=_format_skill_additions(additions),
     )
-    raw = call_llm(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
-    try:
-        data = _parse_response(raw)
-    except json.JSONDecodeError as exc:
-        raise LlmError(f"Model response was not valid JSON: {exc}") from exc
+    data = _call_llm_json(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
 
     return TailoredResumeContent(
         summary=data.get("summary") if isinstance(data.get("summary"), str) else "",
@@ -456,11 +495,7 @@ def generate_cover_letter_with_llm(
     prompt = COVER_LETTER_PROMPT.format(
         resume_text=resume_text[:_MAX_TEXT_CHARS], job_description=job_description[:_MAX_TEXT_CHARS]
     )
-    raw = call_llm(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
-    try:
-        data = _parse_response(raw)
-    except json.JSONDecodeError as exc:
-        raise LlmError(f"Model response was not valid JSON: {exc}") from exc
+    data = _call_llm_json(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
 
     return CoverLetterContent(
         greeting=data.get("greeting") if isinstance(data.get("greeting"), str) else "",
@@ -517,11 +552,7 @@ def generate_interview_prep_with_llm(
     prompt = INTERVIEW_PREP_PROMPT.format(
         resume_text=resume_text[:_MAX_TEXT_CHARS], job_description=job_description[:_MAX_TEXT_CHARS]
     )
-    raw = call_llm(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
-    try:
-        data = _parse_response(raw)
-    except json.JSONDecodeError as exc:
-        raise LlmError(f"Model response was not valid JSON: {exc}") from exc
+    data = _call_llm_json(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
 
     return InterviewPrepContent(
         likely_questions=_as_questions_list(data.get("likely_questions")),

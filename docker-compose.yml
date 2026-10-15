@@ -96,6 +96,10 @@ services:
       # Points at the real yabot-jobs-browser Cloud Run service (see
       # deploy/gcloud-deploy.sh) — no local browser-fetch container.
       BROWSER_FETCH_SERVICE_URL: https://yabot-jobs-browser-487584214286.us-central1.run.app
+      # .env's localhost:9000 is the host's MinIO port — from inside this
+      # container that's the container itself. Auto-score runs (tailored
+      # resume .docx uploads) need the real MinIO.
+      RESUME_STORAGE_ENDPOINT_URL: http://minio:9000
     command: python worker.py
     depends_on:
       migrate:

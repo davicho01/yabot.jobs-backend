@@ -83,6 +83,8 @@ class ApplicationRead(BaseModel):
     # Which resume the apply page's picker is set to for this application —
     # null means no explicit pick (frontend falls back to is_main).
     selected_resume_id: uuid.UUID | None
+    # Set when an auto-score run marked this ready (see app.services.auto_score).
+    ready_to_apply_at: datetime | None
     job_posting: ApplicationJobPostingRead
     # Max of latest_score/latest_tailored_resume_score — see
     # UserJobApplication.best_score in app/models/job_application.py.

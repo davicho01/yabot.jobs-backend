@@ -339,6 +339,23 @@ class ApplicationStatus(StrEnum):
     WITHDRAWN = "withdrawn"
 
 
+class AutoScoreStatus(StrEnum):
+    """AutoScoreRun.status — see app.services.auto_score. The first four are
+    in progress; the rest are terminal."""
+
+    QUEUED = "queued"
+    SCORING = "scoring"
+    TAILORING = "tailoring"
+    SCORING_TAILORED = "scoring_tailored"
+    # Best score cleared the ready bar — application saved + marked ready.
+    READY = "ready"
+    # Tailored, but the best score still fell short of the ready bar.
+    NOT_READY = "not_ready"
+    # First score too low to bother tailoring.
+    BELOW_THRESHOLD = "below_threshold"
+    FAILED = "failed"
+
+
 class FlagReason(StrEnum):
     """Why a user reported a listing's scanned data as wrong — see
     JobPostingUrl.flag_reason / app.services.jobs.flag_job_url."""

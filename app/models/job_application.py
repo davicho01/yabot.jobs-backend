@@ -65,6 +65,9 @@ class UserJobApplication(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # wanted), so this only ever suppresses re-sending for a date already
     # reminded about, never a freshly (re)set one.
     follow_up_reminded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set when an auto-score run's best score cleared the ready bar (see
+    # app.services.auto_score) — the frontend shows these as ready to apply.
+    ready_to_apply_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Pointers to the most recent row in each history table (score/tailored
     # resume/cover letter can each be regenerated, so those tables keep
