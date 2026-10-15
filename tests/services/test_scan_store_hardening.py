@@ -6,7 +6,7 @@ title longer than its varchar(255) column (StringDataRightTruncation) each
 made the result UPDATE fail, so the scan message was retried forever.
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pytest
 from sqlalchemy.exc import DataError, OperationalError
@@ -230,3 +230,36 @@ def test_lane_lets_a_database_outage_propagate_so_the_message_is_retried(monkeyp
 
     scan_db.expire_all()
     assert scan_db.get(JobPostingUrl, row.id).scan_status == ScanStatus.PENDING  # not blamed on the URL
+
+
+def test_upsert_caps_a_future_posted_date_at_the_first_scan_day(scan_db, make_source, make_url):
+    """A board can date a post after we first saw it (live: "2026-12-31" on
+    jobs scanned in October); left as-is it tops the newest-first search and
+    every "posted within N days" filter until that date."""
+    url_row = make_url(make_source())
+    first_scan = datetime(2026, 10, 9, 23, 30, tzinfo=timezone.utc)
+
+    jobs._upsert_posting(scan_db, url_row, ScanResult(success=True, title="T", posted_at=date(2026, 12, 31)), first_scan)
+    scan_db.commit()
+    posting = scan_db.query(JobPosting).filter_by(url_id=url_row.id).one()
+    assert posting.posted_at == date(2026, 10, 9)
+
+    # A rescan days later still caps at the first scan's day, not the rescan's.
+    rescan = datetime(2026, 10, 14, 12, tzinfo=timezone.utc)
+    jobs._upsert_posting(scan_db, url_row, ScanResult(success=True, title="T", posted_at=date(2026, 12, 31)), rescan)
+    scan_db.commit()
+    assert posting.posted_at == date(2026, 10, 9)
+
+
+def test_upsert_keeps_a_posted_date_on_or_before_the_first_scan_day(scan_db, make_source, make_url):
+    url_row = make_url(make_source())
+    first_scan = datetime(2026, 10, 9, 12, tzinfo=timezone.utc)
+
+    jobs._upsert_posting(scan_db, url_row, ScanResult(success=True, title="T", posted_at=date(2026, 10, 9)), first_scan)
+    scan_db.commit()
+    posting = scan_db.query(JobPosting).filter_by(url_id=url_row.id).one()
+    assert posting.posted_at == date(2026, 10, 9)
+
+    jobs._upsert_posting(scan_db, url_row, ScanResult(success=True, title="T"), first_scan)
+    scan_db.commit()
+    assert posting.posted_at is None

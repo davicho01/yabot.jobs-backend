@@ -5,10 +5,12 @@ import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import and_, false, func, or_, select, true, update
+from sqlalchemy import Date, and_, false, func, or_, select, true, update
 from sqlalchemy.exc import InterfaceError, OperationalError
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import Select
+from sqlalchemy.sql.functions import FunctionElement
 
 from app.core.config import settings
 from app.core.rate_limit import RateLimitExceeded
@@ -83,6 +85,25 @@ def parse_search_query(q: str) -> tuple[str | None, list[str]]:
     return " ".join(include_parts).strip() or None, exclude_terms
 
 
+class utc_date(FunctionElement):
+    """A timestamptz's UTC calendar date. Spelled `(x AT TIME ZONE 'UTC')::date`
+    on Postgres because a plain ::date depends on the session time zone, and
+    only an immutable expression can be indexed."""
+
+    type = Date()
+    inherit_cache = True
+
+
+@compiles(utc_date)
+def _utc_date_postgres(element, compiler, **kw):
+    return f"(({compiler.process(element.clauses, **kw)}) AT TIME ZONE 'UTC')::date"
+
+
+@compiles(utc_date, "sqlite")
+def _utc_date_sqlite(element, compiler, **kw):
+    return f"date({compiler.process(element.clauses, **kw)})"
+
+
 def build_job_search_statement(
     *,
     q: str | None = None,
@@ -121,7 +142,12 @@ def build_job_search_statement(
             JobPostingUrl.closed_at.is_(None),
         )
     )
-    order = [JobPostingUrl.created_at.desc()]
+    # Newest posted first; a posting with no posted date sorts by the day it
+    # was first scanned, and first_scanned_at breaks ties within a day. Must
+    # stay exactly ix_job_postings_listed_on's expression (migration
+    # 3b9e4c7a1d52) or broad searches sort every match instead of reading it.
+    listed_on = func.coalesce(JobPosting.posted_at, utc_date(JobPosting.first_scanned_at))
+    order = [listed_on.desc(), JobPosting.first_scanned_at.desc()]
     search_area: SearchAreaRead | None = None
     # salary_min/salary_max use `is not None`, not truthy-`or` like the rest of
     # these — 0 is a valid, meaningful value for both and a plain `or` would
@@ -170,7 +196,7 @@ def build_job_search_statement(
                 # city's own first, then nearer before farther (see radius_search).
                 nearest, near, band = radius_search(place, radius)
                 stmt = stmt.join(nearest, true()).where(near).add_columns(band.label("distance_band"))
-                order = [band, JobPostingUrl.created_at.desc()]
+                order = [band, *order]
                 search_area = SearchAreaRead(label=geo.place_label(place), radius_miles=radius)
             elif geo.is_country_search(location):
                 # "United States" matches most postings, so per-row checks are
@@ -1127,8 +1153,16 @@ def _upsert_posting(db: Session, url_row: JobPostingUrl, result: ScanResult, now
     posting.raw_source = (
         {"html_excerpt": _strip_nul(result.raw_html_excerpt)} if result.raw_html_excerpt else None
     )
-    posting.posted_at = fields["posted_at"]
     _mark_scanned(posting, now)
+    # A board's future-dated post (e.g. "2026-12-31") can't have been posted
+    # after we first saw it: cap it at that day, so it doesn't sit atop the
+    # newest-first search or every "posted within N days" filter.
+    first_scanned_at = posting.first_scanned_at
+    if first_scanned_at.tzinfo is not None:  # SQLite (tests) hands back naive UTC
+        first_scanned_at = first_scanned_at.astimezone(timezone.utc)
+    first_scan_day = first_scanned_at.date()
+    posted_at = fields["posted_at"]
+    posting.posted_at = min(posted_at, first_scan_day) if posted_at else None
     posting.extraction_status = ScanStatus.SUCCESS if result.success else ScanStatus.FAILED
 
     # Cross-source dedup (see app.services.job_dedup): recomputed on every
