@@ -4,6 +4,7 @@ actual work blocked by a Cloud Run Admin / Cloud Scheduler Admin failure.
 """
 
 from app.services import gcp_admin
+from tests.conftest import FakeResponse
 
 
 def test_warms_the_browser_and_resumes_the_scaler_tick(monkeypatch):
@@ -61,3 +62,34 @@ def test_does_not_raise_if_resume_scheduler_job_fails(monkeypatch):
     monkeypatch.setattr(gcp_admin, "resume_scheduler_job", _boom)
 
     gcp_admin.warm_up_browser_scaler()  # must not raise
+
+
+def _fake_run_admin(monkeypatch, service_json):
+    patches = []
+    monkeypatch.setenv("GCP_PROJECT_ID", "yabotjobs")
+    monkeypatch.setattr(gcp_admin, "_headers", lambda: {})
+    monkeypatch.setattr(gcp_admin.httpx, "get", lambda *a, **k: FakeResponse(json_data=service_json))
+    monkeypatch.setattr(
+        gcp_admin.httpx, "patch", lambda url, **k: patches.append((url, k["params"], k["json"])) or FakeResponse()
+    )
+    return patches
+
+
+def test_sets_the_service_level_min_not_the_revision_template(monkeypatch):
+    # A template change would create a new revision and cold-start its floor.
+    patches = _fake_run_admin(monkeypatch, {"scaling": {"minInstanceCount": 2}, "template": {"scaling": {}}})
+
+    assert gcp_admin.set_min_instances("yabot-jobs-sector", 5) is True
+
+    assert patches == [(
+        "https://run.googleapis.com/v2/projects/yabotjobs/locations/us-central1/services/yabot-jobs-sector",
+        {"updateMask": "scaling.minInstanceCount"},
+        {"scaling": {"minInstanceCount": 5}},
+    )]
+
+
+def test_skips_the_patch_when_the_service_level_min_already_matches(monkeypatch):
+    patches = _fake_run_admin(monkeypatch, {"scaling": {"minInstanceCount": 5}, "template": {"scaling": {}}})
+
+    assert gcp_admin.set_min_instances("yabot-jobs-sector", 5) is False
+    assert patches == []
