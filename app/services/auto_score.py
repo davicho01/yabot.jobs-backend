@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.routes.resumes import quick_score_resume, quick_score_tailored_resume, tailor_resume
@@ -100,6 +100,30 @@ def latest_run(db: Session, user_id: uuid.UUID, job_posting_id: uuid.UUID) -> Au
         except Exception:
             logger.exception("Could not re-queue stalled auto score run %s", run.id)  # the next poll tries again
     return run
+
+
+def latest_runs_by_job(
+    db: Session, user_id: uuid.UUID, job_posting_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, AutoScoreRun]:
+    """The newest run per job, for many jobs in one query — the applications
+    list sends these so its cards don't each ask. Raw rows: the stale/stalled
+    handling in latest_run happens when a card polls a run it sees running."""
+    if not job_posting_ids:
+        return {}
+    newest_first = (
+        func.row_number()
+        .over(partition_by=AutoScoreRun.job_posting_id, order_by=AutoScoreRun.created_at.desc())
+        .label("rank")
+    )
+    ranked = (
+        select(AutoScoreRun.id, newest_first)
+        .where(AutoScoreRun.user_id == user_id, AutoScoreRun.job_posting_id.in_(job_posting_ids))
+        .subquery()
+    )
+    runs = db.scalars(
+        select(AutoScoreRun).join(ranked, ranked.c.id == AutoScoreRun.id).where(ranked.c.rank == 1)
+    ).all()
+    return {run.job_posting_id: run for run in runs}
 
 
 def start_auto_score(db: Session, user: User, resume: Resume, posting: JobPosting) -> AutoScoreRun:

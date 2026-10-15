@@ -4,6 +4,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, HttpUrl
 
 from app.models.enums import ApplicationStatus
+from app.schemas.auto_score import AutoScoreRunRead
 
 
 class ApplicationCreate(BaseModel):
@@ -91,3 +92,7 @@ class ApplicationRead(BaseModel):
     best_score: int | None
     latest_tailored_resume: ApplicationTailoredResumeRead | None
     latest_cover_letter: ApplicationCoverLetterRead | None
+    # This job's newest auto-score run, or null if it never had one. Only
+    # GET /applications fills it (see list_applications); other endpoints
+    # leave it null.
+    auto_score: AutoScoreRunRead | None = None

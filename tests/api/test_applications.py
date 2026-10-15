@@ -8,11 +8,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.models as m
-from app.api.routes.applications import bulk_update_applications, update_application
+from app.api.routes.applications import bulk_update_applications, list_applications, update_application
 from app.db.base import Base
 from app.models.enums import ScanStatus
 from app.models.user import User
-from app.schemas.application import ApplicationBulkUpdate, ApplicationUpdate
+from app.schemas.application import ApplicationBulkUpdate, ApplicationRead, ApplicationUpdate
 
 _url_counter = itertools.count()
 
@@ -25,7 +25,14 @@ def db() -> Session:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(
         engine,
-        tables=[m.JobPostingUrl.__table__, m.JobPosting.__table__, m.Company.__table__, m.UserJobApplication.__table__, m.Resume.__table__],
+        tables=[
+            m.JobPostingUrl.__table__,
+            m.JobPosting.__table__,
+            m.Company.__table__,
+            m.UserJobApplication.__table__,
+            m.Resume.__table__,
+            m.AutoScoreRun.__table__,
+        ],
     )
     session = sessionmaker(bind=engine, autoflush=False)()
     yield session
@@ -50,6 +57,39 @@ def _make_application(db, user: User) -> m.UserJobApplication:
     db.add(application)
     db.flush()
     return application
+
+
+def test_list_applications_includes_each_jobs_newest_auto_score_run(db):
+    user = _user()
+    never_scored = _make_application(db, user)
+    scored = _make_application(db, user)
+    now = datetime.now(timezone.utc)
+    for status, age in (("failed", 10), ("ready", 1)):
+        db.add(
+            m.AutoScoreRun(
+                user_id=user.id,
+                job_posting_id=scored.job_posting_id,
+                resume_id=uuid.uuid4(),
+                status=status,
+                created_at=now - timedelta(minutes=age),
+            )
+        )
+    # Another user's run on the same job isn't this user's.
+    db.add(
+        m.AutoScoreRun(
+            user_id=uuid.uuid4(),
+            job_posting_id=never_scored.job_posting_id,
+            resume_id=uuid.uuid4(),
+            status="ready",
+            created_at=now,
+        )
+    )
+    db.flush()
+
+    rows = {row.id: ApplicationRead.model_validate(row) for row in list_applications(current_user=user, db=db)}
+
+    assert rows[never_scored.id].auto_score is None
+    assert rows[scored.id].auto_score.status == "ready"
 
 
 def test_update_application_only_touches_fields_actually_sent(db):
