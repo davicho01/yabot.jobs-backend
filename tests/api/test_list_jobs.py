@@ -76,13 +76,18 @@ def test_total_is_capped_past_the_count_window_and_grows_with_the_page(db, monke
     assert (fourth.total, fourth.total_is_capped) == (10, False)
 
 
-def test_newest_posted_first_falling_back_to_first_scan_day_when_no_posted_date(db):
+def test_newest_first_by_the_moment_the_age_badge_counts_from(db):
+    """The order the cards' "Posted 1d ago" badge implies (jobAge in the
+    frontend): the posted day's midnight UTC when we found the job on a later
+    day, otherwise our first scan. Live regression: a job posted Oct 14 that
+    we found Oct 15 ("1d ago") sorted above one found on Oct 14 itself
+    ("22h ago")."""
     postings = [
         # (title, posted_at, first_scanned_at)
         ("Old post, scanned today", date(2026, 9, 1), datetime(2026, 10, 15, 12, tzinfo=timezone.utc)),
         ("No date, scanned Oct 10", None, datetime(2026, 10, 10, 12, tzinfo=timezone.utc)),
-        ("Posted Oct 12", date(2026, 10, 12), datetime(2026, 10, 12, 9, tzinfo=timezone.utc)),
-        ("Posted Oct 12, scanned later", date(2026, 10, 12), datetime(2026, 10, 13, 9, tzinfo=timezone.utc)),
+        ("Posted Oct 14, found that day", date(2026, 10, 14), datetime(2026, 10, 14, 20, 5, tzinfo=timezone.utc)),
+        ("Posted Oct 14, found Oct 15", date(2026, 10, 14), datetime(2026, 10, 15, 15, 4, tzinfo=timezone.utc)),
     ]
     for n, (title, posted_at, first_scanned_at) in enumerate(postings):
         url_row = m.JobPostingUrl(
@@ -107,14 +112,14 @@ def test_newest_posted_first_falling_back_to_first_scan_day_when_no_posted_date(
     result = _list(db, q="post", page_size=10)
 
     assert [item.posting.title for item in _list(db, page_size=10).items] == [
-        "Posted Oct 12, scanned later",
-        "Posted Oct 12",
-        "No date, scanned Oct 10",
-        "Old post, scanned today",
+        "Posted Oct 14, found that day",  # Oct 14 20:05
+        "Posted Oct 14, found Oct 15",  # Oct 14 00:00
+        "No date, scanned Oct 10",  # Oct 10 12:00
+        "Old post, scanned today",  # Sep 1 00:00
     ]
     # A filtered search sorts the same way.
     assert [item.posting.title for item in result.items] == [
-        "Posted Oct 12, scanned later",
-        "Posted Oct 12",
+        "Posted Oct 14, found that day",
+        "Posted Oct 14, found Oct 15",
         "Old post, scanned today",
     ]

@@ -5,7 +5,7 @@ import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import Date, and_, false, func, or_, select, true, update
+from sqlalchemy import Date, DateTime, and_, case, false, func, or_, select, true, update
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
@@ -104,6 +104,24 @@ def _utc_date_sqlite(element, compiler, **kw):
     return f"date({compiler.process(element.clauses, **kw)})"
 
 
+class utc_midnight(FunctionElement):
+    """A date's midnight UTC, as a timestamptz. `x::timestamp AT TIME ZONE
+    'UTC'` on Postgres for the same reason as utc_date: immutable, so indexable."""
+
+    type = DateTime(timezone=True)
+    inherit_cache = True
+
+
+@compiles(utc_midnight)
+def _utc_midnight_postgres(element, compiler, **kw):
+    return f"(({compiler.process(element.clauses, **kw)})::timestamp AT TIME ZONE 'UTC')"
+
+
+@compiles(utc_midnight, "sqlite")
+def _utc_midnight_sqlite(element, compiler, **kw):
+    return f"datetime({compiler.process(element.clauses, **kw)})"
+
+
 def build_job_search_statement(
     *,
     q: str | None = None,
@@ -142,12 +160,23 @@ def build_job_search_statement(
             JobPostingUrl.closed_at.is_(None),
         )
     )
-    # Newest posted first; a posting with no posted date sorts by the day it
-    # was first scanned, and first_scanned_at breaks ties within a day. Must
-    # stay exactly ix_job_postings_listed_on's expression (migration
-    # 3b9e4c7a1d52) or broad searches sort every match instead of reading it.
-    listed_on = func.coalesce(JobPosting.posted_at, utc_date(JobPosting.first_scanned_at))
-    order = [listed_on.desc(), JobPosting.first_scanned_at.desc()]
+    # Newest first, by the same moment the cards' "Posted 1d ago" badge counts
+    # from (jobAge in the frontend's src/utils/jobPosting.ts), so the badges
+    # only ever grow down the list: the posted day's midnight UTC when it's
+    # an earlier day than our first scan, otherwise (same day, or no posted
+    # date) the first scan itself. first_scanned_at breaks ties (every job
+    # posted on a day and found later shares that midnight), so pages don't
+    # repeat or skip jobs. Must stay exactly ix_job_postings_listed_at's
+    # columns (migration 8e2a5f1c9d47) or broad searches sort every match
+    # instead of reading it.
+    listed_at = case(
+        (
+            JobPosting.posted_at < utc_date(JobPosting.first_scanned_at),
+            utc_midnight(JobPosting.posted_at),
+        ),
+        else_=JobPosting.first_scanned_at,
+    )
+    order = [listed_at.desc(), JobPosting.first_scanned_at.desc()]
     search_area: SearchAreaRead | None = None
     # salary_min/salary_max use `is not None`, not truthy-`or` like the rest of
     # these — 0 is a valid, meaningful value for both and a plain `or` would
