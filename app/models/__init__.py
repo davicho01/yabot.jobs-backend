@@ -1,5 +1,6 @@
 from app.models.api_key import UserApiKey
 from app.models.auth import MagicLinkToken, PersonalAccessToken, UserSession
+from app.models.auto_score_run import AutoScoreRun
 from app.models.company import Company
 from app.models.crawl_source import CrawlSource
 from app.models.feedback import Feedback
@@ -36,4 +37,5 @@ __all__ = [
     "Feedback",
     "FreeTrialJob",
     "SubscriptionEvaluationJob",
+    "AutoScoreRun",
 ]

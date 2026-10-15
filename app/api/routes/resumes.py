@@ -220,7 +220,7 @@ def _render_cover_letter_content(content: dict, contact: dict[str, str], fmt: Li
 
 
 def _stamp_application_pointer(
-    db: Session, user_id: uuid.UUID, job_posting_id: uuid.UUID, **pointer: uuid.UUID
+    db: Session, user_id: uuid.UUID, job_posting_id: uuid.UUID, create: bool = True, **pointer: uuid.UUID
 ) -> None:
     """Record the just-generated score/tailored-resume/cover-letter as the
     current one on this user's application for the job, get-or-creating the
@@ -228,6 +228,9 @@ def _stamp_application_pointer(
     the frontend's own save call hasn't landed yet. `pointer` is a single
     `latest_score_id=`/`latest_tailored_resume_id=`/`latest_cover_letter_id=`
     kwarg — enforced by the one caller each below, not by this signature.
+    create=False only stamps an application that already exists — the
+    auto-score run (app.services.auto_score) decides itself whether one
+    should be created.
     """
     application = db.scalar(
         select(UserJobApplication).where(
@@ -235,6 +238,8 @@ def _stamp_application_pointer(
         )
     )
     if application is None:
+        if not create:
+            return
         application = UserJobApplication(user_id=user_id, job_posting_id=job_posting_id)
         db.add(application)
     for field, value in pointer.items():
@@ -965,22 +970,32 @@ def score_main_resume(
 ) -> ResumeScore:
     resume = _resolve_resume(db, current_user.id, resume_id)
     posting = _get_job_posting(db, job_posting_id)
+    try:
+        return quick_score_resume(db, current_user, resume, posting)
+    except LlmError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM request failed: {exc}") from exc
+
+
+def quick_score_resume(
+    db: Session, current_user: User, resume: Resume, posting: JobPosting, create_application: bool = True
+) -> ResumeScore:
+    """The quick score behind POST /main/score, minus the HTTP wrapping —
+    also run by app.services.auto_score. Raises LlmError on a failed call,
+    HTTPException if the user has no AI access for this job.
+    """
     # Plan, own key, or the free trial (which unlocks this job) — see
     # app.services.ai_access. A failed LLM call below rolls the whole request
     # back, free evaluation included.
     credentials = job_llm_credentials(db, current_user, posting.id)
 
-    try:
-        result = quick_score_resume_with_llm(
-            resume.parsed_text,
-            posting.description or "",
-            provider=credentials.provider,
-            model=credentials.model,
-            api_key=credentials.api_key,
-            base_url=credentials.base_url,
-        )
-    except LlmError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM request failed: {exc}") from exc
+    result = quick_score_resume_with_llm(
+        resume.parsed_text,
+        posting.description or "",
+        provider=credentials.provider,
+        model=credentials.model,
+        api_key=credentials.api_key,
+        base_url=credentials.base_url,
+    )
 
     score = ResumeScore(
         resume_id=resume.id,
@@ -995,7 +1010,7 @@ def score_main_resume(
     )
     db.add(score)
     db.flush()
-    _stamp_application_pointer(db, current_user.id, posting.id, latest_score_id=score.id)
+    _stamp_application_pointer(db, current_user.id, posting.id, create=create_application, latest_score_id=score.id)
     return score
 
 
@@ -1122,6 +1137,7 @@ def _store_tailored_resume(
     posting: JobPosting,
     content: TailoredResumeUpload,
     raw_response: dict | None,
+    create_application: bool = True,
 ) -> TailoredResume:
     docx_bytes = render_tailored_resume_docx(
         content.summary,
@@ -1146,7 +1162,9 @@ def _store_tailored_resume(
     )
     db.add(tailored)
     db.flush()
-    _stamp_application_pointer(db, current_user.id, posting.id, latest_tailored_resume_id=tailored.id)
+    _stamp_application_pointer(
+        db, current_user.id, posting.id, create=create_application, latest_tailored_resume_id=tailored.id
+    )
     return tailored
 
 
@@ -1182,28 +1200,40 @@ def generate_main_tailored_resume(
 ) -> TailoredResume:
     resume = _resolve_resume(db, current_user.id, resume_id)
     posting = _get_job_posting(db, job_posting_id)
+    try:
+        return tailor_resume(db, current_user, resume, posting)
+    except LlmError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM request failed: {exc}") from exc
+
+
+def tailor_resume(
+    db: Session, current_user: User, resume: Resume, posting: JobPosting, create_application: bool = True
+) -> TailoredResume:
+    """POST /main/tailored minus the HTTP wrapping — also run by
+    app.services.auto_score. Raises LlmError / HTTPException like
+    quick_score_resume.
+    """
     key = job_llm_credentials(db, current_user, posting.id)
     fitness_score = _latest_resume_score_dict(db, resume.id, posting.id)
 
-    try:
-        generated = generate_tailored_resume_with_llm(
-            resume.parsed_text,
-            posting.description or "",
-            provider=key.provider,
-            model=key.model,
-            api_key=key.api_key,
-            base_url=key.base_url,
-            fitness_score=fitness_score,
-        )
-    except LlmError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM request failed: {exc}") from exc
+    generated = generate_tailored_resume_with_llm(
+        resume.parsed_text,
+        posting.description or "",
+        provider=key.provider,
+        model=key.model,
+        api_key=key.api_key,
+        base_url=key.base_url,
+        fitness_score=fitness_score,
+    )
 
     content = TailoredResumeUpload(
         summary=generated.summary,
         sections=[ResumeSectionContent(**section) for section in generated.sections],
         contact=ContactInfo(**generated.contact) if generated.contact else None,
     )
-    return _store_tailored_resume(db, current_user, resume, posting, content, generated.raw_response)
+    return _store_tailored_resume(
+        db, current_user, resume, posting, content, generated.raw_response, create_application=create_application
+    )
 
 
 @router.post("/main/tailored/upload", response_model=TailoredResumeRead, status_code=status.HTTP_201_CREATED)
@@ -1253,19 +1283,29 @@ def score_tailored_resume(
 ) -> TailoredResumeScore:
     tailored = _get_owned_tailored_resume(db, current_user.id, tailored_id)
     posting = _get_job_posting(db, tailored.job_posting_id)
-    key = job_llm_credentials(db, current_user, posting.id)
-
     try:
-        result = quick_score_resume_with_llm(
-            _tailored_resume_text(tailored.content),
-            posting.description or "",
-            provider=key.provider,
-            model=key.model,
-            api_key=key.api_key,
-            base_url=key.base_url,
-        )
+        return quick_score_tailored_resume(db, current_user, tailored, posting)
     except LlmError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM request failed: {exc}") from exc
+
+
+def quick_score_tailored_resume(
+    db: Session, current_user: User, tailored: TailoredResume, posting: JobPosting, create_application: bool = True
+) -> TailoredResumeScore:
+    """POST /tailored/{id}/score minus the HTTP wrapping — also run by
+    app.services.auto_score. Raises LlmError / HTTPException like
+    quick_score_resume.
+    """
+    key = job_llm_credentials(db, current_user, posting.id)
+
+    result = quick_score_resume_with_llm(
+        _tailored_resume_text(tailored.content),
+        posting.description or "",
+        provider=key.provider,
+        model=key.model,
+        api_key=key.api_key,
+        base_url=key.base_url,
+    )
 
     score = TailoredResumeScore(
         tailored_resume_id=tailored.id,
@@ -1280,7 +1320,9 @@ def score_tailored_resume(
     )
     db.add(score)
     db.flush()
-    _stamp_application_pointer(db, current_user.id, posting.id, latest_tailored_resume_score_id=score.id)
+    _stamp_application_pointer(
+        db, current_user.id, posting.id, create=create_application, latest_tailored_resume_score_id=score.id
+    )
     return score
 
 

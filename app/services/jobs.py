@@ -917,6 +917,8 @@ def parse_scan_message(data: bytes) -> tuple[str, uuid.UUID]:
     """
     try:
         payload = json.loads(data.decode("utf-8"))
+        if "auto_score_run_id" in payload:
+            return "auto_score", uuid.UUID(payload["auto_score_run_id"])
         if "source_id" in payload:
             return "source", uuid.UUID(payload["source_id"])
         return "url", uuid.UUID(payload["url_id"])
@@ -932,7 +934,17 @@ def process_scan_message(db: Session, kind: str, target_id: uuid.UUID) -> None:
     already queued when throttling shipped drain through the per-source cap
     too. Only URLs with no source (user submissions) are scanned on their
     own, unthrottled — that's low-volume, interactive traffic.
+    An "auto_score" message isn't a scan at all — it rides this topic so the
+    same worker runs it (see app.services.auto_score).
     """
+    if kind == "auto_score":
+        # Imported here: auto_score pulls in the resume routes, which the
+        # scan path otherwise never needs.
+        from app.services.auto_score import run_auto_score
+
+        run_auto_score(db, target_id)
+        return
+
     if kind == "url":
         source_id = db.scalar(select(JobPostingUrl.crawl_source_id).where(JobPostingUrl.id == target_id))
         db.rollback()  # read-only lookup; don't hold a connection open

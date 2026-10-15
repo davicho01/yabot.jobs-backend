@@ -105,6 +105,12 @@ def enqueue_source_scan(source_id: uuid.UUID, lanes: int = 1) -> None:
         future.result(timeout=10)
 
 
+def enqueue_auto_score(run_id: uuid.UUID) -> None:
+    """Publish an AutoScoreRun for the scan worker (see app.services.auto_score)."""
+    payload = json.dumps({"auto_score_run_id": str(run_id)}).encode("utf-8")
+    _get_publisher().publish(_topic_path(), data=payload).result(timeout=10)
+
+
 def subscription_path() -> str:
     return _subscription_path()
 

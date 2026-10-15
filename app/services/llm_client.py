@@ -1,4 +1,6 @@
 import logging
+import threading
+from typing import Any
 
 import anthropic
 import openai
@@ -26,6 +28,14 @@ _OPENAI_COMPATIBLE_BASE_URLS: dict[str, str | None] = {
     LlmProvider.MISTRAL: "https://api.mistral.ai/v1",
 }
 
+# Both SDKs default to a 10-minute timeout with 2 retries. This timeout only
+# covers silence on the connection, though: an overloaded DeepSeek holds the
+# request open and sends blank keep-alive lines, each of which resets it —
+# one auto-score step sat 15 minutes that way. A call that must finish in a
+# bounded time passes call_llm a deadline_seconds as well.
+_TIMEOUT_SECONDS = 120
+_MAX_RETRIES = 1
+
 
 class LlmError(Exception):
     """Raised when a provider call fails or returns something unusable."""
@@ -45,15 +55,52 @@ def _clean_status_error_message(exc: anthropic.APIStatusError | openai.APIStatus
     return str(exc.message)
 
 
-def call_llm(*, provider: str, model: str | None, api_key: str, base_url: str | None, prompt: str) -> str:
-    """Send `prompt` to the given provider/model and return the raw text response."""
+def call_llm(
+    *,
+    provider: str,
+    model: str | None,
+    api_key: str,
+    base_url: str | None,
+    prompt: str,
+    deadline_seconds: float | None = None,
+) -> str:
+    """Send `prompt` to the given provider/model and return the raw text response.
+
+    With `deadline_seconds`, give up (LlmError) once the whole call — SDK
+    retries included — has taken that long, however the provider is
+    stalling. The call runs on a daemon thread so it can be abandoned; it's
+    left to finish or fail on its own, and its result is dropped.
+    """
+    if deadline_seconds is None:
+        return _call(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
+
+    outcome: dict[str, Any] = {}
+
+    def run() -> None:
+        try:
+            outcome["text"] = _call(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
+        except BaseException as exc:  # handed back to the caller below
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=run, name=f"llm-{provider}", daemon=True)
+    thread.start()
+    thread.join(deadline_seconds)
+    if thread.is_alive():
+        logger.warning("%s call passed its %ss deadline; abandoning it.", provider, deadline_seconds)
+        raise LlmError(f"{provider} took too long (over {deadline_seconds:.0f}s) — try again.")
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["text"]
+
+
+def _call(*, provider: str, model: str | None, api_key: str, base_url: str | None, prompt: str) -> str:
     if provider == LlmProvider.ANTHROPIC:
         return _call_anthropic(model=model or _DEFAULT_ANTHROPIC_MODEL, api_key=api_key, prompt=prompt)
     return _call_openai_compatible(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
 
 
 def _call_anthropic(*, model: str, api_key: str, prompt: str) -> str:
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key, timeout=_TIMEOUT_SECONDS, max_retries=_MAX_RETRIES)
     try:
         response = client.messages.create(
             model=model,
@@ -91,7 +138,9 @@ def _call_openai_compatible(
     if provider == LlmProvider.OTHER and resolved_base_url is None:
         raise LlmError("No base_url configured for a custom ('other') provider.")
 
-    client = openai.OpenAI(api_key=api_key, base_url=resolved_base_url)
+    client = openai.OpenAI(
+        api_key=api_key, base_url=resolved_base_url, timeout=_TIMEOUT_SECONDS, max_retries=_MAX_RETRIES
+    )
     # Explicit cap for the same reason as Anthropic's above: a full tailored
     # resume/cover letter JSON response can be long, and a too-small default
     # would truncate it mid-string rather than fail with a clear reason.
