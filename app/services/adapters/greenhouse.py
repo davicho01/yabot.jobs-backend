@@ -359,6 +359,14 @@ def scan_job_url(url: str) -> ScanResult | None:
     # the submitted URL's gh_jid in that case.
     redirect_dropped_gh_jid = _GH_EMBED_JOB_ID_RE.search(url) and not _GH_EMBED_JOB_ID_RE.search(final_url)
     fields = extract(url if redirect_dropped_gh_jid else final_url, html)
+    if _match(url) is None and not (fields and fields.description):
+        # A company page with a gh_jid we couldn't tie to a board (no crawl
+        # source hint, no embed token, no domain-slug guess) — all that's left
+        # here is the page's SEO teaser. Let the generic scanner have it: such
+        # pages often publish the full job as JSON-LD (verified 2026-10-15:
+        # weareroku.com/jobs/…?gh_jid=N, whose board is "roku", from a Clinch
+        # crawl source; the og:description is a 595-char company blurb).
+        return None
     description = (
         (fields.description if fields else None) or base.fallback_description(html) or base.og_description(html)
     )
