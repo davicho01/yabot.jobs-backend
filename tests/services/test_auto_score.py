@@ -131,27 +131,51 @@ def _run(db, user, resume, posting):
     return run
 
 
-def test_below_tailor_threshold_stops_after_first_score_and_creates_no_application(db, setup, monkeypatch):
+def test_below_tailor_threshold_stops_after_first_score_and_saves_archived_application(db, setup, monkeypatch):
     user, resume, posting = setup
     calls = _fake_llm(monkeypatch, db, resume_score=74)
 
     run = _run(db, user, resume, posting)
 
+    application = _application(db, user, posting)
     assert run.status == AutoScoreStatus.BELOW_THRESHOLD
     assert calls == ["score"]
-    assert _application(db, user, posting) is None
+    assert application.is_archived is True
+    assert application.ready_to_apply_at is None
+    assert application.latest_score_id == run.resume_score_id
+    assert application.latest_tailored_resume_id is None
+    assert application.selected_resume_id == resume.id
 
 
-def test_tailored_but_short_of_ready_creates_no_application(db, setup, monkeypatch):
+def test_below_tailor_threshold_leaves_an_existing_application_unarchived(db, setup, monkeypatch):
+    user, resume, posting = setup
+    db.add(m.UserJobApplication(user_id=user.id, job_posting_id=posting.id))
+    db.commit()
+    _fake_llm(monkeypatch, db, resume_score=60)
+
+    run = _run(db, user, resume, posting)
+
+    application = _application(db, user, posting)
+    assert run.status == AutoScoreStatus.BELOW_THRESHOLD
+    assert application.is_archived is False
+    assert application.latest_score_id == run.resume_score_id
+
+
+def test_tailored_but_short_of_ready_saves_unarchived_application_not_ready(db, setup, monkeypatch):
     user, resume, posting = setup
     calls = _fake_llm(monkeypatch, db, resume_score=78, tailored_score=84)
 
     run = _run(db, user, resume, posting)
 
+    application = _application(db, user, posting)
     assert run.status == AutoScoreStatus.NOT_READY
     assert run.best_score == 84
     assert calls == ["score", "tailor", "score_tailored"]
-    assert _application(db, user, posting) is None
+    assert application.is_archived is False
+    assert application.ready_to_apply_at is None
+    assert application.latest_score_id == run.resume_score_id
+    assert application.latest_tailored_resume_id == run.tailored_resume_id
+    assert application.latest_tailored_resume_score_id == run.tailored_score_id
 
 
 def test_existing_application_is_kept_but_not_marked_ready(db, setup, monkeypatch):
