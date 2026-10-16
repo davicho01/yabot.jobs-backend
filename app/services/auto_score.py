@@ -9,10 +9,11 @@ user leaves the page; its AutoScoreRun row is the state the page polls.
 Rules:
 - Quick-score the resume. Below TAILOR_THRESHOLD, stop.
 - Otherwise tailor it and quick-score the tailored version.
-- best = max(both scores). At READY_THRESHOLD or above, save the application
-  (create it if missing) and mark it ready to apply. Below that, no
-  application is created — one the user already had is kept, just not
-  marked ready.
+- best = max(both scores). At READY_THRESHOLD or above, mark the
+  application ready to apply; below it, not ready.
+- Every finished run (not a failed one) saves the application, creating it
+  if missing. One it creates after a first score below TAILOR_THRESHOLD
+  starts archived; one the user already had keeps its archive state.
 """
 
 import logging
@@ -207,6 +208,7 @@ def run_auto_score(db: Session, run_id: uuid.UUID) -> None:
 
         if run.resume_score < TAILOR_THRESHOLD:
             run.best_score = run.resume_score
+            _save_application(db, run)
             _set_status(db, run, AutoScoreStatus.BELOW_THRESHOLD)
             return
 
@@ -244,24 +246,37 @@ def _fail(db: Session, run_id: uuid.UUID, error: str) -> None:
     logger.warning("Auto score run %s failed: %s", run_id, error)
 
 
-def _finish(db: Session, run: AutoScoreRun) -> None:
+def _save_application(db: Session, run: AutoScoreRun) -> UserJobApplication:
+    """Save the job to the user's applications (creating it if missing) with
+    this run's scores and tailored resume. A new one whose first score is
+    below TAILOR_THRESHOLD starts archived; an existing one keeps whatever
+    archive state the user gave it."""
     application = db.scalar(
         select(UserJobApplication).where(
             UserJobApplication.user_id == run.user_id, UserJobApplication.job_posting_id == run.job_posting_id
         )
     )
-    if run.best_score >= READY_THRESHOLD:
-        if application is None:
-            application = UserJobApplication(user_id=run.user_id, job_posting_id=run.job_posting_id)
-            db.add(application)
-        application.latest_score_id = run.resume_score_id
+    if application is None:
+        application = UserJobApplication(
+            user_id=run.user_id,
+            job_posting_id=run.job_posting_id,
+            is_archived=run.resume_score < TAILOR_THRESHOLD,
+        )
+        db.add(application)
+    application.latest_score_id = run.resume_score_id
+    if run.tailored_score_id is not None:
         application.latest_tailored_resume_id = run.tailored_resume_id
         application.latest_tailored_resume_score_id = run.tailored_score_id
-        application.selected_resume_id = application.selected_resume_id or run.resume_id
+    application.selected_resume_id = application.selected_resume_id or run.resume_id
+    return application
+
+
+def _finish(db: Session, run: AutoScoreRun) -> None:
+    application = _save_application(db, run)
+    if run.best_score >= READY_THRESHOLD:
         application.ready_to_apply_at = datetime.now(timezone.utc)
         _set_status(db, run, AutoScoreStatus.READY)
         return
 
-    if application is not None:
-        application.ready_to_apply_at = None
+    application.ready_to_apply_at = None
     _set_status(db, run, AutoScoreStatus.NOT_READY)
