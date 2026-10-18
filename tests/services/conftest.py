@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session, sessionmaker
 import app.models as m
 from app.db.base import Base
 from app.models.enums import ScanStatus
+from app.models.resume import CoverLetter, TailoredResumeScore
 
 
 
@@ -69,7 +70,19 @@ def scan_db() -> Session:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(
         engine,
-        tables=[m.CrawlSource.__table__, m.JobPostingUrl.__table__, m.JobPosting.__table__, m.Company.__table__, m.UserJobApplication.__table__],
+        tables=[
+            m.CrawlSource.__table__,
+            m.JobPostingUrl.__table__,
+            m.JobPosting.__table__,
+            m.Company.__table__,
+            m.UserJobApplication.__table__,
+            # A new application looks up the job's existing results (see
+            # app.services.application_results.link_latest_results).
+            m.ResumeScore.__table__,
+            m.TailoredResume.__table__,
+            TailoredResumeScore.__table__,
+            CoverLetter.__table__,
+        ],
     )
     session = sessionmaker(bind=engine, autoflush=False)()
     yield session

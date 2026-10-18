@@ -48,6 +48,7 @@ from app.schemas.resume import (
     TailoredResumeUpload,
 )
 from app.services.ai_access import job_llm_credentials, resolve_llm_credentials, structure_llm_credentials
+from app.services.application_results import link_latest_results
 from app.services.llm_client import LlmError
 from app.services.resume_llm import (
     apply_skill_additions_with_llm,
@@ -242,6 +243,9 @@ def _stamp_application_pointer(
             return
         application = UserJobApplication(user_id=user_id, job_posting_id=job_posting_id)
         db.add(application)
+        # Earlier results for this job too, not just the one being stamped
+        # (which the loop below then sets, overriding its own pointer).
+        link_latest_results(db, application)
     for field, value in pointer.items():
         setattr(application, field, value)
     db.flush()

@@ -11,8 +11,10 @@ import app.models as m
 from app.api.routes.applications import bulk_update_applications, list_applications, update_application
 from app.db.base import Base
 from app.models.enums import ScanStatus
+from app.models.resume import CoverLetter, TailoredResumeScore
 from app.models.user import User
 from app.schemas.application import ApplicationBulkUpdate, ApplicationRead, ApplicationUpdate
+from app.services.application_results import link_latest_results
 
 _url_counter = itertools.count()
 
@@ -32,6 +34,10 @@ def db() -> Session:
             m.UserJobApplication.__table__,
             m.Resume.__table__,
             m.AutoScoreRun.__table__,
+            m.ResumeScore.__table__,
+            m.TailoredResume.__table__,
+            TailoredResumeScore.__table__,
+            CoverLetter.__table__,
         ],
     )
     session = sessionmaker(bind=engine, autoflush=False)()
@@ -328,3 +334,102 @@ def test_bulk_update_applications_silently_skips_unknown_ids(db):
 def test_bulk_update_applications_with_empty_ids_is_a_no_op(db):
     result = bulk_update_applications(ApplicationBulkUpdate(ids=[], status="applied"), current_user=_user(), db=db)
     assert result == []
+
+
+def _score(db, user, job_posting_id, overall_score, minutes_ago):
+    row = m.ResumeScore(
+        resume_id=uuid.uuid4(),
+        user_id=user.id,
+        job_posting_id=job_posting_id,
+        overall_score=overall_score,
+        matched_keywords=[],
+        missing_keywords=[],
+        summary="",
+        created_at=datetime.now(timezone.utc) - timedelta(minutes=minutes_ago),
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def test_list_applications_falls_back_to_the_jobs_newest_score_when_none_is_linked(db):
+    user = _user()
+    unlinked = _make_application(db, user)
+    never_scored = _make_application(db, user)
+    _score(db, user, unlinked.job_posting_id, 70, minutes_ago=60)
+    _score(db, user, unlinked.job_posting_id, 55, minutes_ago=5)
+    # Another user's score on the same job isn't this user's.
+    _score(db, User(id=uuid.uuid4(), email="other@example.com"), unlinked.job_posting_id, 99, minutes_ago=1)
+
+    rows = {row.id: ApplicationRead.model_validate(row) for row in list_applications(current_user=user, db=db)}
+
+    assert rows[unlinked.id].best_score == 55
+    assert rows[never_scored.id].best_score is None
+
+
+def test_best_score_looks_up_the_fallback_itself_outside_the_list(db):
+    user = _user()
+    application = _make_application(db, user)
+    _score(db, user, application.job_posting_id, 61, minutes_ago=5)
+
+    assert application.best_score == 61
+
+
+def test_a_linked_score_wins_over_a_newer_unlinked_one(db):
+    user = _user()
+    application = _make_application(db, user)
+    linked = _score(db, user, application.job_posting_id, 80, minutes_ago=60)
+    _score(db, user, application.job_posting_id, 40, minutes_ago=5)
+    application.latest_score_id = linked.id
+    db.flush()
+
+    rows = {row.id: ApplicationRead.model_validate(row) for row in list_applications(current_user=user, db=db)}
+
+    assert rows[application.id].best_score == 80
+
+
+def test_link_latest_results_points_a_new_application_at_the_jobs_existing_results(db):
+    user = _user()
+    application = _make_application(db, user)
+    job = application.job_posting_id
+    _score(db, user, job, 60, minutes_ago=60)
+    newest_score = _score(db, user, job, 72, minutes_ago=10)
+    tailored = m.TailoredResume(
+        resume_id=uuid.uuid4(), user_id=user.id, job_posting_id=job, content={}, storage_key="t", filename="t.docx"
+    )
+    db.add(tailored)
+    db.flush()
+    tailored_score = TailoredResumeScore(
+        tailored_resume_id=tailored.id,
+        user_id=user.id,
+        job_posting_id=job,
+        overall_score=86,
+        matched_keywords=[],
+        missing_keywords=[],
+        summary="",
+    )
+    letter = CoverLetter(
+        resume_id=uuid.uuid4(), user_id=user.id, job_posting_id=job, content={}, storage_key="c", filename="c.docx"
+    )
+    db.add_all([tailored_score, letter])
+    db.flush()
+
+    link_latest_results(db, application)
+
+    assert application.latest_score_id == newest_score.id
+    assert application.latest_tailored_resume_id == tailored.id
+    assert application.latest_tailored_resume_score_id == tailored_score.id
+    assert application.latest_cover_letter_id == letter.id
+    assert application.best_score == 86
+
+
+def test_link_latest_results_keeps_a_pointer_already_set(db):
+    user = _user()
+    application = _make_application(db, user)
+    kept = _score(db, user, application.job_posting_id, 50, minutes_ago=60)
+    _score(db, user, application.job_posting_id, 90, minutes_ago=5)
+    application.latest_score_id = kept.id
+
+    link_latest_results(db, application)
+
+    assert application.latest_score_id == kept.id

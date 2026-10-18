@@ -12,6 +12,7 @@ from app.models.job_posting import JobPosting
 from app.models.resume import Resume
 from app.models.user import User
 from app.schemas.application import ApplicationBulkUpdate, ApplicationCreate, ApplicationRead, ApplicationUpdate
+from app.services.application_results import fill_fallback_scores, link_latest_results
 from app.services.auto_score import latest_runs_by_job
 from app.services.jobs import find_existing_application, get_or_create_job_posting
 
@@ -49,6 +50,9 @@ def list_applications(
     runs = latest_runs_by_job(db, current_user.id, [application.job_posting_id for application in applications])
     for application in applications:
         application.auto_score = runs.get(application.job_posting_id)
+    # One query for every application missing its latest score, rather than
+    # best_score looking each one up.
+    fill_fallback_scores(db, current_user.id, applications)
     return applications
 
 
@@ -69,6 +73,10 @@ def create_application(
             user_id=current_user.id, job_posting=posting, status=ApplicationStatus.SAVED
         )
         db.add(application)
+        db.flush()
+        # Scores, tailored resumes or cover letters made for this job before it
+        # was saved (or before an earlier application was removed) show up on it.
+        link_latest_results(db, application)
         db.flush()
     return application
 
