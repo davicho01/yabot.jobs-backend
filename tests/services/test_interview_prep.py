@@ -35,7 +35,8 @@ def test_prep_prompt_formats_inputs_and_preserves_response_contract(monkeypatch)
     assert "{{" not in prompt  # template JSON braces must be escaped for .format()
     assert call.call_args.kwargs | {"prompt": None} == {
         "provider": "openai", "model": "test-model", "api_key": "test-key",
-        "base_url": None, "prompt": None, "deadline_seconds": None,
+        "base_url": None, "prompt": None,
+        "deadline_seconds": resume_llm.INTERVIEW_PREP_DEADLINE_SECONDS,
         "max_tokens": resume_llm.DEFAULT_MAX_TOKENS,
     }
     assert result.likely_questions == [
@@ -87,3 +88,17 @@ def test_prep_rejects_invalid_model_response(monkeypatch, response):
     monkeypatch.setattr(resume_llm, "call_llm", lambda **_: response)
     with pytest.raises(LlmError):
         prep()
+
+
+def test_cover_letter_call_has_a_deadline(monkeypatch):
+    # A stalled provider fails the cover letter at its deadline instead of
+    # holding the request open (the apply page's progress bar is timed to it).
+    response = {"greeting": "Dear team,", "body_paragraphs": ["Hello."], "closing": "Best,"}
+    call = Mock(return_value=json.dumps(response))
+    monkeypatch.setattr(resume_llm, "call_llm", call)
+
+    resume_llm.generate_cover_letter_with_llm(
+        "Python developer", "Python required", provider="openai", model="test-model", api_key="test-key", base_url=None
+    )
+
+    assert call.call_args.kwargs["deadline_seconds"] == resume_llm.COVER_LETTER_DEADLINE_SECONDS
