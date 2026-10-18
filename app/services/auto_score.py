@@ -31,6 +31,7 @@ from app.models.job_application import UserJobApplication
 from app.models.job_posting import JobPosting
 from app.models.resume import Resume, TailoredResume
 from app.models.user import User
+from app.services.application_results import link_latest_results
 from app.services.job_queue import enqueue_auto_score
 from app.services.llm_client import LlmError
 from app.services.resume_llm import QUICK_SCORE_DEADLINE_SECONDS, TAILOR_DEADLINE_SECONDS
@@ -263,6 +264,8 @@ def _save_application(db: Session, run: AutoScoreRun) -> UserJobApplication:
             is_archived=run.resume_score < TAILOR_THRESHOLD,
         )
         db.add(application)
+        # Earlier results (a cover letter, say); this run's own set below win.
+        link_latest_results(db, application)
     application.latest_score_id = run.resume_score_id
     if run.tailored_score_id is not None:
         application.latest_tailored_resume_id = run.tailored_resume_id

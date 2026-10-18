@@ -19,6 +19,7 @@ from app.models.enums import ApplicationStatus, EmploymentType, FlagReason, Scan
 from app.models.job_application import UserJobApplication
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
+from app.services.application_results import link_latest_results
 from app.services.company_logos import resolve_company
 from app.services.company_names import (
     PLACEHOLDER,
@@ -633,13 +634,14 @@ def ensure_user_applicant(db: Session, user_id: uuid.UUID, job_posting_id: uuid.
     """
     existing = find_existing_application(db, user_id, job_posting_id)
     if existing is None:
-        db.add(
-            UserJobApplication(
-                user_id=user_id,
-                job_posting_id=job_posting_id,
-                status=ApplicationStatus.SAVED,
-            )
+        application = UserJobApplication(
+            user_id=user_id,
+            job_posting_id=job_posting_id,
+            status=ApplicationStatus.SAVED,
         )
+        db.add(application)
+        # Any results already made for this job (see link_latest_results).
+        link_latest_results(db, application)
         # The session (SessionLocal, app/db/session.py) is autoflush=False, so
         # without this a second call in the same request/session — a
         # cross-posted duplicate resolving to a *different* job_posting_id —

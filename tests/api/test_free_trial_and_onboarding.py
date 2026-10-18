@@ -8,6 +8,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.models as m
+from app.models.resume import CoverLetter, TailoredResumeScore
 from app.api.routes import resumes as resumes_routes
 from app.api.routes.onboarding import ai_access_seen, dismiss, read_ai_access, read_onboarding
 from app.api.routes.resumes import evaluate_main_resume, generate_main_tailored_resume, score_main_resume
@@ -43,6 +44,10 @@ def db() -> Session:
             m.UserJobApplication.__table__,
             m.FreeTrialJob.__table__,
             m.TailoredResume.__table__,
+            # Read when a result creates the job's application (see
+            # app.services.application_results.link_latest_results).
+            TailoredResumeScore.__table__,
+            CoverLetter.__table__,
         ],
     )
     with engine.begin() as conn:

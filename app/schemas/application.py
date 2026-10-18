@@ -46,6 +46,9 @@ class ApplicationJobPostingRead(BaseModel):
     title: str | None
     company_name: str | None
     company_logo_url: str | None = None
+    # As scanned ("Austin, TX", "Remote - US", several joined by "; ") — shown
+    # under the title on the applications list's cards.
+    location: str | None = None
     salary_min: int | None
     salary_max: int | None
     salary_currency: str | None

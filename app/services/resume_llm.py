@@ -54,6 +54,10 @@ _FORMAT_ATTEMPTS = 3
 # it. Tailoring writes a whole resume, so it gets longer.
 QUICK_SCORE_DEADLINE_SECONDS = 60
 TAILOR_DEADLINE_SECONDS = 120
+# The same for a cover letter and interview prep, generated on request from
+# the apply page, which shows a progress bar timed to these (ApplyPage2.tsx).
+COVER_LETTER_DEADLINE_SECONDS = 120
+INTERVIEW_PREP_DEADLINE_SECONDS = 120
 
 # DeepSeek's models think by default, and the thinking counts toward the
 # response cap: thinking plus a whole tailored resume ran past the default
@@ -505,7 +509,14 @@ def generate_cover_letter_with_llm(
     prompt = COVER_LETTER_PROMPT.format(
         resume_text=resume_text[:_MAX_TEXT_CHARS], job_description=job_description[:_MAX_TEXT_CHARS]
     )
-    data = _call_llm_json(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
+    data = _call_llm_json(
+        provider=provider,
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        prompt=prompt,
+        deadline_seconds=COVER_LETTER_DEADLINE_SECONDS,
+    )
 
     return CoverLetterContent(
         greeting=data.get("greeting") if isinstance(data.get("greeting"), str) else "",
@@ -562,7 +573,14 @@ def generate_interview_prep_with_llm(
     prompt = INTERVIEW_PREP_PROMPT.format(
         resume_text=resume_text[:_MAX_TEXT_CHARS], job_description=job_description[:_MAX_TEXT_CHARS]
     )
-    data = _call_llm_json(provider=provider, model=model, api_key=api_key, base_url=base_url, prompt=prompt)
+    data = _call_llm_json(
+        provider=provider,
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        prompt=prompt,
+        deadline_seconds=INTERVIEW_PREP_DEADLINE_SECONDS,
+    )
 
     return InterviewPrepContent(
         likely_questions=_as_questions_list(data.get("likely_questions")),

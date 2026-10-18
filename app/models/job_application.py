@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, object_session, relationship
 
 from app.db.base import Base
 from app.models.enums import ApplicationStatus
@@ -100,12 +100,30 @@ class UserJobApplication(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     def best_score(self) -> int | None:
         """The higher of the original fitness score and the tailored-resume
         score, whichever is set — the applications list shows one combined
-        badge rather than two separate scores.
+        badge rather than two separate scores. With no latest_score linked,
+        the job's newest score stands in for the original (see
+        _fallback_score).
         """
-        scores = [
-            s.overall_score for s in (self.latest_score, self.latest_tailored_resume_score) if s is not None
-        ]
+        original = self.latest_score.overall_score if self.latest_score is not None else self._fallback_score()
+        tailored = self.latest_tailored_resume_score.overall_score if self.latest_tailored_resume_score else None
+        scores = [s for s in (original, tailored) if s is not None]
         return max(scores) if scores else None
+
+    def _fallback_score(self) -> int | None:
+        """The user's newest score for this job, for an application whose
+        latest_score_id was never set (a score made before the application
+        existed). Read from `fallback_score` when a list prefilled it (see
+        app.services.application_results.fill_fallback_scores), else looked
+        up on its own."""
+        if "fallback_score" in self.__dict__:
+            return self.__dict__["fallback_score"]
+        session = object_session(self)
+        if session is None or self.user_id is None or self.job_posting_id is None:
+            return None
+        # Imported here: that module imports this one.
+        from app.services.application_results import newest_scores_by_job
+
+        return newest_scores_by_job(session, self.user_id, [self.job_posting_id]).get(self.job_posting_id)
 
     def __repr__(self) -> str:
         return f"<UserJobApplication user_id={self.user_id} status={self.status!r}>"
