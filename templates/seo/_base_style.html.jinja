@@ -93,6 +93,8 @@
   .wrap--narrow { max-width: calc(var(--read) + 2.5rem); }
   /* The "no longer available" pages have no breadcrumb above the title. */
   .wrap--gone { padding-top: 3rem; }
+  /* On a phone their two buttons stack at the same full width. */
+  @media (max-width: 760px) { .wrap--gone .head-actions .btn { flex: 1 1 100%; } }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   .skip { position: absolute; left: -9999px; top: 0; background: var(--surface); color: var(--ink); padding: 0.75rem 1rem; z-index: 10; border-radius: 12px; }
   .skip:focus { left: 1rem; top: 1rem; }
@@ -312,6 +314,7 @@
   .site-credits .brand__mark { width: 1.6rem; height: 1.6rem; border-radius: 8px; }
   @media (max-width: 760px) {
     .wrap { padding: 1rem 1rem 3rem; }
+    .site-credits { padding-inline: 1rem; }
     ul.job-list { grid-template-columns: minmax(0, 1fr); }
     ul.tiles { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.6rem; }
   }
