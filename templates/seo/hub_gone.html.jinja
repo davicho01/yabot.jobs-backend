@@ -7,6 +7,7 @@
       static_hub_pages): out of search, with links onward. -#}
   <title>No Current Jobs | Yabot Jobs</title>
   <meta name="robots" content="noindex, follow" />
+  {% include "_fonts.html.jinja" %}
   {% include "_base_style.html.jinja" %}
   {% with page_type = "hub_gone" %}{% include "_analytics.html.jinja" %}{% endwith %}
 </head>
@@ -15,9 +16,11 @@
   <main id="main">
   <div class="wrap">
     <h1>No current jobs here</h1>
-    <p>There aren't enough open jobs on this page right now.</p>
-    <p class="sector-link-back"><a href="{{ base_url }}/jobs/{{ country_slug }}">Browse jobs in the United States &rarr;</a></p>
-    <p class="sector-link-back"><a href="{{ base_url }}/jobs">Search all jobs &rarr;</a></p>
+    <p class="lede">There aren't enough open jobs on this page right now.</p>
+    <div class="head-actions">
+      <a class="btn btn--chip" href="{{ base_url }}/jobs/{{ country_slug }}">Browse jobs in the United States</a>
+      <a class="btn btn--run" href="{{ base_url }}/jobs">Search all jobs</a>
+    </div>
   </div>
   </main>
   {% include "_footer.html.jinja" %}

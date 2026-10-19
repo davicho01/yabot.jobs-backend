@@ -9,9 +9,7 @@
       be removed. -#}
   <title>{% if job %}{{ job.title }} at {{ job.company_display }} – {% endif %}No Longer Available | Yabot Jobs</title>
   <meta name="robots" content="noindex, follow" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
+  {% include "_fonts.html.jinja" %}
   {% include "_base_style.html.jinja" %}
   {% with page_type = "job_gone" %}{% include "_analytics.html.jinja" %}{% endwith %}
 </head>
@@ -23,11 +21,13 @@
     {% if job %}
     <p class="meta-line">{{ job.title }} at {{ job.company_display }}{% if job.location %} &middot; {{ job.location }}{% endif %}</p>
     {% endif %}
-    <p>The posting has closed or been removed from the employer's site.</p>
-    {% if sector_link %}
-    <p class="sector-link-back"><a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_link[0] }}" data-track="sector">Browse current {{ sector_link[1] }} jobs in {{ country_name }} &rarr;</a></p>
-    {% endif %}
-    <p class="sector-link-back"><a href="{{ base_url }}/jobs" data-track="search">Search all jobs &rarr;</a></p>
+    <p class="lede">The posting has closed or been removed from the employer's site.</p>
+    <div class="head-actions">
+      {% if sector_link %}
+      <a class="btn btn--chip" href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_link[0] }}" data-track="sector">Browse current {{ sector_link[1] }} jobs in {{ country_name }}</a>
+      {% endif %}
+      <a class="btn btn--run" href="{{ base_url }}/jobs" data-track="search">Search all jobs</a>
+    </div>
   </div>
   </main>
   {% include "_footer.html.jinja" %}

@@ -12,9 +12,7 @@
   <meta property="og:title" content="{{ sector_name }} Jobs in {{ country_name }}, by Day" />
   <meta property="og:description" content="Browse {{ sector_name }} jobs in {{ country_name }} posted on Yabot Jobs, day by day." />
   <meta property="og:url" content="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
+  {% include "_fonts.html.jinja" %}
   {% include "_base_style.html.jinja" %}
   {% with page_type = "sector_index" %}{% include "_analytics.html.jinja" %}{% endwith %}
 </head>
@@ -22,23 +20,20 @@
   {% include "_header.html.jinja" %}
   <main id="main">
   <div class="wrap">
-    <nav class="breadcrumb">
+    <nav class="breadcrumb" aria-label="Breadcrumb">
       <a href="{{ base_url }}/">Home</a> &rsaquo;
       <a href="{{ base_url }}/jobs">Jobs</a> &rsaquo;
       <a href="{{ base_url }}/jobs/{{ country_slug }}">{{ country_name }}</a> &rsaquo;
-      {{ sector_name }}
+      <span aria-current="page">{{ sector_name }}</span>
     </nav>
     <h1>{{ sector_name }} Jobs in {{ country_name }}, by Day</h1>
     {% include "_scan_notice.html.jinja" %}
 
     {% for month_label, days in months %}
-    <h2 class="month-heading">{{ month_label }}</h2>
-    <ul class="date-list">
+    <h2>{{ month_label }}</h2>
+    <ul class="tiles">
       {% for iso_date, display_date, count in days %}
-      <li>
-        <a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}/{{ iso_date }}">{{ display_date }}</a>
-        &mdash; <span class="count">{{ count }} job{{ '' if count == 1 else 's' }}</span>
-      </li>
+      <li><a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}/{{ iso_date }}"><strong>{{ display_date }}</strong><span class="count">{{ "{:,}".format(count) }} job{{ '' if count == 1 else 's' }}</span></a></li>
       {% endfor %}
     </ul>
     {% endfor %}

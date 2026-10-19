@@ -12,9 +12,7 @@
   <meta property="og:title" content="Jobs in {{ country_name }}, by Sector" />
   <meta property="og:description" content="Browse jobs in {{ country_name }} on Yabot Jobs, by sector." />
   <meta property="og:url" content="{{ base_url }}/jobs/{{ country_slug }}" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
+  {% include "_fonts.html.jinja" %}
   {% include "_base_style.html.jinja" %}
   {% with page_type = "country_index" %}{% include "_analytics.html.jinja" %}{% endwith %}
 </head>
@@ -22,36 +20,33 @@
   {% include "_header.html.jinja" %}
   <main id="main">
   <div class="wrap">
-    <nav class="breadcrumb">
+    <nav class="breadcrumb" aria-label="Breadcrumb">
       <a href="{{ base_url }}/">Home</a> &rsaquo;
       <a href="{{ base_url }}/jobs">Jobs</a> &rsaquo;
-      {{ country_name }}
+      <span aria-current="page">{{ country_name }}</span>
     </nav>
     <h1>Jobs in {{ country_name }}, by Sector</h1>
     {% include "_scan_notice.html.jinja" %}
 
-    <ul class="date-list">
+    <ul class="tiles">
       {% for slug, sector_name, count in sector_totals %}
-      <li>
-        <a href="{{ base_url }}/jobs/{{ country_slug }}/{{ slug }}">{{ sector_name }}</a>
-        &mdash; <span class="count">{{ "{:,}".format(count) }} job{{ '' if count == 1 else 's' }}</span>
-      </li>
+      <li><a href="{{ base_url }}/jobs/{{ country_slug }}/{{ slug }}"><strong>{{ sector_name }}</strong><span class="count">{{ "{:,}".format(count) }} job{{ '' if count == 1 else 's' }}</span></a></li>
       {% endfor %}
     </ul>
 
     {% if hub_links.locations %}
-    <h2 class="month-heading">Top locations</h2>
-    <ul class="date-list">
+    <h2>Top locations</h2>
+    <ul class="tiles">
       {% for name, path, count in hub_links.locations %}
-      <li><a href="{{ base_url }}/{{ path }}">{{ name }}</a> &mdash; <span class="count">{{ "{:,}".format(count) }} job{{ '' if count == 1 else 's' }}</span></li>
+      <li><a href="{{ base_url }}/{{ path }}"><strong>{{ name }}</strong><span class="count">{{ "{:,}".format(count) }} job{{ '' if count == 1 else 's' }}</span></a></li>
       {% endfor %}
     </ul>
     {% endif %}
     {% if hub_links.companies %}
-    <h2 class="month-heading">Top companies hiring</h2>
-    <ul class="date-list">
+    <h2>Top companies hiring</h2>
+    <ul class="tiles">
       {% for name, path, count in hub_links.companies %}
-      <li><a href="{{ base_url }}/{{ path }}">{{ name }}</a> &mdash; <span class="count">{{ "{:,}".format(count) }} job{{ '' if count == 1 else 's' }}</span></li>
+      <li><a href="{{ base_url }}/{{ path }}"><strong>{{ name }}</strong><span class="count">{{ "{:,}".format(count) }} job{{ '' if count == 1 else 's' }}</span></a></li>
       {% endfor %}
     </ul>
     {% endif %}

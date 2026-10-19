@@ -599,7 +599,7 @@ class TestContent:
 
     def test_page_has_glance_and_section_headings(self, db, make_job):
         page = self._page(db, make_job, salary_min=100000, salary_max=120000)
-        assert '<h2 id="glance-h">Job at a glance</h2>' in page and '<h2 id="about-h">About the job</h2>' in page
+        assert '<h2 id="glance-h" class="sr">Job at a glance</h2>' in page and '<h2 id="about-h">About the job</h2>' in page
         assert "<dt>Pay</dt><dd>$100,000 – $120,000</dd>" in page
 
 
@@ -730,14 +730,16 @@ class TestCompanyLogos:
         org = _ld(html_out)["hiringOrganization"]
         assert org["sameAs"] == "https://acme.com"
         assert org["logo"] == "https://yabot.jobs/logos/c/acme.png"
-        assert '<img class="company-logo" src="https://yabot.jobs/logos/c/acme.png"' in html_out
+        assert '<img src="https://yabot.jobs/logos/c/acme.png"' in html_out
 
     def test_logo_sits_on_the_company_line_above_the_title(self, db, acme_with_logo):
         page = sjp.load_job_pages(db, [str(acme_with_logo.id)])[str(acme_with_logo.id)]
         html_out = sjp.render_job_page(page)
-        company_line = re.search(r'<p class="company-line">(.*?)</p>', html_out, re.S).group(1)
-        assert 'class="company-logo"' in company_line and "<span>Acme Corp</span>" in company_line
-        assert html_out.index('class="company-line"') < html_out.index("<h1>")
+        # The logo's tile hangs off the card's band, above the company line.
+        tile = re.search(r'<span class="job-card__tile">(.*?)</span>', html_out, re.S).group(1)
+        assert 'src="https://yabot.jobs/logos/c/acme.png"' in tile
+        assert '<p class="company-line">Acme Corp</p>' in html_out
+        assert html_out.index("job-card__tile") < html_out.index('class="company-line"') < html_out.index("<h1>")
         assert '<p class="meta-line">Austin, TX</p>' in html_out
 
     def test_without_a_logo_the_page_shows_the_placeholder_but_json_ld_has_none(self, db, make_job):
