@@ -653,6 +653,15 @@ class TestHubs:
         assert len(state.jobs) == 10 and "metro=north-carolina" in state.more[1]
         assert len(plan.pages["jobs/us/companies/bandwidth"].sections[0].jobs) == 14  # company hubs keep 25
 
+    def test_a_metro_sector_hub_is_one_wide_list(self):
+        from app.services import static_hub_pages as hubs
+
+        plan = hubs.plan_hubs(self._jobs(5))
+        sector_html = hubs.render_hub(plan.pages["jobs/us/locations/raleigh-nc/engineering-tech"])
+        metro_html = hubs.render_hub(plan.pages["jobs/us/locations/raleigh-nc"])
+        assert '<ul class="job-rows">' in sector_html and "wrap--narrow" not in sector_html
+        assert "job-rows--stacked" in metro_html and "wrap--narrow" in metro_html
+
     def test_company_and_location_directories(self):
         from app.services import static_hub_pages as hubs
 
