@@ -31,12 +31,11 @@
 
     {% for month_label, days in months %}
     <h2>{{ month_label }}</h2>
-    {# One row per day: the date, its count, and a bar sized against
-       a typical busy day (static_pages._bar_scale), so a quiet weekend reads
-       as one at a glance and a one-off spike doesn't flatten the rest. #}
+    {# One row per day: the date, its count, and a bar sized against the
+       busiest day, so a quiet weekend reads as one at a glance. #}
     <ul class="day-rows">
       {% for iso_date, display_date, count in days %}
-      <li><a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}/{{ iso_date }}"><strong>{{ display_date }}</strong><span class="day-rows__bar"><i style="width: {{ [100, 100 * count / bar_scale] | min | round(1) }}%"></i></span><span class="count">{{ "{:,}".format(count) }} job{{ '' if count == 1 else 's' }}</span></a></li>
+      <li><a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}/{{ iso_date }}"><strong>{{ display_date }}</strong><span class="day-rows__bar"><i style="width: {{ (100 * count / max_count) | round(1) }}%"></i></span><span class="count">{{ "{:,}".format(count) }} job{{ '' if count == 1 else 's' }}</span></a></li>
       {% endfor %}
     </ul>
     {% endfor %}

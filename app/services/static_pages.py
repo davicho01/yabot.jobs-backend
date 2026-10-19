@@ -273,18 +273,6 @@ def _build_job_ld_json(jobs: list[JobRow], day_str: str) -> str:
     return json.dumps(payload).replace("</", "<\\/")
 
 
-def _bar_scale(counts: list[int]) -> int:
-    """The count a full-width bar stands for on a sector page: a typical busy
-    day (the 90th percentile), not the busiest one, so a single spike (a big
-    backfill, say) shows as one full bar instead of shrinking every other
-    day's to a sliver. Days above it are capped at full width; their count
-    text stays exact."""
-    if not counts:
-        return 1
-    ordered = sorted(counts)
-    return max(ordered[min(len(ordered) - 1, int(len(ordered) * 0.9))], 1)
-
-
 def render_sector_index(*, country_slug: str, sector: JobSector, dates_with_counts: list[tuple[str, int]]) -> str:
     """`dates_with_counts`: [(YYYY-MM-DD, job_count), ...], any order — sorted
     here newest-first and grouped by month."""
@@ -303,7 +291,7 @@ def render_sector_index(*, country_slug: str, sector: JobSector, dates_with_coun
         sector_slug=sector_slug,
         sector_name=SECTOR_DISPLAY_NAMES[sector],
         months=list(months.items()),
-        bar_scale=_bar_scale([count for _, count in dates_with_counts]),
+        max_count=max((count for _, count in dates_with_counts), default=1) or 1,
         base_url=settings.seo_pages_base_url,
     )
 

@@ -9,7 +9,6 @@ hitting the network.
 
 import itertools
 import json
-import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
@@ -492,12 +491,3 @@ class TestPageStore:
         monkeypatch.setattr(page_store.settings, "seo_pages_bucket", None)
         with pytest.raises(page_store.PageStoreNotConfigured):
             page_store.get_page_store()
-
-
-def test_sector_bars_scale_to_a_typical_busy_day_not_a_spike():
-    """One huge day gets a full bar; the ordinary days keep their proportions."""
-    days = [(f"2026-10-{d:02d}", 1000 + d * 10) for d in range(1, 20)] + [("2026-10-20", 30000)]
-    html = sp.render_sector_index(country_slug="us", sector=JobSector.ENGINEERING_TECH, dates_with_counts=days)
-    widths = [float(w) for w in re.findall(r'<i style="width: ([\d.]+)%">', html)]
-    assert max(widths) == 100.0 and widths.count(100.0) <= 3
-    assert min(widths) > 80  # ordinary days aren't flattened by the spike
