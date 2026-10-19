@@ -373,6 +373,10 @@ class TestSectorTotals:
             ("sales", "Sales", 5),
         ]
 
+    def test_largest_sector_first(self):
+        manifest = {"us": {"sales": {"2026-09-25": 9}, "engineering-tech": {"2026-09-26": 5}, "legal": {"2026-09-26": 7}}}
+        assert [slug for slug, _, _ in sp.sector_totals(manifest, "us")] == ["sales", "legal", "engineering-tech"]
+
     def test_skips_sectors_with_zero_jobs(self):
         manifest = {"us": {"sales": {"2026-09-26": 1}}}
         totals = sp.sector_totals(manifest, "us")

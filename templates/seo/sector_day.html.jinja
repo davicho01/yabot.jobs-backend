@@ -12,9 +12,7 @@
   <meta property="og:title" content="{{ sector_name }} Jobs in {{ country_name }}, Posted {{ date_display }}" />
   <meta property="og:description" content="{{ job_count }} {{ sector_name }} job{{ '' if job_count == 1 else 's' }} posted in {{ country_name }} on {{ date_display }}." />
   <meta property="og:url" content="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}/{{ date_iso }}" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
+  {% include "_fonts.html.jinja" %}
   {% include "_base_style.html.jinja" %}
   {% with page_type = "day" %}{% include "_analytics.html.jinja" %}{% endwith %}
   <script type="application/ld+json">{{ job_ld_json|safe }}</script>
@@ -22,43 +20,46 @@
 <body>
   {% include "_header.html.jinja" %}
   <main id="main">
-  <div class="wrap">
-    <nav class="breadcrumb">
+  <div class="wrap wrap--narrow">
+    <nav class="breadcrumb" aria-label="Breadcrumb">
       <a href="{{ base_url }}/">Home</a> &rsaquo;
       <a href="{{ base_url }}/jobs">Jobs</a> &rsaquo;
       <a href="{{ base_url }}/jobs/{{ country_slug }}">{{ country_name }}</a> &rsaquo;
       <a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}">{{ sector_name }}</a> &rsaquo;
-      {{ date_display }}
+      <span aria-current="page">{{ date_display }}</span>
     </nav>
     <h1>{{ sector_name }} Jobs in {{ country_name }}, Posted {{ date_display }}</h1>
     <p class="meta-line">{{ job_count }} job{{ '' if job_count == 1 else 's' }} found &middot; Updated as of {{ generated_at_display }} Pacific</p>
     {% include "_scan_notice.html.jinja" %}
 
-    <ul class="job-list">
+    {# A day can list a thousand jobs or more, so they're compact rows on
+       one card rather than a band card each (which ran a phone to ~350
+       screens). Every job stays on the page, so crawlers reach them all. #}
+    <ul class="job-rows job-rows--stacked">
     {% for job in jobs %}
       <li>
-        <div class="job-title"><a href="{{ base_url }}/{{ job.href_path }}" data-track="day_job">{{ job.title }}</a></div>
-        <div class="job-meta">
-          {% if job.company_logo_url %}<img class="company-logo-sm" src="{{ job.company_logo_url }}" alt="" width="24" height="24" loading="lazy" />{% endif %}
-          {{ job.company_name or "Unknown company" }}
-          {% if job.location %} &middot; {{ job.location }}{% endif %}
-          {% if job.salary_display %} &middot; {{ job.salary_display }}{% endif %}
-          {% if job.posted_at %} &middot; Posted {{ job.posted_at.strftime('%b %-d, %Y') }}{% endif %}
+        <span class="job-rows__logo">{% if job.company_logo_url %}<img src="{{ job.company_logo_url }}" alt="" width="28" height="28" loading="lazy" />{% else %}<b>{{ (job.company_name or "?")[:1] | upper }}</b>{% endif %}</span>
+        <div class="job-rows__body">
+          <a class="job-rows__title" href="{{ base_url }}/{{ job.href_path }}" data-track="day_job">{{ job.title }}</a>
+          <span class="job-rows__meta"><span class="job-rows__company">{{ job.company_name or "Unknown company" }}</span>{% if job.location %}<span class="job-rows__place">{{ job.location }}</span>{% endif %}</span>
         </div>
+        <span class="job-pay">{{ job.salary_display or "" }}</span>
       </li>
     {% endfor %}
     </ul>
 
-    <div class="day-nav">
-      <span>{% if prev_day %}<a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}/{{ prev_day }}">&larr; Previous day</a>{% endif %}</span>
-      <span>{% if next_day %}<a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}/{{ next_day }}">Next day &rarr;</a>{% endif %}</span>
-    </div>
-    <p class="sector-link-back"><a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}">Browse all {{ sector_name }} days &rarr;</a></p>
+    <nav class="pager" aria-label="Other days">
+      <span>{% if prev_day %}<a class="btn btn--chip" href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}/{{ prev_day }}">&lsaquo; Previous day</a>{% endif %}</span>
+      <span>{% if next_day %}<a class="btn btn--run" href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}/{{ next_day }}">Next day &rsaquo;</a>{% endif %}</span>
+    </nav>
+    <p class="more-link"><a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}">Browse all {{ sector_name }} days &rarr;</a></p>
 
-    <footer class="other-sectors">
-      Other sectors:
-      {% for name, slug in other_sectors %}<a href="{{ base_url }}/jobs/{{ country_slug }}/{{ slug }}">{{ name }}</a>{% if not loop.last %} &middot; {% endif %}{% endfor %}
-    </footer>
+    <section aria-labelledby="other-h">
+      <h2 id="other-h">Other sectors</h2>
+      <ul class="chips">
+        {% for name, slug in other_sectors %}<li><a href="{{ base_url }}/jobs/{{ country_slug }}/{{ slug }}">{{ name }}</a></li>{% endfor %}
+      </ul>
+    </section>
   </div>
   </main>
   {% include "_footer.html.jinja" %}

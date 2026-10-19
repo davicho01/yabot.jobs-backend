@@ -364,6 +364,11 @@ class LinkJob:
         return self.company_name or self.domain
 
     @property
+    def logo_url(self) -> str | None:
+        """The company's logo through its stable alias, for the card's tile."""
+        return logo_alias_url(self.company_key)
+
+    @property
     def day(self) -> date:
         return job_day(self.posted_at, self.found_at)
 

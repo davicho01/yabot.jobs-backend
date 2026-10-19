@@ -1,0 +1,16 @@
+{# Links to other job pages (static_job_pages.LinkJob) as the day page's list:
+   compact rows on one card on a phone, one line per job in columns on a
+   desktop. With one_company (a company's own page) the logo and company
+   name are left off, since every row would repeat them. #}
+<ul class="job-rows job-rows--stacked{% if one_company %} job-rows--one-company{% endif %}">
+  {% for j in jobs %}
+  <li>
+    {% if not one_company %}<span class="job-rows__logo">{% if j.logo_url %}<img src="{{ j.logo_url }}" alt="" width="28" height="28" loading="lazy" />{% else %}<b>{{ j.company_display[:1] | upper }}</b>{% endif %}</span>{% endif %}
+    <div class="job-rows__body">
+      <a class="job-rows__title" href="{{ base_url }}/{{ j.path }}" data-track="{{ track | default('job') }}">{{ j.title }}</a>
+      <span class="job-rows__meta">{% if not one_company %}<span class="job-rows__company">{{ j.company_display }}</span>{% endif %}{% if j.location %}<span class="job-rows__place">{{ j.location }}</span>{% endif %}</span>
+    </div>
+    <span class="job-rows__when">Posted {{ j.day.strftime('%b %-d') }}</span>
+  </li>
+  {% endfor %}
+</ul>
