@@ -20,7 +20,7 @@
 <body>
   {% include "_header.html.jinja" %}
   <main id="main">
-  <div class="wrap">
+  <div class="wrap wrap--narrow">
     <nav class="breadcrumb" aria-label="Breadcrumb">
       <a href="{{ base_url }}/">Home</a> &rsaquo;
       <a href="{{ base_url }}/jobs">Jobs</a> &rsaquo;
@@ -35,7 +35,7 @@
     {# A day can list a thousand jobs or more, so they're compact rows on
        one card rather than a band card each (which ran a phone to ~350
        screens). Every job stays on the page, so crawlers reach them all. #}
-    <ul class="job-rows">
+    <ul class="job-rows job-rows--stacked">
     {% for job in jobs %}
       <li>
         <span class="job-rows__logo">{% if job.company_logo_url %}<img src="{{ job.company_logo_url }}" alt="" width="28" height="28" loading="lazy" />{% else %}<b>{{ (job.company_name or "?")[:1] | upper }}</b>{% endif %}</span>
