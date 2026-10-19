@@ -227,15 +227,17 @@
     ul.job-rows .job-pay { margin-left: calc(40px + 0.75rem); margin-top: 0.3rem; }
   }
 
-  /* On a desktop the day's list is a plain list: one line per job (title,
-     then company and place, the pay at the end), no card or logos. */
+  /* On a desktop the day's list is a plain list: one line per job (a small
+     logo, the title, then company and place, the pay at the end), no card. */
   @media (min-width: 761px) {
     ul.job-rows { padding: 0; border-radius: 0; background: none; box-shadow: none; border-top: 1px solid var(--line); }
-    ul.job-rows li { gap: 1rem; padding: 0.55rem 0.25rem; border-bottom: 1px solid var(--line); }
+    ul.job-rows li { gap: 0.75rem; padding: 0.5rem 0.25rem; border-bottom: 1px solid var(--line); }
     ul.job-rows li + li::before { display: none; }
     ul.job-rows li:hover { background: none; }
     ul.job-rows li:hover .job-rows__title { color: var(--focus); }
-    .job-rows__logo { display: none; }
+    .job-rows__logo { width: 28px; height: 28px; border-radius: 8px; box-shadow: 0 0 0 1px var(--line); }
+    .job-rows__logo img { width: 20px; height: 20px; border-radius: 4px; }
+    .job-rows__logo b { font-size: 0.8rem; }
     .job-rows__body { flex-direction: row; align-items: baseline; gap: 0.75rem; }
     .job-rows__title { flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .job-rows__meta { flex: 1; }
