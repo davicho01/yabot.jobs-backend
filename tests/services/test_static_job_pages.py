@@ -659,8 +659,8 @@ class TestHubs:
         plan = hubs.plan_hubs(self._jobs(5))
         sector_html = hubs.render_hub(plan.pages["jobs/us/locations/raleigh-nc/engineering-tech"])
         metro_html = hubs.render_hub(plan.pages["jobs/us/locations/raleigh-nc"])
-        assert '<ul class="job-rows">' in sector_html and "wrap--narrow" not in sector_html
-        assert "job-rows--stacked" in metro_html and "wrap--narrow" in metro_html
+        assert '<ul class="job-rows">' in sector_html and '<div class="wrap">' in sector_html
+        assert '<ul class="job-rows job-rows--stacked">' in metro_html and '<div class="wrap wrap--narrow">' in metro_html
 
     def test_company_and_location_directories(self):
         from app.services import static_hub_pages as hubs
