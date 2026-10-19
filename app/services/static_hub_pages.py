@@ -91,9 +91,6 @@ class Hub:
     sections: list[Section] = field(default_factory=list)
     link_lists: list[tuple[str, list[tuple[str, str]]]] = field(default_factory=list)  # (heading, [(label, url)])
     board: tuple[str, str] | None = None  # (label, absolute url)
-    # One long list from many companies (a metro's or remote's single sector):
-    # laid out as the day pages' full-width list rather than the centered rows.
-    wide_list: bool = False
     # A directory of other hubs instead of jobs: [(heading, [(name, absolute url, job count)])].
     directory: list[tuple[str, list[tuple[str, str, int]]]] = field(default_factory=list)
 
@@ -306,7 +303,6 @@ def plan_hubs(live: Iterable[LinkJob]) -> HubPlan:
                 sections=[Section(heading=f"{sector_name} jobs", jobs=_newest_first(group)[:METRO_SECTOR_MAX_JOBS], total=len(group))],
                 link_lists=[("Nearby", [(f"All jobs in {area.name}", _url(path)), (f"{sector_name} jobs across the US", _url(f"{HUB_ROOT}/{slug}"))])],
                 board=(f"Search {sector_name} jobs in {area.name}", _board(metro=area.slug, sector=group[0].sector)),
-                wide_list=True,
             )
 
         def more_link(slug, name, count, code=code, area=area):
@@ -384,7 +380,6 @@ def plan_hubs(live: Iterable[LinkJob]) -> HubPlan:
                 count=len(group),
                 sections=[Section(heading=f"Remote {sector_name} jobs", jobs=_newest_first(group)[:METRO_SECTOR_MAX_JOBS], total=len(group))],
                 board=(f"Search remote {sector_name} jobs", _board(workplace="remote", sector=group[0].sector)),
-                wide_list=True,
             )
         plan._remote_paths[None] = remote_path
 

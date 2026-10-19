@@ -22,7 +22,7 @@
 <body>
   {% include "_header.html.jinja" %}
   <main id="main">
-  <div class="wrap{% if not hub.wide_list %} wrap--narrow{% endif %}">
+  <div class="wrap wrap--narrow">
     {% with trail=hub.trail %}{% include "_breadcrumb.html.jinja" %}{% endwith %}
     <h1>{{ hub.h1 }}</h1>
     <p class="lede">{{ hub.description }}</p>
@@ -41,7 +41,7 @@
     {% for section in hub.sections %}
     <section>
       <h2>{{ section.heading }}{% if section.total > section.jobs|length %} <span class="count">{{ "{:,}".format(section.total) }}</span>{% endif %}</h2>
-      {% with jobs=section.jobs, track="hub_job", one_company=hub.path.startswith("jobs/" ~ country_slug ~ "/companies/"), stacked=not hub.wide_list %}{% include "_job_rows.html.jinja" %}{% endwith %}
+      {% with jobs=section.jobs, track="hub_job", one_company=hub.path.startswith("jobs/" ~ country_slug ~ "/companies/") %}{% include "_job_rows.html.jinja" %}{% endwith %}
       {% if section.more %}<p class="more-link"><a href="{{ section.more[1] }}">{{ section.more[0] }} &rarr;</a></p>{% endif %}
     </section>
     {% endfor %}
