@@ -227,6 +227,21 @@
     ul.job-rows .job-pay { margin-left: calc(40px + 0.75rem); margin-top: 0.3rem; }
   }
 
+  /* On a desktop the day's list is a plain list: one line per job (title,
+     then company and place, the pay at the end), no card or logos. */
+  @media (min-width: 761px) {
+    ul.job-rows { padding: 0; border-radius: 0; background: none; box-shadow: none; border-top: 1px solid var(--line); }
+    ul.job-rows li { gap: 1rem; padding: 0.55rem 0.25rem; border-bottom: 1px solid var(--line); }
+    ul.job-rows li + li::before { display: none; }
+    ul.job-rows li:hover { background: none; }
+    ul.job-rows li:hover .job-rows__title { color: var(--focus); }
+    .job-rows__logo { display: none; }
+    .job-rows__body { flex-direction: row; align-items: baseline; gap: 0.75rem; }
+    .job-rows__title { flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .job-rows__meta { flex: 1; }
+    ul.job-rows .job-pay { padding: 0; background: none; font-size: 0.85rem; }
+  }
+
   /* ---------- prev/next, "more" links ---------- */
   .pager { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; margin-top: 2rem; }
   .more-link { margin: 1rem 0 0; }
