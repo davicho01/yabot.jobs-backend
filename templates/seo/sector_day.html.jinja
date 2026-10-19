@@ -41,9 +41,9 @@
         <span class="job-rows__logo">{% if job.company_logo_url %}<img src="{{ job.company_logo_url }}" alt="" width="28" height="28" loading="lazy" />{% else %}<b>{{ (job.company_name or "?")[:1] | upper }}</b>{% endif %}</span>
         <div class="job-rows__body">
           <a class="job-rows__title" href="{{ base_url }}/{{ job.href_path }}" data-track="day_job">{{ job.title }}</a>
-          <span class="job-rows__meta">{{ job.company_name or "Unknown company" }}{% if job.location %} &middot; {{ job.location }}{% endif %}</span>
+          <span class="job-rows__meta"><span class="job-rows__company">{{ job.company_name or "Unknown company" }}</span>{% if job.location %}<span class="job-rows__place">{{ job.location }}</span>{% endif %}</span>
         </div>
-        {% if job.salary_display %}<span class="job-pay">{{ job.salary_display }}</span>{% endif %}
+        <span class="job-pay">{{ job.salary_display or "" }}</span>
       </li>
     {% endfor %}
     </ul>

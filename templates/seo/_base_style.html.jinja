@@ -220,6 +220,8 @@
   .job-rows__title::after { content: ""; position: absolute; inset: 0; }
   .job-rows__meta { font-size: 0.85rem; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   ul.job-rows .job-pay { flex: none; font-size: 0.82rem; }
+  ul.job-rows .job-pay:empty { display: none; }
+  .job-rows__place::before { content: " · "; }
   @media (max-width: 760px) {
     ul.job-rows li { flex-wrap: wrap; align-items: flex-start; padding: 0.7rem 0.9rem; gap: 0 0.75rem; }
     ul.job-rows li + li::before { left: 0.9rem; right: 0.9rem; }
@@ -227,21 +229,28 @@
     ul.job-rows .job-pay { margin-left: calc(40px + 0.75rem); margin-top: 0.3rem; }
   }
 
-  /* On a desktop the day's list is a plain list: one line per job (a small
-     logo, the title, then company and place, the pay at the end), no card. */
+  /* On a desktop the day's list is a plain table-like list: one line per
+     job in fixed columns (logo, title, company, place, pay), so each column
+     lines up down the page; a long value is cut off with an ellipsis. */
   @media (min-width: 761px) {
     ul.job-rows { padding: 0; border-radius: 0; background: none; box-shadow: none; border-top: 1px solid var(--line); }
-    ul.job-rows li { gap: 0.75rem; padding: 0.5rem 0.25rem; border-bottom: 1px solid var(--line); }
+    ul.job-rows li {
+      display: grid; grid-template-columns: 28px minmax(0, 2.4fr) minmax(0, 1.1fr) minmax(0, 1.5fr) 9.5rem;
+      align-items: center; gap: 0.9rem; padding: 0.5rem 0.25rem; border-bottom: 1px solid var(--line);
+    }
     ul.job-rows li + li::before { display: none; }
     ul.job-rows li:hover { background: none; }
     ul.job-rows li:hover .job-rows__title { color: var(--focus); }
     .job-rows__logo { width: 28px; height: 28px; border-radius: 8px; box-shadow: 0 0 0 1px var(--line); }
     .job-rows__logo img { width: 20px; height: 20px; border-radius: 4px; }
     .job-rows__logo b { font-size: 0.8rem; }
-    .job-rows__body { flex-direction: row; align-items: baseline; gap: 0.75rem; }
-    .job-rows__title { flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .job-rows__meta { flex: 1; }
-    ul.job-rows .job-pay { padding: 0; background: none; font-size: 0.85rem; }
+    .job-rows__body, .job-rows__meta { display: contents; }
+    .job-rows__title, .job-rows__company, .job-rows__place { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .job-rows__company, .job-rows__place { font-size: 0.85rem; color: var(--ink-soft); }
+    .job-rows__company { grid-column: 3; }
+    .job-rows__place { grid-column: 4; }
+    .job-rows__place::before { content: none; }
+    ul.job-rows .job-pay, ul.job-rows .job-pay:empty { display: block; grid-column: 5; padding: 0; background: none; font-size: 0.85rem; text-align: right; }
   }
 
   /* ---------- prev/next, "more" links ---------- */
