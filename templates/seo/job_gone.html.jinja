@@ -16,7 +16,7 @@
 <body>
   {% include "_header.html.jinja" %}
   <main id="main">
-  <div class="wrap">
+  <div class="wrap wrap--narrow wrap--gone">
     <h1>This job is no longer available</h1>
     {% if job %}
     <p class="meta-line">{{ job.title }} at {{ job.company_display }}{% if job.location %} &middot; {{ job.location }}{% endif %}</p>
