@@ -9,6 +9,7 @@
       be removed. -#}
   <title>{% if job %}{{ job.title }} at {{ job.company_display }} – {% endif %}No Longer Available | Yabot Jobs</title>
   <meta name="robots" content="noindex, follow" />
+  <meta name="description" content="{% if job %}{{ job.title }} at {{ job.company_display }} is no longer available. {% else %}This job is no longer available. {% endif %}Browse current {% if sector_link %}{{ sector_link[1] }} {% endif %}jobs in {{ country_name }} on Yabot Jobs." />
   {% include "_fonts.html.jinja" %}
   {% include "_base_style.html.jinja" %}
   {% with page_type = "job_gone" %}{% include "_analytics.html.jinja" %}{% endwith %}
