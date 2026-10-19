@@ -22,7 +22,7 @@
 <body>
   {% include "_header.html.jinja" %}
   <main id="main">
-  <div class="wrap">
+  <div class="wrap wrap--narrow">
     {% include "_breadcrumb.html.jinja" %}
     {# The shared job page's card (the app's /jobs/:id): the plum band with
        the logo tile, then the posting on a white card. #}
@@ -68,7 +68,7 @@
     {% if links.same_company %}
     <section class="job-related" aria-labelledby="company-h">
       <h2 id="company-h">More jobs at {{ job.company_display }}</h2>
-      {% with jobs=links.same_company, track="company_job" %}{% include "_job_links.html.jinja" %}{% endwith %}
+      {% with jobs=links.same_company, track="company_job", one_company=true %}{% include "_job_rows.html.jinja" %}{% endwith %}
       {% if links.company_hub %}<p class="more-link"><a href="{{ base_url }}/{{ links.company_hub }}" data-track="company_hub">All jobs at {{ job.company_display }} &rarr;</a></p>{% endif %}
     </section>
     {% endif %}
@@ -76,7 +76,7 @@
     {% if links.similar %}
     <section class="job-related" aria-labelledby="similar-h">
       <h2 id="similar-h">Similar jobs</h2>
-      {% with jobs=links.similar, track="similar_job" %}{% include "_job_links.html.jinja" %}{% endwith %}
+      {% with jobs=links.similar, track="similar_job" %}{% include "_job_rows.html.jinja" %}{% endwith %}
     </section>
     {% endif %}
 

@@ -210,38 +210,8 @@
     ul.day-rows--named a { grid-template-columns: minmax(0, 1fr) 4.5rem 5.5rem; }
   }
 
-  /* ---------- band cards (the board's .band-card) ---------- */
-  ul.job-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
-  ul.job-list li {
-    --c: var(--run-0); --c-end: var(--run-1);
-    position: relative; display: flex; flex-direction: column; min-width: 0;
-    background: linear-gradient(110deg, var(--c), var(--c-end)) top / 100% 35px no-repeat, var(--surface);
-    border-radius: 26px; box-shadow: var(--shadow-card); overflow: hidden;
-    transition: transform 0.15s ease;
-  }
-  ul.job-list li:nth-child(8n+2) { --c: var(--run-1); --c-end: var(--run-2); }
-  ul.job-list li:nth-child(8n+3) { --c: var(--run-2); --c-end: var(--run-3); }
-  ul.job-list li:nth-child(8n+4) { --c: var(--run-3); --c-end: var(--run-4); }
-  ul.job-list li:nth-child(8n+5) { --c: var(--run-4); --c-end: var(--run-3); }
-  ul.job-list li:nth-child(8n+6) { --c: var(--run-3); --c-end: var(--run-2); }
-  ul.job-list li:nth-child(8n+7) { --c: var(--run-2); --c-end: var(--run-1); }
-  ul.job-list li:nth-child(8n+8) { --c: var(--run-1); --c-end: var(--run-0); }
-  ul.job-list li:hover { transform: translateY(-2px); }
-  ul.job-list li:focus-within { box-shadow: 0 0 0 2px var(--c), var(--shadow-card); }
-  @media (hover: none) { ul.job-list li:hover { transform: none; } }
-  .job-tile { position: absolute; left: 16px; top: 14px; width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; background: #fff; box-shadow: 0 4px 14px rgba(31, 26, 53, 0.16); overflow: hidden; }
-  .job-tile img { width: 32px; height: 32px; object-fit: contain; border-radius: 8px; }
-  .job-body { display: flex; flex-direction: column; gap: 0.15rem; flex: 1; padding: 4.25rem 1rem 1rem; min-width: 0; }
-  .job-company { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .job-title { font-size: 1.1rem; font-weight: 600; letter-spacing: -0.025em; line-height: 1.2; }
-  .job-title a { text-decoration: none; color: var(--ink); }
-  /* The whole card is the title's link. */
-  .job-title a::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
-  .job-title a:focus-visible { outline: 0; }
-  .job-meta { font-size: 0.88rem; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .job-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin-top: auto; padding-top: 0.6rem; }
+  /* ---------- the pay chip: lime, as on the board ---------- */
   .job-pay { padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.9rem; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--pay-ink); background: color-mix(in srgb, var(--lime) 45%, transparent); }
-  .job-posted { margin-left: auto; font-size: 0.72rem; color: var(--ink-soft); }
   @media (prefers-color-scheme: dark) { .job-pay { background: color-mix(in srgb, var(--lime) 16%, transparent); } }
 
   /* ---------- compact rows on one card (the day pages' long lists) ---------- */
@@ -320,7 +290,6 @@
   @media (max-width: 760px) {
     .wrap { padding: 1rem 1rem 3rem; }
     .site-credits { padding-inline: 1rem; }
-    ul.job-list { grid-template-columns: minmax(0, 1fr); }
     ul.tiles { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.6rem; }
   }
 </style>
