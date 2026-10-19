@@ -41,7 +41,7 @@
     {% for section in hub.sections %}
     <section>
       <h2>{{ section.heading }}{% if section.total > section.jobs|length %} <span class="count">{{ "{:,}".format(section.total) }}</span>{% endif %}</h2>
-      {% with jobs=section.jobs, track="hub_job" %}{% include "_job_links.html.jinja" %}{% endwith %}
+      {% with jobs=section.jobs, track="hub_job", one_company=hub.path.startswith("jobs/" ~ country_slug ~ "/companies/") %}{% include "_job_rows.html.jinja" %}{% endwith %}
       {% if section.more %}<p class="more-link"><a href="{{ section.more[1] }}">{{ section.more[0] }} &rarr;</a></p>{% endif %}
     </section>
     {% endfor %}

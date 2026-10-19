@@ -252,12 +252,24 @@
   .job-rows__meta { font-size: 0.85rem; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   ul.job-rows .job-pay { flex: none; font-size: 0.82rem; }
   ul.job-rows .job-pay:empty { display: none; }
-  .job-rows__place::before { content: " · "; }
+  .job-rows__company + .job-rows__place::before { content: " · "; }
+  .job-rows__when { flex: none; font-size: 0.78rem; color: var(--ink-soft); white-space: nowrap; }
+  /* One company's own page: no logo column. */
+  ul.job-rows--one-company li + li::before { left: 1.1rem; }
   @media (max-width: 760px) {
     ul.job-rows li { flex-wrap: wrap; align-items: flex-start; padding: 0.7rem 0.9rem; gap: 0 0.75rem; }
     ul.job-rows li + li::before { left: 0.9rem; right: 0.9rem; }
     .job-rows__body { flex-basis: calc(100% - 40px - 0.75rem); }
     ul.job-rows .job-pay { margin-left: calc(40px + 0.75rem); margin-top: 0.3rem; }
+    /* A row with a posting date (the hubs' lists): the date at the end of
+       the place line rather than on a line of its own. */
+    ul.job-rows li:has(.job-rows__when) { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: baseline; }
+    ul.job-rows li:has(.job-rows__when) .job-rows__logo { grid-row: span 2; align-self: start; }
+    ul.job-rows li:has(.job-rows__when) .job-rows__body { display: contents; }
+    ul.job-rows li:has(.job-rows__when) .job-rows__title { grid-column: 2 / -1; }
+    ul.job-rows--one-company li:has(.job-rows__when) { grid-template-columns: minmax(0, 1fr) auto; }
+    ul.job-rows--one-company li:has(.job-rows__when) .job-rows__title { grid-column: 1 / -1; }
+    ul.job-rows--one-company li + li::before { left: 0.9rem; }
   }
 
   /* On a desktop the day's list is a plain table-like list: one line per
@@ -278,6 +290,9 @@
     .job-rows__body { display: contents; }
     .job-rows__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     ul.job-rows .job-pay, ul.job-rows .job-pay:empty { display: block; grid-column: 4; padding: 0; background: none; font-size: 0.85rem; text-align: right; }
+    ul.job-rows .job-rows__when { grid-column: 4; text-align: right; }
+    ul.job-rows--one-company li { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 9.5rem; }
+    ul.job-rows--one-company .job-rows__when { grid-column: 3; }
   }
 
   /* ---------- prev/next, "more" links ---------- */
