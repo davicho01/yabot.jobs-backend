@@ -284,13 +284,14 @@ def render_sector_index(*, country_slug: str, sector: JobSector, dates_with_coun
     for iso_date, count in ordered:
         d = date.fromisoformat(iso_date)
         month_label = d.strftime("%B %Y")
-        months.setdefault(month_label, []).append((iso_date, d.strftime("%b %-d, %Y"), count))
+        months.setdefault(month_label, []).append((iso_date, d.strftime("%a, %b %-d"), count))
     return template.render(
         country_slug=country_slug,
         country_name=country_name,
         sector_slug=sector_slug,
         sector_name=SECTOR_DISPLAY_NAMES[sector],
         months=list(months.items()),
+        max_count=max((count for _, count in dates_with_counts), default=1) or 1,
         base_url=settings.seo_pages_base_url,
     )
 
