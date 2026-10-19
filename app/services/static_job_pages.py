@@ -590,6 +590,17 @@ def content_hash(job: JobPage) -> str:
     return hashlib.sha256(json.dumps(fields, default=str).encode()).hexdigest()[:16]
 
 
+def indexing_score(job: JobPage) -> int:
+    """0-3, how much a new page is worth one of the Indexing API's few
+    daily notifications (app.services.google_indexing): a point each for a
+    listed salary, a known company (one with a real logo), and remote."""
+    return (
+        (job.salary_min is not None or job.salary_max is not None)
+        + bool(job.company_logo_key)
+        + (job.workplace_type == WorkplaceType.REMOTE)
+    )
+
+
 def _execute_with_retry(db: Session, stmt):
     """One retry on a dropped connection. Cloud SQL closes connections when
     a crawl burst runs it out of slots, and a long backfill shouldn't die
@@ -946,6 +957,11 @@ class JobPagesResult:
     job_paths: dict[str, str] = field(default_factory=dict)
     # Top company/location hub links for the country page (static_hub_pages).
     country_links: dict = field(default_factory=dict)
+    # (indexing_score, day, path) of each page published this run, and the
+    # paths replaced with the "no longer available" page — what
+    # app.services.google_indexing tells Google about.
+    new_pages: list[tuple[int, date, str]] = field(default_factory=list)
+    removed_paths: list[str] = field(default_factory=list)
 
 
 def generate_job_pages(
@@ -1049,6 +1065,7 @@ def generate_job_pages(
         for start in range(0, len(new_ids), RENDER_BATCH_SIZE):
             loaded = load_job_pages(db, new_ids[start : start + RENDER_BATCH_SIZE])
             publish(pool, list(loaded), loaded)
+            result.new_pages.extend((indexing_score(job), index[i].day, index[i].path) for i, job in loaded.items())
             batches_done += 1
             checkpoint()
         for start in range(0, len(check_ids), RENDER_BATCH_SIZE):
@@ -1083,6 +1100,7 @@ def generate_job_pages(
 
     result.updated = len(rerendered)
     result.deferred = deferred
+    result.removed_paths = [previous[i].path for i in removed_ids]
     result.unchanged = len(index) - result.published - result.updated - deferred
 
     since = now.astimezone(DAY_BOUNDARY_TZ).date() - timedelta(days=SITEMAP_RECENT_DAYS)

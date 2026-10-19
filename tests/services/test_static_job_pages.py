@@ -289,6 +289,19 @@ class TestGenerate:
         assert str(older.id).encode() not in sitemap
         assert b"Software Engineer" in store.get(_path(store, older.id))
 
+    def test_reports_new_pages_with_indexing_scores_and_removed_paths(self, db, make_job, store):
+        plain = make_job()
+        remote_paid = make_job(workplace_type=WorkplaceType.REMOTE, salary_min=100_000)
+        result = sjp.generate_job_pages(db, now=NOW)
+        scores = {path: score for score, _, path in result.new_pages}
+        plain_path = _path(store, plain.id)
+        assert scores == {plain_path: 0, _path(store, remote_paid.id): 2}
+
+        plain.closed_at = NOW
+        db.commit()
+        result = sjp.generate_job_pages(db, now=NOW)
+        assert (result.new_pages, result.removed_paths) == ([], [plain_path])
+
     def test_unchanged_jobs_are_skipped(self, db, make_job, store):
         make_job()
         sjp.generate_job_pages(db, now=NOW)
