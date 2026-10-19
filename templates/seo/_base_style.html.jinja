@@ -254,6 +254,8 @@
   ul.job-rows .job-pay:empty { display: none; }
   .job-rows__company + .job-rows__place::before { content: " · "; }
   .job-rows__when { flex: none; font-size: 0.78rem; color: var(--ink-soft); white-space: nowrap; }
+  /* The hubs' lists (job-rows--stacked) keep the phone's two-line rows on a
+     desktop too: title over place, the posting day at the right. */
   /* One company's own page: no logo column. */
   ul.job-rows--one-company li + li::before { left: 1.1rem; }
   @media (max-width: 760px) {
@@ -276,23 +278,23 @@
      job in fixed columns (logo, title, "company · place", pay), so each
      column lines up down the page; a long value is cut off with an ellipsis. */
   @media (min-width: 761px) {
-    ul.job-rows { padding: 0; border-radius: 0; background: none; box-shadow: none; border-top: 1px solid var(--line); }
-    ul.job-rows li {
+    ul.job-rows:not(.job-rows--stacked) { padding: 0; border-radius: 0; background: none; box-shadow: none; border-top: 1px solid var(--line); }
+    ul.job-rows:not(.job-rows--stacked) li {
       display: grid; grid-template-columns: 28px minmax(0, 1.1fr) minmax(0, 1fr) 9.5rem;
       align-items: center; gap: 0.9rem; padding: 0.5rem 0.25rem; border-bottom: 1px solid var(--line);
     }
-    ul.job-rows li + li::before { display: none; }
-    ul.job-rows li:hover { background: none; }
-    ul.job-rows li:hover .job-rows__title { color: var(--focus); }
-    .job-rows__logo { width: 28px; height: 28px; border-radius: 8px; box-shadow: 0 0 0 1px var(--line); }
-    .job-rows__logo img { width: 20px; height: 20px; border-radius: 4px; }
-    .job-rows__logo b { font-size: 0.8rem; }
-    .job-rows__body { display: contents; }
-    .job-rows__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    ul.job-rows .job-pay, ul.job-rows .job-pay:empty { display: block; grid-column: 4; padding: 0; background: none; font-size: 0.85rem; text-align: right; }
-    ul.job-rows .job-rows__when { grid-column: 4; text-align: right; }
-    ul.job-rows--one-company li { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 9.5rem; }
-    ul.job-rows--one-company .job-rows__when { grid-column: 3; }
+    ul.job-rows:not(.job-rows--stacked) li + li::before { display: none; }
+    ul.job-rows:not(.job-rows--stacked) li:hover { background: none; }
+    ul.job-rows:not(.job-rows--stacked) li:hover .job-rows__title { color: var(--focus); }
+    ul.job-rows:not(.job-rows--stacked) .job-rows__logo { width: 28px; height: 28px; border-radius: 8px; box-shadow: 0 0 0 1px var(--line); }
+    ul.job-rows:not(.job-rows--stacked) .job-rows__logo img { width: 20px; height: 20px; border-radius: 4px; }
+    ul.job-rows:not(.job-rows--stacked) .job-rows__logo b { font-size: 0.8rem; }
+    ul.job-rows:not(.job-rows--stacked) .job-rows__body { display: contents; }
+    ul.job-rows:not(.job-rows--stacked) .job-rows__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    ul.job-rows:not(.job-rows--stacked) .job-pay, ul.job-rows:not(.job-rows--stacked) .job-pay:empty { display: block; grid-column: 4; padding: 0; background: none; font-size: 0.85rem; text-align: right; }
+    ul.job-rows:not(.job-rows--stacked) .job-rows__when { grid-column: 4; text-align: right; }
+    ul.job-rows--one-company:not(.job-rows--stacked) li { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 9.5rem; }
+    ul.job-rows--one-company:not(.job-rows--stacked) .job-rows__when { grid-column: 3; }
   }
 
   /* ---------- prev/next, "more" links ---------- */
