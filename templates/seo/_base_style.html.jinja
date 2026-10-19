@@ -312,7 +312,8 @@
   .more-link a:hover { color: var(--focus); }
 
   /* ---------- the footer ---------- */
-  .site-credits { max-width: var(--wrap); margin: 0 auto; padding: 1.5rem 1.25rem 2rem; border-top: 1px solid var(--line); font-size: 0.8rem; color: var(--ink-soft); display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+  /* The footer in the pages' centered column, its text on the content's left edge. */
+  .site-credits { max-width: calc(var(--read) + 2.5rem); margin: 0 auto; padding: 1.5rem 1.25rem 2rem; border-top: 1px solid var(--line); font-size: 0.8rem; color: var(--ink-soft); display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
   .site-credits p { margin: 0; }
   .site-credits .brand { font-size: 1rem; }
   .site-credits .brand__mark { width: 1.6rem; height: 1.6rem; border-radius: 8px; }
