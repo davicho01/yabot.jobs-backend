@@ -64,6 +64,7 @@ from app.models.job_url import JobPostingUrl
 from app.services import geo
 from app.services.company_logos import logo_alias_url, write_logo_alias
 from app.services.job_locations import split_locations
+from app.services.page_store import get_page_store
 from app.services.static_pages import (
     _TEMPLATE_ENV,
     COUNTRY_ISO2_BY_SLUG,
@@ -86,6 +87,13 @@ PAGE_VERSION = 3
 MANIFEST_KEY = "_meta/job-pages.json"
 SITEMAP_INDEX_KEY = "sitemap-job-pages.xml"
 SITEMAP_SHARD_SIZE = 45_000  # under the sitemap protocol's 50,000-URL cap
+# Only jobs posted in the last this many days go in the sitemap. Google
+# crawls a few thousand pages a day while ~15k new job pages land each
+# weekday, so a sitemap of every live page meant most expired unseen. Older
+# pages stay live and indexable, reachable through the hubs and related-job
+# links; they just drop out of the sitemap.
+SITEMAP_RECENT_DAYS = 7
+_SITEMAP_SHARD_RE = re.compile(r"/(sitemap-job-pages-\d+\.xml)</loc>")
 # Nothing re-checks a user-submitted URL unless someone rescans it, so this
 # is the backstop that keeps a long-dead job from staying indexed forever.
 MAX_AGE_DAYS = 60
@@ -856,10 +864,9 @@ def render_job_gone(job: JobPage | None) -> str:
 
 def build_sitemaps(prefix: str, urls: list[tuple[str, str | None]]) -> dict[str, str]:
     """{key: xml}: numbered `<prefix>-<n>.xml` shards of (path, lastmod)
-    URLs, at most SITEMAP_SHARD_SIZE each."""
+    URLs in the order given, at most SITEMAP_SHARD_SIZE each."""
     base = settings.seo_pages_base_url
-    ordered = sorted(urls)
-    shards = [ordered[i : i + SITEMAP_SHARD_SIZE] for i in range(0, len(ordered), SITEMAP_SHARD_SIZE)] or [[]]
+    shards = [urls[i : i + SITEMAP_SHARD_SIZE] for i in range(0, len(urls), SITEMAP_SHARD_SIZE)] or [[]]
     out = {}
     for n, shard in enumerate(shards, start=1):
         body = "\n".join(
@@ -875,28 +882,43 @@ def build_sitemaps(prefix: str, urls: list[tuple[str, str | None]]) -> dict[str,
     return out
 
 
-def build_job_sitemaps(pages: dict[str, str], hub_paths: Iterable[str] = ()) -> dict[str, str]:
+def build_job_sitemaps(
+    pages: dict[str, str],
+    hub_paths: Iterable[str] = (),
+    days: dict[str, date] | None = None,
+    previous_shards: Iterable[str] = (),
+) -> dict[str, str]:
     """{key: xml} — numbered shards of the job pages (sitemap-job-pages-<n>),
     a shard of hub pages (sitemap-hubs-<n>), and the sitemap index
     (SITEMAP_INDEX_KEY) that robots.txt points at. `pages` is the manifest's
-    {url_id: entry}; a page's lastmod is its scan date."""
+    {url_id: entry} for the pages to list; `days` their posting days, newest
+    listed first. A page's lastmod is when it was last rendered — a rescan
+    that changed nothing doesn't move it — else its scan date for entries
+    from before rendered_at was recorded. Any of `previous_shards` (job-page
+    shard keys an earlier run published) not produced now gets an empty
+    urlset, so a shrinking sitemap leaves no stale shard behind."""
+    days = days or {}
     job_urls = []
     for url_id, raw in pages.items():
         entry = parse_entry(url_id, raw)
-        job_urls.append((entry.path, entry.scanned[:10] or None))
-    out = build_sitemaps("sitemap-job-pages", job_urls)
+        day = days.get(url_id, date.min)
+        job_urls.append((day, entry.path, (entry.rendered_at or entry.scanned)[:10] or None))
+    job_urls.sort(key=lambda u: (-u[0].toordinal(), u[1]))
+    out = build_sitemaps("sitemap-job-pages", [(path, lastmod) for _, path, lastmod in job_urls])
     hubs = sorted(hub_paths)
     if hubs:
         out.update(build_sitemaps("sitemap-hubs", [(path, None) for path in hubs]))
     base = settings.seo_pages_base_url
     index_entries = "\n".join(f"  <sitemap><loc>{base}/{key}</loc></sitemap>" for key in sorted(out))
+    empty = build_sitemaps("empty", [])["empty-1.xml"]
+    stale = {key: empty for key in previous_shards if key not in out}
     out[SITEMAP_INDEX_KEY] = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
         f"{index_entries}\n"
         "</sitemapindex>\n"
     )
-    return out
+    return out | stale
 
 
 # ---------------------------------------------------------------------------
@@ -1058,7 +1080,12 @@ def generate_job_pages(
     result.deferred = deferred
     result.unchanged = len(index) - result.published - result.updated - deferred
 
-    for key, xml in build_job_sitemaps(pages, hub_paths).items():
+    since = now.astimezone(DAY_BOUNDARY_TZ).date() - timedelta(days=SITEMAP_RECENT_DAYS)
+    recent = {i: raw for i, raw in pages.items() if i in index and index[i].day >= since}
+    previous_index = get_page_store().get(SITEMAP_INDEX_KEY) or b""
+    previous_shards = _SITEMAP_SHARD_RE.findall(previous_index.decode())
+    sitemaps = build_job_sitemaps(recent, hub_paths, {i: index[i].day for i in recent}, previous_shards)
+    for key, xml in sitemaps.items():
         upload_xml(key, xml)
         result.touched_paths.append(f"/{key}")
     # Hubs are rewritten every run; they all sit under /jobs/, which
