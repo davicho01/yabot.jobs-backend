@@ -205,6 +205,28 @@
   .job-posted { margin-left: auto; font-size: 0.72rem; color: var(--ink-soft); }
   @media (prefers-color-scheme: dark) { .job-pay { background: color-mix(in srgb, var(--lime) 16%, transparent); } }
 
+  /* ---------- compact rows on one card (the day pages' long lists) ---------- */
+  ul.job-rows { list-style: none; margin: 0; padding: 0.4rem 0; border-radius: 26px; background: var(--surface); box-shadow: var(--shadow-card); }
+  ul.job-rows li { position: relative; display: flex; align-items: center; gap: 0.85rem; padding: 0.7rem 1.1rem; }
+  ul.job-rows li + li::before { content: ""; position: absolute; top: 0; left: calc(1.1rem + 40px + 0.85rem); right: 1.1rem; border-top: 1px solid var(--line); }
+  ul.job-rows li:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
+  .job-rows__logo { flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: #fff; box-shadow: 0 2px 8px rgba(31, 26, 53, 0.12); overflow: hidden; }
+  /* No logo yet: the company's initial, as the app's letter avatar. */
+  .job-rows__logo b { font-weight: 700; color: #1f1a35; }
+  .job-rows__logo img { width: 28px; height: 28px; object-fit: contain; border-radius: 6px; }
+  .job-rows__body { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+  .job-rows__title { font-weight: 600; letter-spacing: -0.015em; line-height: 1.3; text-decoration: none; color: var(--ink); }
+  /* The whole row is the title's link. */
+  .job-rows__title::after { content: ""; position: absolute; inset: 0; }
+  .job-rows__meta { font-size: 0.85rem; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  ul.job-rows .job-pay { flex: none; font-size: 0.82rem; }
+  @media (max-width: 760px) {
+    ul.job-rows li { flex-wrap: wrap; align-items: flex-start; padding: 0.7rem 0.9rem; gap: 0 0.75rem; }
+    ul.job-rows li + li::before { left: 0.9rem; right: 0.9rem; }
+    .job-rows__body { flex-basis: calc(100% - 40px - 0.75rem); }
+    ul.job-rows .job-pay { margin-left: calc(40px + 0.75rem); margin-top: 0.3rem; }
+  }
+
   /* ---------- prev/next, "more" links ---------- */
   .pager { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; margin-top: 2rem; }
   .more-link { margin: 1rem 0 0; }

@@ -32,19 +32,18 @@
     <p class="meta-line">{{ job_count }} job{{ '' if job_count == 1 else 's' }} found &middot; Updated as of {{ generated_at_display }} Pacific</p>
     {% include "_scan_notice.html.jinja" %}
 
-    <ul class="job-list">
+    {# A day can list a thousand jobs or more, so they're compact rows on
+       one card rather than a band card each (which ran a phone to ~350
+       screens). Every job stays on the page, so crawlers reach them all. #}
+    <ul class="job-rows">
     {% for job in jobs %}
       <li>
-        <span class="job-tile">{% if job.company_logo_url %}<img src="{{ job.company_logo_url }}" alt="" width="32" height="32" loading="lazy" />{% endif %}</span>
-        <div class="job-body">
-          <div class="job-company">{{ job.company_name or "Unknown company" }}</div>
-          <div class="job-title"><a href="{{ base_url }}/{{ job.href_path }}" data-track="day_job">{{ job.title }}</a></div>
-          {% if job.location %}<div class="job-meta">{{ job.location }}</div>{% endif %}
-          <div class="job-tags">
-            {% if job.salary_display %}<span class="job-pay">{{ job.salary_display }}</span>{% endif %}
-            {% if job.posted_at %}<span class="job-posted">Posted {{ job.posted_at.strftime('%b %-d') }}</span>{% endif %}
-          </div>
+        <span class="job-rows__logo">{% if job.company_logo_url %}<img src="{{ job.company_logo_url }}" alt="" width="28" height="28" loading="lazy" />{% else %}<b>{{ (job.company_name or "?")[:1] | upper }}</b>{% endif %}</span>
+        <div class="job-rows__body">
+          <a class="job-rows__title" href="{{ base_url }}/{{ job.href_path }}" data-track="day_job">{{ job.title }}</a>
+          <span class="job-rows__meta">{{ job.company_name or "Unknown company" }}{% if job.location %} &middot; {{ job.location }}{% endif %}</span>
         </div>
+        {% if job.salary_display %}<span class="job-pay">{{ job.salary_display }}</span>{% endif %}
       </li>
     {% endfor %}
     </ul>
