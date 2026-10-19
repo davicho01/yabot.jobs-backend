@@ -234,6 +234,27 @@ class TestSitemaps:
         out = sjp.build_job_sitemaps({})
         assert "sitemap-job-pages-1.xml" in out["sitemap-job-pages.xml"]
 
+    def test_lastmod_is_the_render_date_not_the_scan_date(self):
+        out = sjp.build_job_sitemaps({"a": "3|2026-10-09T00:00:00+00:00|job/a|2026-10-01T05:00:00+00:00|h"})
+        assert "<loc>https://yabot.jobs/job/a</loc><lastmod>2026-10-01</lastmod>" in out["sitemap-job-pages-1.xml"]
+
+    def test_newest_posting_day_first(self):
+        out = sjp.build_job_sitemaps(
+            {"a": "3|2026-10-01T00:00:00+00:00", "b": "3|2026-10-01T00:00:00+00:00", "c": "3|2026-10-01T00:00:00+00:00"},
+            days={"a": date(2026, 9, 28), "b": date(2026, 10, 1), "c": date(2026, 9, 30)},
+        )
+        xml = out["sitemap-job-pages-1.xml"]
+        assert xml.index("/job/b<") < xml.index("/job/c<") < xml.index("/job/a<")
+
+    def test_shards_no_longer_produced_are_emptied_and_left_out_of_the_index(self):
+        out = sjp.build_job_sitemaps(
+            {"a": "3|2026-10-01T00:00:00+00:00"},
+            previous_shards=["sitemap-job-pages-1.xml", "sitemap-job-pages-2.xml"],
+        )
+        assert "/job/a<" in out["sitemap-job-pages-1.xml"]
+        assert "<url>" not in out["sitemap-job-pages-2.xml"] and "<urlset" in out["sitemap-job-pages-2.xml"]
+        assert "sitemap-job-pages-2.xml" not in out["sitemap-job-pages.xml"]
+
 
 class TestGenerate:
     def test_dry_run_writes_nothing(self, db, make_job, monkeypatch):
@@ -257,6 +278,16 @@ class TestGenerate:
         assert f"/{path}</loc>".encode() in store.get("sitemap-job-pages-1.xml")
         # A brand-new key was never cached, so only the sitemaps need invalidating.
         assert sorted(result.touched_paths) == ["/sitemap-job-pages-1.xml", "/sitemap-job-pages.xml"]
+
+    def test_sitemap_lists_only_recent_jobs_but_older_pages_stay_live(self, db, make_job, store):
+        recent = make_job(posted_at=(NOW - timedelta(days=sjp.SITEMAP_RECENT_DAYS)).date())
+        older = make_job(posted_at=(NOW - timedelta(days=sjp.SITEMAP_RECENT_DAYS + 1)).date())
+        sjp.generate_job_pages(db, now=NOW)
+
+        sitemap = store.get("sitemap-job-pages-1.xml")
+        assert f"/{_path(store, recent.id)}</loc>".encode() in sitemap
+        assert str(older.id).encode() not in sitemap
+        assert b"Software Engineer" in store.get(_path(store, older.id))
 
     def test_unchanged_jobs_are_skipped(self, db, make_job, store):
         make_job()
