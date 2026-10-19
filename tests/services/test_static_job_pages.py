@@ -600,7 +600,7 @@ class TestContent:
     def test_page_has_glance_and_section_headings(self, db, make_job):
         page = self._page(db, make_job, salary_min=100000, salary_max=120000)
         assert '<h2 id="glance-h" class="sr">Job at a glance</h2>' in page and '<h2 id="about-h">About the job</h2>' in page
-        assert "<dt>Pay</dt><dd>$100,000 – $120,000</dd>" in page
+        assert '<div class="job-facts__pay"><dt class="sr">Pay</dt><dd>$100,000 – $120,000</dd></div>' in page
 
 
 class TestHubs:
