@@ -632,6 +632,27 @@ class TestHubs:
         assert ("Engineering & Technology jobs in Raleigh, NC", "jobs/us/locations/raleigh-nc/engineering-tech") in links
         assert plan.country_links()["locations"][0][1] in plan.pages
 
+    def test_an_area_lists_only_its_own_cities_each_linked_to_the_board(self):
+        from app.services import static_hub_pages as hubs
+
+        live = self._jobs(4) + self._jobs(2, location="Nashville, TN; Cary, NC", company_key="multi")
+        page = hubs.plan_hubs(live).pages["jobs/us/locations/raleigh-nc"]
+        (heading, cities), = page.link_lists
+        assert heading == "Cities in this area"
+        assert [name for name, _ in cities] == ["Raleigh", "Cary"]  # not Nashville
+        assert "location=Cary%2C+NC" in dict(cities)["Cary"] and "sector=all" in dict(cities)["Cary"]
+
+    def test_place_hubs_list_ten_jobs_per_sector_and_link_the_rest(self):
+        from app.services import static_hub_pages as hubs
+
+        plan = hubs.plan_hubs(self._jobs(14))
+        metro = plan.pages["jobs/us/locations/raleigh-nc"].sections[0]
+        assert len(metro.jobs) == 10 and metro.total == 14
+        assert metro.more[1].endswith("/jobs/us/locations/raleigh-nc/engineering-tech")
+        state = plan.pages["jobs/us/locations/north-carolina"].sections[0]
+        assert len(state.jobs) == 10 and "metro=north-carolina" in state.more[1]
+        assert len(plan.pages["jobs/us/companies/bandwidth"].sections[0].jobs) == 14  # company hubs keep 25
+
     def test_company_and_location_directories(self):
         from app.services import static_hub_pages as hubs
 

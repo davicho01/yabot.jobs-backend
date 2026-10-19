@@ -24,6 +24,7 @@ import logging
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Iterable
 from urllib.parse import urlencode
 
@@ -37,10 +38,14 @@ from app.services.static_job_pages import (
     _sector_link,
     breadcrumb_ld,
     ld_json,
+    resolve_first_location,
     sector_slug,
     slugify,
 )
-from app.services.static_pages import _TEMPLATE_ENV, COUNTRY_NAMES, DAY_BOUNDARY_TZ, read_json, upload_html, write_json
+from app.services.job_locations import split_locations
+from app.services.static_pages import (
+    _TEMPLATE_ENV, COUNTRY_NAMES, DAY_BOUNDARY_TZ, SECTORS_BY_SLUG, read_json, upload_html, write_json,
+)
 
 logger = logging.getLogger("app.static_hub_pages")
 
@@ -48,7 +53,8 @@ HUB_ROOT = f"jobs/{COUNTRY_SLUG}"
 HUB_MANIFEST_KEY = "_meta/hub-pages.json"
 COMPANY_MIN_JOBS = 2
 LOCATION_MIN_JOBS = 5
-PER_SECTION = 25  # jobs listed per sector on a company/metro/state/remote hub
+PER_SECTION = 25  # jobs listed per sector on a company hub
+PLACE_PER_SECTION = 10  # ... and on a metro/state/remote hub, where each sector links its own full list
 COMPANY_MAX_JOBS = 300
 METRO_SECTOR_MAX_JOBS = 200
 COUNTRY_TOP = 12  # companies/locations listed on the country page; the rest on /jobs/us/companies and /locations
@@ -164,7 +170,7 @@ def _trail(*crumbs: tuple[str, str | None]) -> list[tuple[str, str | None]]:
     return [("Home", f"{base}/"), ("Jobs", f"{base}/jobs"), (COUNTRY_NAMES[COUNTRY_SLUG], f"{base}/{HUB_ROOT}"), *crumbs]
 
 
-def _by_sector(jobs: list[LinkJob], more_link=None) -> list[Section]:
+def _by_sector(jobs: list[LinkJob], more_link=None, per_section: int = PER_SECTION) -> list[Section]:
     """Sections per sector (largest first), PER_SECTION newest jobs each.
     `more_link(sector_slug, sector_name, count)` -> (label, url) or None."""
     groups: dict[str, list[LinkJob]] = defaultdict(list)
@@ -176,17 +182,51 @@ def _by_sector(jobs: list[LinkJob], more_link=None) -> list[Section]:
         sections.append(
             Section(
                 heading=name,
-                jobs=_newest_first(group)[:PER_SECTION],
+                jobs=_newest_first(group)[:per_section],
                 total=len(group),
-                more=more_link(slug, name, len(group)) if more_link and len(group) > PER_SECTION else None,
+                more=more_link(slug, name, len(group)) if more_link and len(group) > per_section else None,
             )
         )
     return sections
 
 
-def _top_cities(jobs: list[LinkJob], limit: int = 15) -> list[str]:
-    counts = Counter(city for city in (job.city for job in jobs) if city)
+def _top_cities(jobs: list[LinkJob], area: geo.Metro | None = None, limit: int = 15) -> list[tuple[str, str]]:
+    """The most common (city, state) among the jobs. On an area's hub, every
+    one of a job's locations that lies in the area counts, and nothing
+    outside it does: a job listed in "Nashville, TN; Austin, TX" adds Austin
+    to the Austin page, not Nashville. Elsewhere (a company's hub), each
+    job's first location."""
+    counts: Counter[tuple[str, str]] = Counter()
+    for job in jobs:
+        if area is None:
+            resolution = resolve_first_location(job.location)
+            if resolution is not None and resolution.place is not None:
+                counts[(resolution.place.name, resolution.place.state)] += 1
+            continue
+        found = set()
+        for entry in split_locations(job.location):
+            resolution = _resolve(entry)
+            if resolution is None or resolution.place is None:
+                continue
+            if area.code in {getattr(resolution.metro, "code", None), getattr(resolution.state, "code", None)}:
+                found.add((resolution.place.name, resolution.place.state))
+        counts.update(found)
     return [city for city, _ in counts.most_common(limit)]
+
+
+@lru_cache(maxsize=200_000)
+def _resolve(entry: str):
+    try:
+        return geo.resolve_entry(entry)
+    except Exception:  # a geo bug must never block publishing
+        logger.exception("Couldn't resolve location %r.", entry)
+        return None
+
+
+def _city_links(cities: list[tuple[str, str]], **board: str) -> list[tuple[str, str]]:
+    """Each city as a link to the board searching it (with `board`'s other
+    filters, e.g. the company)."""
+    return [(name, _board(**board, location=f"{name}, {state}", sector="all")) for name, state in cities]
 
 
 def plan_hubs(live: Iterable[LinkJob]) -> HubPlan:
@@ -215,12 +255,12 @@ def plan_hubs(live: Iterable[LinkJob]) -> HubPlan:
             title=f"Jobs at {name} ({len(jobs):,} open)",
             h1=f"Jobs at {name}",
             description=f"{len(jobs):,} open jobs at {name}"
-            + (f" in {', '.join(cities[:3])}" if cities else "")
+            + (f" in {', '.join(city for city, _ in cities[:3])}" if cities else "")
             + f", updated {updated}. See every role and apply on Yabot Jobs.",
             trail=_trail((name, None)),
             count=len(jobs),
             sections=_by_sector(_newest_first(jobs)[:COMPANY_MAX_JOBS]),
-            link_lists=[("Locations", [(city, "") for city in cities])] if cities else [],
+            link_lists=[("Locations", _city_links(cities, company=name))] if cities else [],
             board=(f"Search all {name} jobs on Yabot", _board(company=name, sector="all")),
         )
         plan._company_paths[key] = path
@@ -269,18 +309,18 @@ def plan_hubs(live: Iterable[LinkJob]) -> HubPlan:
             sub = plan._metro_sector_paths.get((code, slug))
             return (f"All {count:,} {name} jobs in {area.name}", _url(sub)) if sub else None
 
-        cities = _top_cities(jobs)
+        cities = _top_cities(jobs, area)
         plan.pages[path] = Hub(
             path=path,
             title=f"Jobs in {area.name} ({len(jobs):,} open)",
             h1=f"Jobs in {area.name}",
             description=f"{len(jobs):,} open jobs in the {area.title} area"
-            + (f", including {', '.join(cities[:3])}" if cities else "")
+            + (f", including {', '.join(city for city, _ in cities[:3])}" if cities else "")
             + f". Updated {updated}; free to search and apply on Yabot Jobs.",
             trail=_trail((f"Jobs in {area.name}", None)),
             count=len(jobs),
-            sections=_by_sector(jobs, more_link),
-            link_lists=[("Cities in this area", [(city, "") for city in cities])] if cities else [],
+            sections=_by_sector(jobs, more_link, PLACE_PER_SECTION),
+            link_lists=[("Cities in this area", _city_links(cities))] if cities else [],
             board=(f"Search all jobs in {area.name}", _board(metro=area.slug, sector="all")),
         )
 
@@ -296,6 +336,11 @@ def plan_hubs(live: Iterable[LinkJob]) -> HubPlan:
             ),
             key=lambda m: -m[2],
         )
+        def state_more(slug, name, count, area=area):
+            # No state × sector hub, so the rest of a sector is a board search.
+            sector = SECTORS_BY_SLUG.get(slug)
+            return (f"All {count:,} {name} jobs in {area.name}", _board(metro=area.slug, sector=sector.value)) if sector else None
+
         plan.pages[path] = Hub(
             path=path,
             title=f"Jobs in {area.name} ({len(jobs):,} open)",
@@ -305,7 +350,7 @@ def plan_hubs(live: Iterable[LinkJob]) -> HubPlan:
             + f". Updated {updated}; free to search and apply on Yabot Jobs.",
             trail=_trail((f"Jobs in {area.name}", None)),
             count=len(jobs),
-            sections=_by_sector(jobs),
+            sections=_by_sector(jobs, state_more, PLACE_PER_SECTION),
             link_lists=[("Metro areas", [(f"{name} ({count:,})", url) for name, url, count in metros_here])] if metros_here else [],
             board=(f"Search all jobs in {area.name}", _board(metro=area.slug, sector="all")),
         )
@@ -349,7 +394,7 @@ def plan_hubs(live: Iterable[LinkJob]) -> HubPlan:
             description=f"{len(remote):,} open remote jobs in the US, updated {updated}. Free to search and apply on Yabot Jobs.",
             trail=_trail(("Remote jobs", None)),
             count=len(remote),
-            sections=_by_sector(remote, remote_more),
+            sections=_by_sector(remote, remote_more, PLACE_PER_SECTION),
             board=("Search all remote jobs", _board(workplace="remote", sector="all")),
         )
 
