@@ -1,0 +1,40 @@
+{#- Every company or location hub, largest first (static_hub_pages._plan_directories). -#}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ hub.title }} | Yabot Jobs</title>
+  <meta name="description" content="{{ hub.description }}" />
+  <link rel="canonical" href="{{ page_url }}" />
+  <meta name="robots" content="index, follow" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Yabot Jobs" />
+  <meta property="og:title" content="{{ hub.h1 }}" />
+  <meta property="og:description" content="{{ hub.description }}" />
+  <meta property="og:url" content="{{ page_url }}" />
+  <meta property="og:image" content="{{ base_url }}/og-image.png" />
+  {% include "_fonts.html.jinja" %}
+  {% include "_base_style.html.jinja" %}
+  {% with page_type = "hub_directory" %}{% include "_analytics.html.jinja" %}{% endwith %}
+  <script type="application/ld+json">{{ ld_json|safe }}</script>
+</head>
+<body>
+  {% include "_header.html.jinja" %}
+  {% from "_count_rows.html.jinja" import rows %}
+  <main id="main">
+  <div class="wrap wrap--narrow">
+    {% with trail=hub.trail %}{% include "_breadcrumb.html.jinja" %}{% endwith %}
+    <h1>{{ hub.h1 }}</h1>
+    <p class="lede">{{ hub.description }}</p>
+    {% for heading, items in hub.directory %}
+    <section>
+      <h2>{{ heading }}</h2>
+      {{ rows(items) }}
+    </section>
+    {% endfor %}
+  </div>
+  </main>
+  {% include "_footer.html.jinja" %}
+</body>
+</html>

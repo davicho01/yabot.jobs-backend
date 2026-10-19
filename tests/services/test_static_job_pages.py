@@ -632,6 +632,23 @@ class TestHubs:
         assert ("Engineering & Technology jobs in Raleigh, NC", "jobs/us/locations/raleigh-nc/engineering-tech") in links
         assert plan.country_links()["locations"][0][1] in plan.pages
 
+    def test_company_and_location_directories(self):
+        from app.services import static_hub_pages as hubs
+
+        live = self._jobs(5) + self._jobs(5, company_key="remoteco", workplace_type=WorkplaceType.REMOTE, metros=(), location=None)
+        plan = hubs.plan_hubs(live)
+        companies, places = plan.pages["jobs/us/companies"], plan.pages["jobs/us/locations"]
+        assert [url.rsplit("/", 1)[1] for _, url, _ in companies.directory[0][1]] == ["bandwidth", "remoteco"]
+        headings = [heading for heading, _ in places.directory]
+        assert headings == ["Remote", "States", "Metro areas"]
+        assert dict(places.directory)["States"][0][0] == "North Carolina"
+        # Directories aren't listed as hubs on the country page, but linked from it.
+        links = plan.country_links()
+        assert all(path.count("/") == 3 for _, path, _ in links["locations"] + links["companies"])
+        assert links["all_locations"] == ("jobs/us/locations", 3) and links["all_companies"][0] == "jobs/us/companies"
+        html = hubs.render_hub(places)
+        assert "<h2>Metro areas</h2>" in html and 'class="day-rows day-rows--named"' in html
+
     def test_board_links_name_a_sector_since_the_board_defaults_to_tech(self):
         from app.services import static_hub_pages as hubs
 

@@ -1,0 +1,11 @@
+{# A list as rows of name, a bar sized against the list's largest count, and
+   the count (the country page and the company/location directories).
+   items: [(name, absolute url, count)]. #}
+{% macro rows(items) %}
+{% set top = items | map(attribute=2) | max %}
+<ul class="day-rows day-rows--named">
+  {% for name, href, count in items %}
+  <li><a href="{{ href }}"><strong>{{ name }}</strong><span class="day-rows__bar"><i style="width: {{ (100 * count / (top or 1)) | round(1) }}%"></i></span><span class="count">{{ "{:,}".format(count) }} job{{ '' if count == 1 else 's' }}</span></a></li>
+  {% endfor %}
+</ul>
+{% endmacro %}

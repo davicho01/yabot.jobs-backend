@@ -8,6 +8,7 @@ every job page from somewhere other than the sitemap:
   /jobs/us/locations/<metro>/<sector>   e.g. engineering jobs in Raleigh
   /jobs/us/locations/<state>            a state's metros and jobs ("north-carolina")
   /jobs/us/locations/remote[/<sector>]  US-remote jobs
+  /jobs/us/companies, /jobs/us/locations  every company / place hub, by size
 
 Metro and state slugs are app.services.geo's own (the same ones the board's
 ?metro= filter takes), and the two can't collide: a metro slug ends in its
@@ -50,7 +51,7 @@ LOCATION_MIN_JOBS = 5
 PER_SECTION = 25  # jobs listed per sector on a company/metro/state/remote hub
 COMPANY_MAX_JOBS = 300
 METRO_SECTOR_MAX_JOBS = 200
-COUNTRY_TOP = 30  # companies/locations listed on the country page
+COUNTRY_TOP = 12  # companies/locations listed on the country page; the rest on /jobs/us/companies and /locations
 
 
 def company_hub_path(slug: str) -> str:
@@ -84,6 +85,8 @@ class Hub:
     sections: list[Section] = field(default_factory=list)
     link_lists: list[tuple[str, list[tuple[str, str]]]] = field(default_factory=list)  # (heading, [(label, url)])
     board: tuple[str, str] | None = None  # (label, absolute url)
+    # A directory of other hubs instead of jobs: [(heading, [(name, absolute url, job count)])].
+    directory: list[tuple[str, list[tuple[str, str, int]]]] = field(default_factory=list)
 
 
 class HubPlan:
@@ -138,7 +141,12 @@ class HubPlan:
             hubs.sort(key=lambda h: (-h.count, h.h1))
             return [(h.h1.removeprefix("Jobs at ").removeprefix("Jobs in "), h.path, h.count) for h in hubs[:COUNTRY_TOP]]
 
-        return {"companies": top("companies"), "locations": top("locations")}
+        links = {"companies": top("companies"), "locations": top("locations")}
+        for kind in ("companies", "locations"):
+            directory = self.pages.get(f"{HUB_ROOT}/{kind}")
+            if directory is not None:
+                links[f"all_{kind}"] = (directory.path, sum(len(items) for _, items in directory.directory))
+        return links
 
 
 def _url(path: str) -> str:
@@ -345,12 +353,61 @@ def plan_hubs(live: Iterable[LinkJob]) -> HubPlan:
             board=("Search all remote jobs", _board(workplace="remote", sector="all")),
         )
 
+    _plan_directories(plan)
     return plan
+
+
+def _hub_name(hub: Hub) -> str:
+    return hub.h1.removeprefix("Jobs at ").removeprefix("Jobs in ")
+
+
+def _plan_directories(plan: HubPlan) -> None:
+    """/jobs/us/companies and /jobs/us/locations: every company and place hub
+    this run, largest first, so the country page can list only the top few
+    and still link to the rest."""
+    def under(kind: str) -> list[Hub]:
+        hubs = [h for h in plan.pages.values() if h.path.startswith(f"{HUB_ROOT}/{kind}/") and h.path.count("/") == 3]
+        return sorted(hubs, key=lambda h: (-h.count, h.h1))
+
+    def items(hubs: list[Hub]) -> list[tuple[str, str, int]]:
+        return [(_hub_name(h), _url(h.path), h.count) for h in hubs]
+
+    companies = under("companies")
+    if companies:
+        path = f"{HUB_ROOT}/companies"
+        plan.pages[path] = Hub(
+            path=path,
+            title=f"Companies Hiring in the US ({len(companies):,})",
+            h1="Companies hiring in the US",
+            description=f"{len(companies):,} companies with open jobs on Yabot Jobs, largest first. Free to search and apply.",
+            trail=_trail(("Companies", None)),
+            count=sum(h.count for h in companies),
+            directory=[("Companies", items(companies))],
+        )
+
+    places = under("locations")
+    if places:
+        path = f"{HUB_ROOT}/locations"
+        code_by_path = {p: code for code, p in plan._metro_paths.items()}
+        remote = [h for h in places if h.path == location_hub_path("remote")]
+        states = [h for h in places if h.path in code_by_path and plan._areas[code_by_path[h.path]].kind == "state"]
+        metros = [h for h in places if h not in remote and h not in states]
+        plan.pages[path] = Hub(
+            path=path,
+            title=f"Jobs by Location in the US ({len(places):,} places)",
+            h1="Jobs by location in the US",
+            description=f"Open jobs in {len(places):,} US states, metro areas and remote, largest first. Free to search and apply on Yabot Jobs.",
+            trail=_trail(("Locations", None)),
+            count=sum(h.count for h in places),
+            directory=[(heading, items(hubs)) for heading, hubs in
+                       (("Remote", remote), ("States", states), ("Metro areas", metros)) if hubs],
+        )
 
 
 def render_hub(hub: Hub) -> str:
     page_url = _url(hub.path)
-    return _TEMPLATE_ENV.get_template("hub.html.jinja").render(
+    template = "hub_directory.html.jinja" if hub.directory else "hub.html.jinja"
+    return _TEMPLATE_ENV.get_template(template).render(
         hub=hub,
         page_url=page_url,
         ld_json=ld_json(breadcrumb_ld(hub.trail, page_url)),

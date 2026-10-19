@@ -28,16 +28,7 @@
     <h1>Jobs in {{ country_name }}, by Sector</h1>
     {% include "_scan_notice.html.jinja" %}
 
-    {# Each list as the sector page's day rows: a name, a bar sized against
-       the list's largest count, and the count. #}
-    {% macro rows(items) %}
-    {% set top = items | map(attribute=2) | max %}
-    <ul class="day-rows day-rows--named">
-      {% for name, href, count in items %}
-      <li><a href="{{ href }}"><strong>{{ name }}</strong><span class="day-rows__bar"><i style="width: {{ (100 * count / (top or 1)) | round(1) }}%"></i></span><span class="count">{{ "{:,}".format(count) }} job{{ '' if count == 1 else 's' }}</span></a></li>
-      {% endfor %}
-    </ul>
-    {% endmacro %}
+    {% from "_count_rows.html.jinja" import rows %}
 
     <h2>Sectors</h2>
     {% set sectors = [] %}
@@ -49,12 +40,14 @@
     {% set places = [] %}
     {% for name, path, count in hub_links.locations %}{% set _ = places.append((name, base_url ~ "/" ~ path, count)) %}{% endfor %}
     {{ rows(places) }}
+    {% if hub_links.all_locations %}<p class="more-link"><a href="{{ base_url }}/{{ hub_links.all_locations[0] }}">All {{ "{:,}".format(hub_links.all_locations[1]) }} locations &rarr;</a></p>{% endif %}
     {% endif %}
     {% if hub_links.companies %}
     <h2>Top companies hiring</h2>
     {% set companies = [] %}
     {% for name, path, count in hub_links.companies %}{% set _ = companies.append((name, base_url ~ "/" ~ path, count)) %}{% endfor %}
     {{ rows(companies) }}
+    {% if hub_links.all_companies %}<p class="more-link"><a href="{{ base_url }}/{{ hub_links.all_companies[0] }}">All {{ "{:,}".format(hub_links.all_companies[1]) }} companies &rarr;</a></p>{% endif %}
     {% endif %}
   </div>
   </main>

@@ -337,9 +337,9 @@ def add_to_manifest(manifest: dict, country_slug: str, sector: JobSector, local_
 
 def sector_totals(manifest: dict, country_slug: str) -> list[tuple[str, str, int]]:
     """[(sector_slug, sector_name, total_job_count), ...] summed across every
-    day ever recorded for country_slug, sorted alphabetically by sector name
-    (a navigation page, not a ranking — alphabetical is what's actually easy
-    to scan for "find my sector"), skipping any sector with zero jobs (its
+    day ever recorded for country_slug, largest first (the country page
+    draws each as a bar, so they step down like its places and companies;
+    ties alphabetical), skipping any sector with zero jobs (its
     own sector_index page doesn't exist either in that case — see
     generate_for_date — so there'd be nothing to link to)."""
     days_by_sector = manifest.get(country_slug, {})
@@ -348,7 +348,7 @@ def sector_totals(manifest: dict, country_slug: str) -> list[tuple[str, str, int
         total = sum(days_by_sector.get(slug, {}).values())
         if total:
             totals.append((slug, name, total))
-    return sorted(totals, key=lambda entry: entry[1])
+    return sorted(totals, key=lambda entry: (-entry[2], entry[1]))
 
 
 def build_sitemap_xml(manifest: dict) -> str:
