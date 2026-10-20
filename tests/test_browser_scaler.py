@@ -3,16 +3,21 @@ Monitoring / Cloud Run Admin / Cloud Scheduler Admin calls are monkeypatched
 so no real GCP API call happens.
 """
 
+from datetime import datetime, timedelta, timezone
+
 import browser_scaler
 
 
-def _patch(monkeypatch, *, crawl_worker: int, worker: int):
+def _patch(monkeypatch, *, crawl_worker: int, worker: int, resumed_ago: timedelta = timedelta(hours=1)):
     def _get_instance_count(service_name, *, lookback_minutes=5):
         return {"crawl-worker": crawl_worker, "worker": worker}[service_name]
 
     set_calls = []
     pause_calls = []
     monkeypatch.setattr(browser_scaler, "get_instance_count", _get_instance_count)
+    monkeypatch.setattr(
+        browser_scaler, "scheduler_job_updated_at", lambda job: datetime.now(timezone.utc) - resumed_ago
+    )
     monkeypatch.setattr(browser_scaler, "set_min_instances", lambda service, count: set_calls.append((service, count)))
     monkeypatch.setattr(browser_scaler, "pause_scheduler_job", lambda job: pause_calls.append(job))
     return set_calls, pause_calls
@@ -81,3 +86,44 @@ def test_stays_active_without_pausing_while_either_service_is_busy(monkeypatch):
     browser_scaler.main()
 
     assert pause_calls == []
+
+
+def test_idle_right_after_a_resume_keeps_the_warm_up_floors_and_the_tick(monkeypatch):
+    # Workers haven't shown up in Monitoring yet (~90s): not drained.
+    set_calls, pause_calls = _patch(monkeypatch, crawl_worker=0, worker=0, resumed_ago=timedelta(seconds=30))
+
+    browser_scaler.main()
+
+    assert set_calls == []
+    assert pause_calls == []
+
+
+def test_idle_past_the_grace_window_scales_down_and_pauses(monkeypatch):
+    set_calls, pause_calls = _patch(monkeypatch, crawl_worker=0, worker=0, resumed_ago=timedelta(minutes=4))
+
+    browser_scaler.main()
+
+    assert set_calls == [("yabot-jobs-browser", 0), ("yabot-jobs-sector", 0)]
+    assert pause_calls == ["browser-scaler-tick"]
+
+
+def test_busy_right_after_a_resume_scales_as_usual(monkeypatch):
+    set_calls, pause_calls = _patch(monkeypatch, crawl_worker=0, worker=8, resumed_ago=timedelta(seconds=30))
+
+    browser_scaler.main()
+
+    assert set_calls == [("yabot-jobs-browser", 1), ("yabot-jobs-sector", 2)]
+    assert pause_calls == []
+
+
+def test_unknown_resume_time_falls_back_to_pausing(monkeypatch):
+    set_calls, pause_calls = _patch(monkeypatch, crawl_worker=0, worker=0)
+
+    def _boom(job):
+        raise RuntimeError("403 from Cloud Scheduler Admin")
+
+    monkeypatch.setattr(browser_scaler, "scheduler_job_updated_at", _boom)
+
+    browser_scaler.main()
+
+    assert pause_calls == ["browser-scaler-tick"]

@@ -147,6 +147,19 @@ def _set_scheduler_job_paused(job_name: str, *, paused: bool) -> None:
     logger.info("%sd Cloud Scheduler job %s.", action.capitalize(), job_name)
 
 
+def scheduler_job_updated_at(job_name: str) -> datetime:
+    """When `job_name` was last changed by a user call (userUpdateTime): its
+    last pause or resume, since nothing else edits these jobs."""
+    response = httpx.get(
+        f"https://cloudscheduler.googleapis.com/v1/projects/{_project_id()}/locations/{_REGION}/jobs/{job_name}",
+        headers=_headers(),
+        timeout=30.0,
+    )
+    response.raise_for_status()
+    # Seconds precision is plenty; the API can return up to 9 fractional digits.
+    return datetime.strptime(response.json()["userUpdateTime"][:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+
+
 def pause_scheduler_job(job_name: str) -> None:
     _set_scheduler_job_paused(job_name, paused=True)
 
