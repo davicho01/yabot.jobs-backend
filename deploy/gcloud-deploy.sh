@@ -23,8 +23,8 @@
 #                       + Cloud Scheduler cron trigger
 #   - retry-failed-scans  Cloud Function 2nd gen (retry_failed_scans.py:dispatch)
 #                       + Cloud Scheduler cron trigger
-#   - generate-static-job-pages  Cloud Function 2nd gen (generate_static_job_pages.py:dispatch)
-#                       + Cloud Scheduler cron trigger, every 30 minutes — publishes
+#   - generate-static-job-pages  Cloud Run Job (generate_static_job_pages.py)
+#                       + Cloud Scheduler cron trigger, every 2 hours — publishes
 #                       the crawlable "jobs by sector, by day" pages straight into the
 #                       *frontend's* S3 bucket/CloudFront (SEO_PAGES_BUCKET below), not
 #                       this backend's own storage.
@@ -249,9 +249,9 @@ gcloud run jobs deploy redo-dedup \
 # ---------------------------------------------------------------------------
 # 3c. generate-job-pages-backfill — Cloud Run Job, one-off: renders every
 #     per-job SEO page (/job/{url_id}, app.services.static_job_pages) at
-#     once. The scheduled generate-static-job-pages function (§10) keeps
+#     once. The scheduled generate-static-job-pages job (§10) keeps
 #     them up to date incrementally afterwards, but a first full render of
-#     every live job won't fit in its 540s timeout. Also the way to force a
+#     every live job won't fit in its 1800s timeout. Also the way to force a
 #     re-render after a template change, though bumping
 #     static_job_pages.PAGE_VERSION does that on the next scheduled run
 #     anyway. Deploy once, then execute by hand — --dry-run first for the
@@ -661,15 +661,14 @@ gcloud scheduler jobs create http retry-failed-scans-hourly \
   --oidc-token-audience="$RETRY_FAILED_SCANS_FUNCTION_URL"
 
 # ---------------------------------------------------------------------------
-# 10. generate-static-job-pages — Cloud Function (2nd gen), triggered by
-#     Scheduler. Deploys from source (this repo), entry point is dispatch()
-#     in generate_static_job_pages.py — same shape as the functions above in
-#     every respect except what it talks to: it writes straight into the
-#     *frontend's* S3 bucket/CloudFront distribution
-#     (SEO_PAGES_BUCKET/SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID above), not
-#     Postgres/Pub/Sub. Every 2 hours, 9am-9pm America/New_York, weekdays
-#     (since 2026-10-14; 9am-11pm from 2026-10-12): crawl-dispatch runs
-#     every 30 minutes and each source is crawled on its own adaptive
+# 10. generate-static-job-pages — Cloud Run Job, triggered by Scheduler via
+#     a fire-and-forget call to the Run Admin API, same as crawl-dispatcher
+#     (§6). Runs generate_static_job_pages.py from the shared image. It
+#     writes straight into the *frontend's* S3 bucket/CloudFront
+#     distribution (SEO_PAGES_BUCKET/SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID
+#     above), not Postgres/Pub/Sub. Every 2 hours, 9am-9pm America/New_York,
+#     weekdays (since 2026-10-14; 9am-11pm from 2026-10-12): crawl-dispatch
+#     runs every 30 minutes and each source is crawled on its own adaptive
 #     interval (2h minimum), so new postings land throughout the day
 #     instead of in two bursts. Every 2 hours matches that minimum, and the
 #     9pm run picks up the last crawls of the day (dispatch stops at
@@ -679,6 +678,20 @@ gcloud scheduler jobs create http retry-failed-scans-hourly \
 #     pages whose content changed, and invalidations are collapsed to a few
 #     wildcards per run (static_pages.collapse_invalidation_paths).
 #
+#     Was an HTTP Cloud Function Scheduler waited on until 2026-10-20. Runs
+#     had grown to 4-9 minutes, and twice in two days (2026-10-19 5pm,
+#     2026-10-20 3pm ET) Scheduler logged a 502 mid-run and fired the
+#     "Static page generator failed" alert while the function went on to
+#     finish and return 200. A job has no HTTP round-trip to drop: its
+#     execution fails only when the script exits non-zero.
+#
+#     --memory=2Gi/--cpu=1: each run loads the per-job page manifest
+#     (~280k entries), an in-memory index of every live job for related
+#     links, and plans ~8k company/location hubs (see deploy.yml).
+#     --task-timeout=1800: a run that spends its full MAX_RENDERS_PER_RUN
+#     re-render budget took ~490s by 2026-10-06. --max-retries=0: the next
+#     run two hours later regenerates the same pages anyway.
+#
 #     IMPORTANT: the yabot-jobs-backend IAM user (whose key/secret are
 #     already in the resume-storage-access-key/resume-storage-secret-key
 #     secrets above, reused here) must additionally have s3:PutObject/
@@ -687,41 +700,33 @@ gcloud scheduler jobs create http retry-failed-scans-hourly \
 #     to make once, not something this script can do.
 # ---------------------------------------------------------------------------
 
-gcloud functions deploy generate-static-job-pages \
-  --gen2 \
+gcloud run jobs deploy generate-static-job-pages \
+  --image="$IMAGE_TAG" \
   --region="$REGION" \
-  --runtime=python313 \
-  --source=. \
-  --entry-point=dispatch \
-  --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=generate_static_job_pages.py \
-  --trigger-http \
-  --no-allow-unauthenticated \
+  --command=python --args=generate_static_job_pages.py \
+  --set-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION" \
   --set-env-vars="$COMMON_ENV" \
   --set-secrets="$COMMON_SECRETS,LOGO_DEV_SECRET_KEY=logo-dev-secret-key:latest" \
   --memory=2Gi \
   --cpu=1 \
-  --timeout=540s \
-  --update-labels=function=generate-static-job-pages
+  --task-timeout=1800 \
+  --max-retries=0 \
+  --labels=function=generate-static-job-pages
 
-gcloud run services update generate-static-job-pages \
+gcloud run jobs add-iam-policy-binding generate-static-job-pages \
   --region="$REGION" \
-  --add-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION"
+  --member="serviceAccount:${PROJECT_ID}@appspot.gserviceaccount.com" \
+  --role="roles/run.invoker"
 
-GENERATE_STATIC_JOB_PAGES_FUNCTION_URL="$(gcloud functions describe generate-static-job-pages --gen2 --region="$REGION" --format='value(serviceConfig.uri)')"
-
-gcloud functions add-invoker-policy-binding generate-static-job-pages \
-  --gen2 \
-  --region="$REGION" \
-  --member="serviceAccount:${PROJECT_ID}@appspot.gserviceaccount.com"
-
+# --oauth-service-account-email (not --oidc-...) because the target is the
+# Run Admin REST API, not the job's own service URL.
 gcloud scheduler jobs create http generate-static-job-pages-30min \
   --location="$REGION" \
   --schedule="0 9-21/2 * * 1-5" \
   --time-zone="America/New_York" \
-  --uri="$GENERATE_STATIC_JOB_PAGES_FUNCTION_URL" \
+  --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/generate-static-job-pages:run" \
   --http-method=POST \
-  --oidc-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com" \
-  --oidc-token-audience="$GENERATE_STATIC_JOB_PAGES_FUNCTION_URL"
+  --oauth-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com"
 
 # ---------------------------------------------------------------------------
 # 11. find-official-sites — Cloud Function (2nd gen), triggered daily by
@@ -799,7 +804,6 @@ gcloud scheduler jobs create http find-official-sites-daily \
 #   gcloud functions deploy retry-failed-scans --gen2 --region="$REGION" --project="$PROJECT_ID" \
 #     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=retry_failed_scans.py \
 #     --update-labels=function=retry-failed-scans
-#   gcloud functions deploy generate-static-job-pages --gen2 --region="$REGION" --project="$PROJECT_ID" \
-#     --source=. --entry-point=dispatch --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=generate_static_job_pages.py \
-#     --update-labels=function=generate-static-job-pages
+#   gcloud run jobs deploy generate-static-job-pages --image="$IMAGE_TAG" --region="$REGION" --project="$PROJECT_ID" \
+#     --labels=function=generate-static-job-pages
 # ---------------------------------------------------------------------------
