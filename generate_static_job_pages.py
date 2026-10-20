@@ -145,12 +145,5 @@ def main() -> None:
         raise job_error  # still report the run as failed, after the day pages are fully out
 
 
-def dispatch(_request=None) -> tuple[str, int]:
-    """Cloud Functions (2nd gen) HTTP entry point — Cloud Scheduler calls this
-    on its own 30-minute cadence instead of a shell invoking main() directly."""
-    main()
-    return "ok", 200
-
-
 if __name__ == "__main__":
     main()

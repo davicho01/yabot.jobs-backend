@@ -4,10 +4,11 @@ name: Deploy
 # saved-search-alerts/follow-up-reminders/retry-failed-scans/
 # generate-static-job-pages/find-official-sites with the new image/source on every push to
 # main. worker and crawl-worker are Cloud Functions (2nd gen, Pub/Sub-
-# triggered) redeployed from source, same as crawl-dispatcher,
+# triggered) redeployed from source, same as
 # browser-scaler, saved-search-alerts, follow-up-reminders,
-# retry-failed-scans, generate-static-job-pages, and find-official-sites (HTTP-triggered,
-# Scheduler-invoked) — not from the built image below.
+# retry-failed-scans, and find-official-sites (HTTP-triggered,
+# Scheduler-invoked) — not from the built image below. crawl-dispatcher and
+# generate-static-job-pages are Cloud Run Jobs deployed from that image.
 # One-time setup (API enablement,
 # Cloud SQL instance, secrets, IAM bindings, Scheduler jobs, the functions'
 # Pub/Sub triggers) lives in deploy/gcloud-deploy.sh and is NOT part of this
@@ -382,8 +383,6 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
       - id: auth
         uses: google-github-actions/auth@v2
         with:
@@ -394,41 +393,19 @@ jobs:
         with:
           version: latest
 
-      # Same shape as retry-failed-scans above — its own dispatch() entry
-      # point in generate_static_job_pages.py, not this repo's main.py.
-      # --trigger-http/--no-allow-unauthenticated spelled out here for the
-      # same reason as retry-failed-scans: this is that function's
-      # first-ever deploy, before deploy/gcloud-deploy.sh's one-time setup
-      # has applied its trigger config.
-      # --memory=2Gi/--cpu=1 pinned: each run loads the per-job page
-      # manifest (~280k entries), an in-memory index of every live job for
-      # related links, and plans ~8k company/location hubs. At 512Mi the
-      # 2026-10-02 10pm run was killed before publishing 7,121 new pages;
-      # 1Gi then held the plan but not rendering every hub at once (fixed in
-      # static_hub_pages.publish_hubs). 2Gi is headroom over both.
-      # --timeout=1800s: a run that spends its full MAX_RENDERS_PER_RUN
-      # re-render budget took ~490s by 2026-10-06, close to the 540s
-      # default. The scheduler's --attempt-deadline is 1800s to match.
-      # --update-secrets adds the logo.dev key (company logos, see
-      # app.services.logo_dev) on top of the secrets gcloud-deploy.sh set,
-      # so it survives every redeploy; only this function calls logo.dev.
+      # A Cloud Run Job since 2026-10-20, started fire-and-forget by
+      # Scheduler like crawl-dispatcher above: as an HTTP function Scheduler
+      # waited on, its 4-9 minute runs sometimes came back as a 502 to
+      # Scheduler (and an alert) while the run itself finished fine. See
+      # deploy/gcloud-deploy.sh §10. Deploys from the already-built image;
+      # command/args/memory/cpu/timeout/secrets (including the logo.dev key)/
+      # env vars/Cloud SQL come from that one-time setup and carry forward.
+      # --memory=2Gi there: each run loads the per-job page manifest (~280k
+      # entries), an in-memory index of every live job for related links,
+      # and plans ~8k company/location hubs. At 512Mi the 2026-10-02 10pm
+      # run was killed before publishing 7,121 new pages.
       - name: Deploy generate-static-job-pages
-        run: |
-          gcloud functions deploy generate-static-job-pages \
-            --gen2 \
-            --region="$REGION" \
-            --project="$PROJECT_ID" \
-            --runtime=python313 \
-            --source=. \
-            --entry-point=dispatch \
-            --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=generate_static_job_pages.py \
-            --trigger-http \
-            --no-allow-unauthenticated \
-            --memory=2Gi \
-            --cpu=1 \
-            --timeout=1800s \
-            --update-secrets=LOGO_DEV_SECRET_KEY=logo-dev-secret-key:latest \
-            --update-labels=function=generate-static-job-pages
+        run: gcloud run jobs deploy generate-static-job-pages --image="${{ needs.build.outputs.image_tag }}" --region="$REGION" --project="$PROJECT_ID" --labels=function=generate-static-job-pages
 
   deploy-find-official-sites:
     needs: build
