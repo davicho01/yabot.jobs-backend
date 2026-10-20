@@ -146,7 +146,6 @@ class TestEligibility:
             {"title": None},
             {"primary_posting_id": uuid.uuid4()},
             {"flagged_at": NOW},
-            {"closed_at": NOW},
             {"created_at": NOW - timedelta(days=sjp.MAX_AGE_DAYS + 1)},
             {"posted_at": (NOW - timedelta(days=sjp.MAX_AGE_DAYS + 1)).date()},
         ],
@@ -154,6 +153,10 @@ class TestEligibility:
     def test_excludes(self, db, make_job, kwargs):
         make_job(**kwargs)
         assert sjp.eligible_job_ids(db, NOW) == {}
+
+    def test_a_closed_job_stays_eligible(self, db, make_job):
+        make_job(closed_at=NOW)
+        assert len(sjp.eligible_job_ids(db, NOW)) == 1
 
     def test_a_recent_posted_at_keeps_an_old_scan_eligible(self, db, make_job):
         make_job(created_at=NOW - timedelta(days=90), posted_at=(NOW - timedelta(days=5)).date())
@@ -309,7 +312,7 @@ class TestGenerate:
         assert b"Staff Engineer" in store.get(path)
         assert f"/{path}" in result.touched_paths
 
-    def test_a_closed_job_gets_the_gone_page_and_leaves_the_sitemap(self, db, make_job, store):
+    def test_a_closed_job_keeps_its_page_with_its_closed_date(self, db, make_job, store):
         row = make_job()
         sjp.generate_job_pages(db, now=NOW)
         path = _path(store, row.id)
@@ -318,12 +321,19 @@ class TestGenerate:
 
         result = sjp.generate_job_pages(db, now=NOW)
 
-        assert result.removed == 1
-        assert b"no longer available" in store.get(path)
-        assert str(row.id).encode() not in store.get("sitemap-job-pages-1.xml")
+        page = store.get(path).decode()
+        assert result.updated == 1 and result.removed == 0
+        assert _path(store, row.id) == path
+        assert "noindex" not in page and "Build <strong>things</strong>." in page
+        assert f'<div class="job-dates__closed"><dt>Closed</dt><dd>{NOW:%B %-d, %Y}</dd></div>' in page
+        assert "Apply on Yabot Jobs" not in page
+        assert _ld(page)["validThrough"] == NOW.date().isoformat()
+        assert str(row.id).encode() in store.get("sitemap-job-pages-1.xml")
         assert f"/{path}" in result.touched_paths
+        # Nothing changed since: left alone.
+        assert sjp.generate_job_pages(db, now=NOW).updated == 0
 
-    def test_a_reopened_job_comes_back(self, db, make_job, store):
+    def test_a_reopened_job_loses_its_closed_date(self, db, make_job, store):
         row = make_job()
         sjp.generate_job_pages(db, now=NOW)
         row.closed_at = NOW
@@ -334,8 +344,15 @@ class TestGenerate:
 
         result = sjp.generate_job_pages(db, now=NOW)
 
-        assert result.published == 1
-        assert b"Apply on Yabot Jobs" in store.get(_path(store, row.id))
+        page = store.get(_path(store, row.id)).decode()
+        assert result.updated == 1
+        assert "Apply on Yabot Jobs" in page and "<dt>Closed</dt>" not in page
+
+    def test_a_closed_job_is_left_out_of_other_pages_related_lists(self, db, make_job, store):
+        a = make_job(title="Backend Engineer")
+        b = make_job(title="Frontend Engineer", closed_at=NOW)
+        sjp.generate_job_pages(db, now=NOW)
+        assert _path(store, b.id) not in store.get(_path(store, a.id)).decode()
 
     def test_only_full_re_renders_existing_pages_a_page_version_bump_does_not(self, db, make_job, store, monkeypatch):
         make_job()

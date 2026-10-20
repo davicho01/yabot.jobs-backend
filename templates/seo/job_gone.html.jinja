@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  {#- What a /job/{url_id} page becomes once its job stops qualifying (closed,
-      flagged, a duplicate, too old, deleted) — see static_job_pages. noindex
+  {#- What a /job/{url_id} page becomes once its job stops qualifying (flagged,
+      a duplicate, too old, deleted) — see static_job_pages. A closed job
+      keeps its full page instead, with an expired validThrough. noindex
       takes it out of search; Google for Jobs requires expired postings to
       be removed. -#}
   <title>{% if job %}{{ job.title }} at {{ job.company_display }} – {% endif %}No Longer Available | Yabot Jobs</title>
