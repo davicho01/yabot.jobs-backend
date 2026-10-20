@@ -662,7 +662,7 @@ class TestContent:
         # 00:36 UTC on Oct 20 is still Oct 19 in Eastern time (EDT, UTC-4).
         evening = datetime(2026, 10, 20, 0, 36, tzinfo=timezone.utc)
         page = self._page(db, make_job, posted_at=date(2026, 10, 19), first_scanned_at=evening, closed_at=evening)
-        assert "<div><dt>First scanned</dt><dd>October 19, 2026, 8:36 PM ET</dd></div>" in page
+        assert "<div><dt>First found</dt><dd>October 19, 2026, 8:36 PM ET</dd></div>" in page
         assert "This job closed October 19, 2026" in page
 
 
