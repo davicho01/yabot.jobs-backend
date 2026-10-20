@@ -29,9 +29,15 @@ Usage: python browser_scaler.py
 
 import logging
 import math
+from datetime import datetime, timedelta, timezone
 
 from app.core.log_config import configure_logging
-from app.services.gcp_admin import get_instance_count, pause_scheduler_job, set_min_instances
+from app.services.gcp_admin import (
+    get_instance_count,
+    pause_scheduler_job,
+    scheduler_job_updated_at,
+    set_min_instances,
+)
 
 configure_logging()
 logger = logging.getLogger("app.browser_scaler")
@@ -77,6 +83,25 @@ _LOOKBACK_MINUTES = 5
 _CRAWL_WORKER_CONCURRENCY = 4
 _WORKER_CONCURRENCY = 1
 
+# Workers take ~90s to show up as active in Cloud Monitoring, so a tick right
+# after crawl_dispatcher.py / retry_failed_scans.py resume this job (and set
+# the warm-up floors) still sees 0 and used to read that as "drained": it
+# zeroed the floors and paused. Verified 2026-10-20: 77 of 165 crawl runs
+# since 10-12 lost their floor that way; first ticks under 60s after the
+# warm-up paused ~70% of the time, 90-130s only 3 of 47. So for this long
+# after a resume, an idle reading keeps the warm-up floors and the tick.
+_RESUME_GRACE = timedelta(minutes=3)
+
+
+def _just_resumed() -> bool:
+    try:
+        return datetime.now(timezone.utc) - scheduler_job_updated_at(_SCALER_SCHEDULER_JOB) < _RESUME_GRACE
+    except Exception:
+        # Unknown: fall back to scaling down and pausing as before, rather
+        # than risk ticking (and holding floors) indefinitely.
+        logger.exception("Couldn't read when %s was resumed", _SCALER_SCHEDULER_JOB)
+        return False
+
 
 def main() -> None:
     crawl_worker_count = (
@@ -84,6 +109,9 @@ def main() -> None:
     )
     worker_count = get_instance_count("worker", lookback_minutes=_LOOKBACK_MINUTES) * _WORKER_CONCURRENCY
     total = crawl_worker_count + worker_count
+    if total == 0 and _just_resumed():
+        logger.info("No workers seen yet, but %s was just resumed: keeping the warm-up floors.", _SCALER_SCHEDULER_JOB)
+        return
     desired = min(round(_BROWSER_DEMAND_RATIO * total), _MIN_INSTANCES_CAP)
     logger.info(
         "crawl-worker=%d worker=%d (last %dm) -> desired min-instances=%d",

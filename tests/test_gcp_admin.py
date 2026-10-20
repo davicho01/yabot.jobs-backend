@@ -3,6 +3,8 @@ callers (crawl_dispatcher.py, retry_failed_scans.py) must not have their own
 actual work blocked by a Cloud Run Admin / Cloud Scheduler Admin failure.
 """
 
+from datetime import datetime, timezone
+
 from app.services import gcp_admin
 from tests.conftest import FakeResponse
 
@@ -93,3 +95,12 @@ def test_skips_the_patch_when_the_service_level_min_already_matches(monkeypatch)
 
     assert gcp_admin.set_min_instances("yabot-jobs-sector", 5) is False
     assert patches == []
+
+
+def test_scheduler_job_updated_at_reads_user_update_time(monkeypatch):
+    # Real shape from prod (2026-10-20); the API can return up to 9 fractional digits.
+    _fake_run_admin(monkeypatch, {"state": "PAUSED", "userUpdateTime": "2026-10-20T03:02:35.924393123Z"})
+
+    assert gcp_admin.scheduler_job_updated_at("browser-scaler-tick") == datetime(
+        2026, 10, 20, 3, 2, 35, tzinfo=timezone.utc
+    )
