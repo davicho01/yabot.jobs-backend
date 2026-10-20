@@ -51,7 +51,7 @@
           {# A closed job keeps its page, but there's nothing left to apply to. #}
           {% if job.closed_at %}
           <div class="job-cta__text">
-            <strong>This job closed {{ job.closed_at.strftime("%B %-d, %Y") }}</strong>
+            <strong>This job closed {{ closed_date }}</strong>
             <span>The employer is no longer taking applications. Sign in free to find similar jobs and get alerts for new ones.</span>
           </div>
           <div class="job-cta__buttons">

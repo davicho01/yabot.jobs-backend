@@ -87,7 +87,7 @@ logger = logging.getLogger("app.static_job_pages")
 
 # Which rendering a page came from. Informational: bumping it re-renders
 # nothing by itself (run the backfill job, --full, for that).
-PAGE_VERSION = 3
+PAGE_VERSION = 4
 MANIFEST_KEY = "_meta/job-pages.json"
 SITEMAP_INDEX_KEY = "sitemap-job-pages.xml"
 SITEMAP_SHARD_SIZE = 45_000  # under the sitemap protocol's 50,000-URL cap
@@ -255,15 +255,21 @@ def place_slug(location: str | None, workplace_type: str | None) -> str:
     return "remote" if workplace_type == WorkplaceType.REMOTE else ""
 
 
+def eastern(moment: datetime) -> datetime:
+    """A stored timestamp in DAY_BOUNDARY_TZ (US Eastern), the zone every
+    date on these pages is shown in. SQLite (tests) hands back naive UTC."""
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(DAY_BOUNDARY_TZ)
+
+
 def job_day(posted_at: date | None, found_at: datetime) -> date:
     """The day page a job is listed on — same rule as
     static_pages.jobs_for_sector_day: the employer's posted date, else the
-    Pacific day we first saw it."""
+    Eastern day we first saw it."""
     if posted_at is not None:
         return posted_at
-    if found_at.tzinfo is None:
-        found_at = found_at.replace(tzinfo=timezone.utc)
-    return found_at.astimezone(DAY_BOUNDARY_TZ).date()
+    return eastern(found_at).date()
 
 
 def new_job_path(job: "LinkJob") -> str:
@@ -512,7 +518,7 @@ class JobPage:
 
     @property
     def date_posted(self) -> date:
-        return self.posted_at or self.found_at.date()
+        return self.day
 
     @property
     def day(self) -> date:
@@ -832,7 +838,7 @@ def _lead(job: JobPage) -> str:
 
 
 def _closed_date(job: JobPage) -> str | None:
-    return job.closed_at.strftime("%B %-d, %Y") if job.closed_at else None
+    return eastern(job.closed_at).strftime("%B %-d, %Y") if job.closed_at else None
 
 
 def _glance(job: JobPage) -> list[tuple[str, str]]:
@@ -844,7 +850,9 @@ def _glance(job: JobPage) -> list[tuple[str, str]]:
         ("Employment", _EMPLOYMENT_LABELS.get(job.employment_type)),
         ("Sector", (_sector_link(job.sector) or (None, None))[1]),
         ("Posted", job.date_posted.strftime("%B %-d, %Y")),
-        ("First scanned", job.first_scanned_at.strftime("%B %-d, %Y") if job.first_scanned_at else None),
+        # A static page can't know its visitor's zone (the SPA shows their
+        # local time), so the time says it's Eastern.
+        ("First scanned", eastern(job.first_scanned_at).strftime("%B %-d, %Y, %-I:%M %p ET") if job.first_scanned_at else None),
         ("Apply by", job.expires.strftime("%B %-d, %Y") if _parse_date(job.valid_through) and not job.closed_at else None),
         ("Closed", _closed_date(job)),
     ]
@@ -874,6 +882,7 @@ def render_job_page(job: JobPage, path: str | None = None, links: PageLinks | No
         meta_description=meta_description(job),
         lead=_lead(job),
         glance=_glance(job),
+        closed_date=_closed_date(job),
         description_html=description_html,
         job_ld_json=ld_json([_job_ld(job, description_html, page_url), breadcrumb_ld(trail, page_url)]),
         trail=trail,
@@ -981,6 +990,7 @@ def generate_job_pages(
     *,
     dry_run: bool = False,
     full: bool = False,
+    only: Iterable[str] = (),
     now: datetime | None = None,
     max_renders: int | None = MAX_RENDERS_PER_RUN,
 ) -> JobPagesResult:
@@ -997,14 +1007,16 @@ def generate_job_pages(
 
     # New pages first: a job without a page is invisible, while an outdated
     # page only shows yesterday's version of itself. Already-published pages
-    # are only looked at when rescanned, closed or reopened (or with --full),
-    # and re-rendered
-    # only if their own content changed (content_hash).
+    # are only looked at when rescanned, closed or reopened (or with --full,
+    # or named in `only`, --ids: a backfill of just those pages), and
+    # re-rendered only if their own content changed (content_hash).
+    forced = set(only)
     new_ids = [i for i in index if i not in previous]
     removed_ids = [i for i in previous if i not in index]
     check_ids = [
         i for i in index
-        if i in previous and (full or previous[i].scanned != index[i].scanned or previous[i].closed != index[i].closed)
+        if i in previous
+        and (full or i in forced or previous[i].scanned != index[i].scanned or previous[i].closed != index[i].closed)
     ]
     deferred = 0
     if max_renders is not None and len(new_ids) > max_renders:
@@ -1089,7 +1101,7 @@ def generate_job_pages(
             loaded = load_job_pages(db, check_ids[start : start + RENDER_BATCH_SIZE])
             changed = []
             for i, job in loaded.items():
-                if not full and content_hash(job) == previous[i].content_hash:
+                if not full and i not in forced and content_hash(job) == previous[i].content_hash:
                     pages[i] = replace(previous[i], scanned=index[i].scanned, closed=index[i].closed).dump()
                     result.rescanned_unchanged += 1
                 else:

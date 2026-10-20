@@ -29,7 +29,7 @@
       <span aria-current="page">{{ date_display }}</span>
     </nav>
     <h1>{{ sector_name }} Jobs in {{ country_name }}, Posted {{ date_display }}</h1>
-    <p class="meta-line">{{ job_count }} job{{ '' if job_count == 1 else 's' }} found &middot; Updated as of {{ generated_at_display }} Pacific</p>
+    <p class="meta-line">{{ job_count }} job{{ '' if job_count == 1 else 's' }} found &middot; Updated as of {{ generated_at_display }}</p>
     {% include "_scan_notice.html.jinja" %}
 
     {# A day can list a thousand jobs or more, so they're compact rows on

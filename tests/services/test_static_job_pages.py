@@ -55,6 +55,7 @@ def make_job(db):
         *,
         created_at: datetime = NOW - timedelta(days=1),
         scanned_at: datetime = NOW - timedelta(days=1),
+        first_scanned_at: datetime | None = None,
         country: str | None = "US",
         extraction_status: str = ScanStatus.SUCCESS,
         title: str | None = "Software Engineer",
@@ -103,6 +104,7 @@ def make_job(db):
                 primary_posting_id=primary_posting_id,
                 posted_at=posted_at,
                 scanned_at=scanned_at,
+                first_scanned_at=first_scanned_at,
                 description=description,
                 workplace_type=workplace_type,
                 employment_type=EmploymentType.FULL_TIME,
@@ -361,6 +363,12 @@ class TestGenerate:
         assert sjp.generate_job_pages(db, now=NOW).updated == 0
         assert sjp.generate_job_pages(db, now=NOW, full=True).updated == 1
 
+    def test_only_re_renders_just_the_named_pages(self, db, make_job, store):
+        a, _ = make_job(), make_job()
+        sjp.generate_job_pages(db, now=NOW)
+        result = sjp.generate_job_pages(db, now=NOW, only=[str(a.id)])
+        assert (result.updated, result.unchanged) == (1, 1)
+
     def test_render_cap_defers_the_rest_to_later_runs(self, db, make_job, store):
         rows = [make_job() for _ in range(5)]
 
@@ -473,7 +481,7 @@ class TestGeneratorScript:
         monkeypatch.setattr(script, "SessionLocal", lambda: type("S", (), {"rollback": lambda s: None, "close": lambda s: None})())
         monkeypatch.setattr(script, "generate_for_date", lambda db, d, **kw: day)
         monkeypatch.setattr(script, "read_job_paths", lambda: {})
-        monkeypatch.setattr(script, "generate_job_pages", lambda db, dry_run, full: (_ for _ in ()).throw(RuntimeError("boom")))
+        monkeypatch.setattr(script, "generate_job_pages", lambda db, dry_run, full, only: (_ for _ in ()).throw(RuntimeError("boom")))
         monkeypatch.setattr(script, "invalidate_paths", lambda paths: invalidated.append(paths))
         monkeypatch.setattr(script, "publish_assets", lambda: ["/jobs/_assets/analytics.js"])
         monkeypatch.setattr("sys.argv", ["generate_static_job_pages.py"])
@@ -505,8 +513,8 @@ class TestPaths:
             "jobs/us/engineering-tech/2026-10-02/sr-network-development-engineer-raleigh-nc-" + job.url_id
         )
 
-    def test_day_falls_back_to_the_pacific_day_we_found_it(self):
-        # 02:00 UTC on Oct 3 is still Oct 2 in Pacific time.
+    def test_day_falls_back_to_the_eastern_day_we_found_it(self):
+        # 02:00 UTC on Oct 3 is still Oct 2 in Eastern time.
         job = _link_job(posted_at=None, found_at=datetime(2026, 10, 3, 2, 0, tzinfo=timezone.utc))
         assert "/2026-10-02/" in sjp.new_job_path(job)
 
@@ -649,6 +657,13 @@ class TestContent:
         page = self._page(db, make_job, salary_min=100000, salary_max=120000)
         assert '<h2 id="glance-h" class="sr">Job at a glance</h2>' in page and '<h2 id="about-h">About the job</h2>' in page
         assert '<div class="job-facts__pay"><dt class="sr">Pay</dt><dd>$100,000 – $120,000</dd></div>' in page
+
+    def test_dates_are_eastern_days_not_utc_days(self, db, make_job):
+        # 00:36 UTC on Oct 20 is still Oct 19 in Eastern time (EDT, UTC-4).
+        evening = datetime(2026, 10, 20, 0, 36, tzinfo=timezone.utc)
+        page = self._page(db, make_job, posted_at=date(2026, 10, 19), first_scanned_at=evening, closed_at=evening)
+        assert "<div><dt>First scanned</dt><dd>October 19, 2026, 8:36 PM ET</dd></div>" in page
+        assert "This job closed October 19, 2026" in page
 
 
 class TestHubs:
