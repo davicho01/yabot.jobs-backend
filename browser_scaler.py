@@ -71,9 +71,18 @@ _SECTOR_MIN_INSTANCES_CAP = _MIN_INSTANCES_CAP
 _LOOKBACK_MINUTES = 5
 
 
+# Requests each instance runs at once (--concurrency in deploy.yml). The
+# ratios above were tuned at 1 request per instance, so demand is counted in
+# requests in flight: instances x concurrency.
+_CRAWL_WORKER_CONCURRENCY = 4
+_WORKER_CONCURRENCY = 1
+
+
 def main() -> None:
-    crawl_worker_count = get_instance_count("crawl-worker", lookback_minutes=_LOOKBACK_MINUTES)
-    worker_count = get_instance_count("worker", lookback_minutes=_LOOKBACK_MINUTES)
+    crawl_worker_count = (
+        get_instance_count("crawl-worker", lookback_minutes=_LOOKBACK_MINUTES) * _CRAWL_WORKER_CONCURRENCY
+    )
+    worker_count = get_instance_count("worker", lookback_minutes=_LOOKBACK_MINUTES) * _WORKER_CONCURRENCY
     total = crawl_worker_count + worker_count
     desired = min(round(_BROWSER_DEMAND_RATIO * total), _MIN_INSTANCES_CAP)
     logger.info(

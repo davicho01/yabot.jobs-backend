@@ -19,8 +19,8 @@ def _patch(monkeypatch, *, crawl_worker: int, worker: int):
 
 
 def test_scales_up_proportionally_to_combined_instance_count(monkeypatch):
-    # (20 crawl-worker + 60 worker) * 0.10 = 8
-    set_calls, pause_calls = _patch(monkeypatch, crawl_worker=20, worker=60)
+    # Requests in flight: (5 crawl-worker x 4 + 60 worker x 1) * 0.10 = 8
+    set_calls, pause_calls = _patch(monkeypatch, crawl_worker=5, worker=60)
 
     browser_scaler.main()
 
