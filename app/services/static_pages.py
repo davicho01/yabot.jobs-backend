@@ -32,11 +32,13 @@ from app.services.page_store import get_page_store
 
 logger = logging.getLogger("app.static_pages")
 
-# The single timezone that defines "day" for these pages — the product is
-# US-focused, so a UTC day would split jobs posted the same US day across two
-# date pages (evening Pacific postings spilling into the next UTC day).
+# The single timezone that defines "day" for these pages, and every date and
+# time they show: US Eastern (EST, or EDT in summer), labeled "ET" wherever a
+# time appears, since a static page can't know its visitor's zone (the SPA
+# shows the visitor's local time instead). The product is US-focused, so a
+# UTC day would split jobs posted the same US evening across two date pages.
 # ZoneInfo (not a fixed offset) so DST transitions are handled correctly.
-DAY_BOUNDARY_TZ = ZoneInfo("America/Los_Angeles")
+DAY_BOUNDARY_TZ = ZoneInfo("America/New_York")
 
 MANIFEST_KEY = "_meta/generated-pages.json"
 SITEMAP_KEY = "sitemap-jobs.xml"
@@ -231,7 +233,7 @@ def render_day_page(
         date_iso=day_str,
         jobs=jobs,
         job_count=len(jobs),
-        generated_at_display=generated_at.astimezone(DAY_BOUNDARY_TZ).strftime("%-I:%M %p"),
+        generated_at_display=generated_at.astimezone(DAY_BOUNDARY_TZ).strftime("%-I:%M %p ET"),
         prev_day=prev_day,
         next_day=next_day,
         base_url=settings.seo_pages_base_url,

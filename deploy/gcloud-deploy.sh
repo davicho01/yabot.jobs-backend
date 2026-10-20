@@ -251,11 +251,11 @@ gcloud run jobs deploy redo-dedup \
 #     per-job SEO page (/job/{url_id}, app.services.static_job_pages) at
 #     once. The scheduled generate-static-job-pages job (§10) keeps
 #     them up to date incrementally afterwards, but a first full render of
-#     every live job won't fit in its 1800s timeout. Also the way to force a
-#     re-render after a template change, though bumping
-#     static_job_pages.PAGE_VERSION does that on the next scheduled run
-#     anyway. Deploy once, then execute by hand — --dry-run first for the
-#     counts:
+#     every live job won't fit in its 1800s timeout. Also the only way to
+#     re-render existing pages after a template change (bumping
+#     static_job_pages.PAGE_VERSION just records the version; it re-renders
+#     nothing by itself). Deploy once, then execute by hand — --dry-run
+#     first for the counts:
 #       gcloud run jobs execute generate-job-pages-backfill --region="$REGION" --args=generate_static_job_pages.py,--full,--dry-run --wait
 #       gcloud run jobs execute generate-job-pages-backfill --region="$REGION" --wait
 # ---------------------------------------------------------------------------

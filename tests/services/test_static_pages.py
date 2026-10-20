@@ -92,94 +92,94 @@ def make_posting(db):
     return _make
 
 
-# A day with no DST ambiguity: 9am Pacific on 2026-09-26 is safely inside
-# that Pacific calendar day regardless of PST/PDT.
-PT_NOON = datetime(2026, 9, 26, 17, 0, tzinfo=timezone.utc)  # 10:00 PT (PDT, UTC-7)
+# A day with no DST ambiguity: 1pm Eastern on 2026-09-26 is safely inside
+# that Eastern calendar day regardless of EST/EDT.
+MIDDAY = datetime(2026, 9, 26, 17, 0, tzinfo=timezone.utc)  # 13:00 ET (EDT, UTC-4)
 
 
 class TestDayBoundsUtc:
-    def test_pdt_offset_in_september(self):
+    def test_edt_offset_in_september(self):
         start, end = sp.day_bounds_utc(date(2026, 9, 26))
-        assert start == datetime(2026, 9, 26, 7, 0, tzinfo=timezone.utc)  # midnight PDT = 07:00 UTC
-        assert end == datetime(2026, 9, 27, 7, 0, tzinfo=timezone.utc)
+        assert start == datetime(2026, 9, 26, 4, 0, tzinfo=timezone.utc)  # midnight EDT = 04:00 UTC
+        assert end == datetime(2026, 9, 27, 4, 0, tzinfo=timezone.utc)
 
-    def test_pst_offset_in_january(self):
+    def test_est_offset_in_january(self):
         start, end = sp.day_bounds_utc(date(2026, 1, 15))
-        assert start == datetime(2026, 1, 15, 8, 0, tzinfo=timezone.utc)  # midnight PST = 08:00 UTC
-        assert end == datetime(2026, 1, 16, 8, 0, tzinfo=timezone.utc)
+        assert start == datetime(2026, 1, 15, 5, 0, tzinfo=timezone.utc)  # midnight EST = 05:00 UTC
+        assert end == datetime(2026, 1, 16, 5, 0, tzinfo=timezone.utc)
 
 
 class TestJobsForSectorDay:
     def test_includes_a_valid_job_on_the_target_day(self, db, make_posting):
-        make_posting(created_at=PT_NOON)
+        make_posting(created_at=MIDDAY)
         jobs = sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26))
         assert len(jobs) == 1
         assert jobs[0].title == "Software Engineer"
 
     def test_excludes_wrong_sector(self, db, make_posting):
-        make_posting(created_at=PT_NOON, sector=JobSector.SALES)
+        make_posting(created_at=MIDDAY, sector=JobSector.SALES)
         assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
 
     def test_excludes_wrong_country(self, db, make_posting):
-        make_posting(created_at=PT_NOON, country="GB")
+        make_posting(created_at=MIDDAY, country="GB")
         assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
 
     def test_excludes_unresolved_country(self, db, make_posting):
-        make_posting(created_at=PT_NOON, country=None)
+        make_posting(created_at=MIDDAY, country=None)
         assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
 
     def test_excludes_unsuccessful_scans(self, db, make_posting):
-        make_posting(created_at=PT_NOON, extraction_status=ScanStatus.NEEDS_REVIEW)
+        make_posting(created_at=MIDDAY, extraction_status=ScanStatus.NEEDS_REVIEW)
         assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
 
     def test_excludes_non_canonical_duplicates(self, db, make_posting):
-        make_posting(created_at=PT_NOON, primary_posting_id=uuid.uuid4())
+        make_posting(created_at=MIDDAY, primary_posting_id=uuid.uuid4())
         assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
 
     def test_excludes_flagged_listings(self, db, make_posting):
-        make_posting(created_at=PT_NOON, flagged_at=PT_NOON)
+        make_posting(created_at=MIDDAY, flagged_at=MIDDAY)
         assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
 
     def test_excludes_closed_listings(self, db, make_posting):
-        make_posting(created_at=PT_NOON, closed_at=PT_NOON)
+        make_posting(created_at=MIDDAY, closed_at=MIDDAY)
         assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
 
-    def test_evening_pacific_post_does_not_spill_into_next_utc_day(self, db, make_posting):
-        # 11pm Pacific (PDT, UTC-7) on Sept 26 is 06:00 UTC on Sept 27 — a
+    def test_evening_eastern_post_does_not_spill_into_next_utc_day(self, db, make_posting):
+        # 11pm Eastern (EDT, UTC-4) on Sept 26 is 03:00 UTC on Sept 27 — a
         # naive UTC-day bucket would wrongly file this under Sept 27.
-        late_pt = datetime(2026, 9, 27, 6, 0, tzinfo=timezone.utc)
-        make_posting(created_at=late_pt)
+        late_et = datetime(2026, 9, 27, 3, 0, tzinfo=timezone.utc)
+        make_posting(created_at=late_et)
         assert len(sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26))) == 1
         assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 27)) == []
 
     def test_carries_salary_fields_through(self, db, make_posting):
-        make_posting(created_at=PT_NOON, salary_min=100_000, salary_max=130_000, salary_currency="USD")
+        make_posting(created_at=MIDDAY, salary_min=100_000, salary_max=130_000, salary_currency="USD")
         jobs = sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26))
         assert jobs[0].salary_min == 100_000
         assert jobs[0].salary_max == 130_000
         assert jobs[0].salary_display == "$100,000 – $130,000"
 
     def test_excludes_adjacent_days(self, db, make_posting):
-        make_posting(created_at=PT_NOON - timedelta(days=1))
-        make_posting(created_at=PT_NOON + timedelta(days=1))
+        make_posting(created_at=MIDDAY - timedelta(days=1))
+        make_posting(created_at=MIDDAY + timedelta(days=1))
         assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
 
     def test_buckets_by_posted_at_not_scan_date_when_known(self, db, make_posting):
         # Scanned today, but the employer says it was posted a week ago —
         # belongs on that day's page, not today's.
-        make_posting(created_at=PT_NOON, posted_at=date(2026, 9, 19))
+        make_posting(created_at=MIDDAY, posted_at=date(2026, 9, 19))
         assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
         assert len(sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 19))) == 1
 
     def test_falls_back_to_scan_date_when_posted_at_unknown(self, db, make_posting):
-        make_posting(created_at=PT_NOON, posted_at=None)
+        make_posting(created_at=MIDDAY, posted_at=None)
         assert len(sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26))) == 1
 
     def test_known_posted_at_elsewhere_is_not_rescued_by_todays_scan(self, db, make_posting):
         # Scanned today (created_at in today's window) but posted_at names a
         # *different* day — the known date always wins, never overridden by
         # when we happened to find it.
-        make_posting(created_at=PT_NOON, posted_at=date(2026, 9, 25))
+        make_posting(created_at=MIDDAY, posted_at=date(2026, 9, 25))
         assert sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26)) == []
 
     def test_ordered_by_scan_time_so_newly_found_jobs_land_at_the_top(self, db, make_posting):
@@ -189,9 +189,9 @@ class TestJobsForSectorDay:
         # predictably at the top instead of the whole list re-shuffling.
         # Mixed posted_at (some known, one not) to confirm the sort ignores
         # it entirely once the day-bucketing filter has already applied.
-        make_posting(created_at=PT_NOON, title="Zebra Role", posted_at=date(2026, 9, 26))
-        make_posting(created_at=PT_NOON + timedelta(minutes=1), title="Alpha Role", posted_at=None)
-        make_posting(created_at=PT_NOON + timedelta(minutes=2), title="Middle Role", posted_at=date(2026, 9, 26))
+        make_posting(created_at=MIDDAY, title="Zebra Role", posted_at=date(2026, 9, 26))
+        make_posting(created_at=MIDDAY + timedelta(minutes=1), title="Alpha Role", posted_at=None)
+        make_posting(created_at=MIDDAY + timedelta(minutes=2), title="Middle Role", posted_at=date(2026, 9, 26))
 
         jobs = sp.jobs_for_sector_day(db, "US", JobSector.ENGINEERING_TECH, date(2026, 9, 26))
 
@@ -266,7 +266,7 @@ class TestRendering:
                 title="Senior Backend Engineer",
                 company_name="Acme & Co",
                 location="Austin, TX",
-                scanned_at_local=PT_NOON,
+                scanned_at_local=MIDDAY,
             )
         ]
         manifest = sp.add_to_manifest({}, "us", JobSector.ENGINEERING_TECH, date(2026, 9, 26), 1)
@@ -299,7 +299,7 @@ class TestRendering:
                 title="Senior Backend Engineer",
                 company_name="Acme Corp",
                 location="Austin, TX",
-                scanned_at_local=PT_NOON,
+                scanned_at_local=MIDDAY,
                 salary_min=120_000,
                 salary_max=150_000,
             )
@@ -328,22 +328,22 @@ class TestRendering:
         }
 
     def test_job_row_salary_display_variants(self):
-        no_salary = sp.JobRow(url_id="x", title="t", company_name=None, location=None, scanned_at_local=PT_NOON)
+        no_salary = sp.JobRow(url_id="x", title="t", company_name=None, location=None, scanned_at_local=MIDDAY)
         assert no_salary.salary_display is None
 
         range_usd = sp.JobRow(
-            url_id="x", title="t", company_name=None, location=None, scanned_at_local=PT_NOON,
+            url_id="x", title="t", company_name=None, location=None, scanned_at_local=MIDDAY,
             salary_min=90_000, salary_max=110_000,
         )
         assert range_usd.salary_display == "$90,000 – $110,000"
 
         single_value = sp.JobRow(
-            url_id="x", title="t", company_name=None, location=None, scanned_at_local=PT_NOON, salary_max=75_000
+            url_id="x", title="t", company_name=None, location=None, scanned_at_local=MIDDAY, salary_max=75_000
         )
         assert single_value.salary_display == "$75,000"
 
         other_currency = sp.JobRow(
-            url_id="x", title="t", company_name=None, location=None, scanned_at_local=PT_NOON,
+            url_id="x", title="t", company_name=None, location=None, scanned_at_local=MIDDAY,
             salary_min=50_000, salary_max=60_000, salary_currency="EUR",
         )
         assert other_currency.salary_display == "50,000 EUR – 60,000 EUR"
@@ -403,7 +403,7 @@ class TestRenderCountryIndex:
 
 class TestGenerateForDate:
     def test_dry_run_returns_counts_without_touching_s3(self, db, make_posting, monkeypatch):
-        make_posting(created_at=PT_NOON)
+        make_posting(created_at=MIDDAY)
 
         def _boom(*a, **k):
             raise AssertionError("dry_run must not call S3/CloudFront")
@@ -421,12 +421,12 @@ class TestGenerateForDate:
         assert result.job_counts == {}
 
     def test_non_us_postings_are_not_published_anywhere(self, db, make_posting):
-        make_posting(created_at=PT_NOON, country="GB")
+        make_posting(created_at=MIDDAY, country="GB")
         result = sp.generate_for_date(db, date(2026, 9, 26), dry_run=True)
         assert result.job_counts == {}
 
     def test_publishes_day_and_index_pages_and_updates_manifest(self, db, make_posting, monkeypatch):
-        make_posting(created_at=PT_NOON)
+        make_posting(created_at=MIDDAY)
         uploaded: dict[str, str] = {}
         monkeypatch.setattr(sp, "read_manifest", lambda: {})
         monkeypatch.setattr(sp, "upload_html", lambda key, html: uploaded.__setitem__(key, html))
@@ -447,7 +447,7 @@ class TestGenerateForDate:
         assert "/sitemap-jobs.xml" in result.touched_paths
 
     def test_invalidate_false_leaves_cloudfront_to_the_caller(self, db, make_posting, monkeypatch):
-        make_posting(created_at=PT_NOON)
+        make_posting(created_at=MIDDAY)
         monkeypatch.setattr(sp, "read_manifest", lambda: {})
         monkeypatch.setattr(sp, "upload_html", lambda key, html: None)
         monkeypatch.setattr(sp, "upload_xml", lambda key, xml: None)
