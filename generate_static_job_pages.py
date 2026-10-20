@@ -32,8 +32,9 @@ Sectors with zero jobs that day are skipped entirely (no thin/empty page).
 Each run first brings the per-job pages up to date (see
 app.services.static_job_pages: new jobs at /jobs/us/<sector>/<day>/<title>-
 <place>-<id>, older ones staying at /job/<id>; rescanned ones re-rendered
-only if their content changed; "no longer available" pages for jobs that
-closed — every other page is left as first rendered) along with the company and
+only if their content changed, closed ones re-rendered with their Closed date;
+"no longer available" pages for jobs that stopped qualifying — every other page
+is left as first rendered) along with the company and
 location hubs (app.services.static_hub_pages), then the day pages, which link
 each job at its page's path — and sends a single CloudFront invalidation
 covering everything both passes changed.

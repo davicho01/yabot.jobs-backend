@@ -25,7 +25,11 @@ when — so each run only
   - renders jobs that are new, first, ahead of anything else,
   - re-renders a rescanned job (its scanned_at moved) only if its own content
     changed (content_hash); otherwise just records the new scanned_at,
-  - replaces jobs that stopped qualifying (closed, flagged, now a duplicate,
+  - re-renders a job that closed or reopened (its closed_at moved), so the
+    page keeps everything it showed plus its Closed date, and an expired
+    validThrough for Google; closed jobs stay out of the hubs and the
+    related-job lists, which only list open ones,
+  - replaces jobs that stopped qualifying (flagged, now a duplicate,
     rescanned into a failure, past MAX_AGE_DAYS, deleted) with a noindex
     "no longer available" page. Deleting the object instead would fall through
     to CloudFront's SPA fallback: a soft 404 that redirects.
@@ -277,7 +281,7 @@ def legacy_job_path(url_id: str) -> str:
 
 # ---------------------------------------------------------------------------
 # Manifest entries:
-# "<PAGE_VERSION>|<scanned_at>|<path>|<rendered_at>|<content_hash>"
+# "<PAGE_VERSION>|<scanned_at>|<path>|<rendered_at>|<content_hash>|<closed_at>"
 # ---------------------------------------------------------------------------
 
 
@@ -288,16 +292,18 @@ class ManifestEntry:
     path: str
     rendered_at: str  # ISO; "" for entries written before it was recorded
     content_hash: str = ""  # content_hash(); "" for entries from before it
+    closed: str = ""  # the job's closed_at (ISO) when rendered; "" while open
 
     def dump(self) -> str:
-        return f"{self.version}|{self.scanned}|{self.path}|{self.rendered_at}|{self.content_hash}"
+        return f"{self.version}|{self.scanned}|{self.path}|{self.rendered_at}|{self.content_hash}|{self.closed}"
 
 
 def parse_entry(url_id: str, raw: str) -> ManifestEntry:
     """Tolerates the older entries: two-part "<version>|<scanned_at>" ones,
     whose pages all live at /job/<url_id>, and four-part ones without a
     content hash, whose scanned_at may carry a "~<logo hash>" suffix from
-    when a new logo meant a re-render."""
+    when a new logo meant a re-render, and five-part ones from before closed
+    jobs kept their pages (all open when rendered)."""
     parts = raw.split("|")
     return ManifestEntry(
         version=parts[0],
@@ -305,6 +311,7 @@ def parse_entry(url_id: str, raw: str) -> ManifestEntry:
         path=parts[2] if len(parts) > 2 and parts[2] else legacy_job_path(url_id),
         rendered_at=parts[3] if len(parts) > 3 else "",
         content_hash=parts[4] if len(parts) > 4 else "",
+        closed=parts[5] if len(parts) > 5 else "",
     )
 
 
@@ -329,7 +336,8 @@ def read_job_paths() -> dict[str, str]:
 def _eligible_filter(now: datetime):
     """Same base filter as static_pages.jobs_for_sector_day (and so as a
     normal /jobs search) — successfully scanned, titled, canonical, unflagged,
-    US — plus still open and inside MAX_AGE_DAYS."""
+    US — plus inside MAX_AGE_DAYS. Open or closed: a closed job keeps its
+    page, with its Closed date."""
     cutoff = now - timedelta(days=MAX_AGE_DAYS)
     return and_(
         JobPosting.extraction_status == ScanStatus.SUCCESS,
@@ -337,7 +345,6 @@ def _eligible_filter(now: datetime):
         JobPosting.primary_posting_id.is_(None),
         JobPosting.country == COUNTRY_ISO2_BY_SLUG[COUNTRY_SLUG],
         JobPostingUrl.flagged_at.is_(None),
-        JobPostingUrl.closed_at.is_(None),
         or_(
             JobPosting.posted_at >= cutoff.date(),
             and_(JobPosting.posted_at.is_(None), JobPostingUrl.created_at >= cutoff),
@@ -364,6 +371,7 @@ class LinkJob:
     posted_at: date | None
     found_at: datetime
     scanned: str  # ISO; the page's version
+    closed: str = ""  # closed_at (ISO); "" while open
     path: str = ""
     _place: str | None = None
 
@@ -398,7 +406,7 @@ def load_link_index(db: Session, now: datetime) -> dict[str, LinkJob]:
     """Every job that should have a live page, keyed by url_id."""
     stmt = (
         select(
-            JobPostingUrl.id, JobPostingUrl.domain, JobPostingUrl.created_at,
+            JobPostingUrl.id, JobPostingUrl.domain, JobPostingUrl.created_at, JobPostingUrl.closed_at,
             JobPosting.title, JobPosting.company_name, JobPosting.company_key, JobPosting.title_key,
             JobPosting.sector, JobPosting.metros, JobPosting.location, JobPosting.workplace_type,
             JobPosting.posted_at, JobPosting.scanned_at,
@@ -428,6 +436,7 @@ def load_link_index(db: Session, now: datetime) -> dict[str, LinkJob]:
             posted_at=row.posted_at,
             found_at=row.created_at,
             scanned=scanned,
+            closed=_iso(row.closed_at) if row.closed_at else "",
         )
     return index
 
@@ -473,6 +482,9 @@ class JobPage:
     company_domain: str | None = None
     company_key: str | None = None
     company_logo_key: str | None = None  # the stored logo, if it has one yet
+    # When its board stopped listing it, or a rescan found it expired
+    # (app.services.jobs) — None while open.
+    closed_at: datetime | None = None
 
     @property
     def company_logo_url(self) -> str | None:
@@ -508,9 +520,12 @@ class JobPage:
 
     @property
     def expires(self) -> date:
-        """The employer's validThrough when it gives one (and it's sane),
-        else the day this page is retired: MAX_AGE_DAYS after it was posted
-        or found, matching _eligible_filter."""
+        """The day it closed, once it has, so Google for Jobs drops it; else
+        the employer's validThrough when it gives one (and it's sane), else
+        the day this page is retired: MAX_AGE_DAYS after it was posted or
+        found, matching _eligible_filter."""
+        if self.closed_at is not None:
+            return self.closed_at.date()
         employer = _parse_date(self.valid_through)
         if employer is not None and employer >= self.date_posted:
             return employer
@@ -535,7 +550,7 @@ def load_job_pages(db: Session, url_ids: Iterable[str]) -> dict[str, JobPage]:
     # job, a lot of bytes off a small database for nothing.
     stmt = (
         select(
-            JobPostingUrl.id, JobPostingUrl.domain, JobPostingUrl.created_at,
+            JobPostingUrl.id, JobPostingUrl.domain, JobPostingUrl.created_at, JobPostingUrl.closed_at,
             JobPosting.title, JobPosting.company_name, JobPosting.location, JobPosting.locations,
             JobPosting.workplace_type, JobPosting.employment_type, JobPosting.sector, JobPosting.description,
             JobPosting.posted_at, JobPosting.first_scanned_at,
@@ -572,6 +587,7 @@ def load_job_pages(db: Session, url_ids: Iterable[str]) -> dict[str, JobPage]:
             company_domain=row.company_domain,
             company_key=row.company_key,
             company_logo_key=row.company_logo_key,
+            closed_at=row.closed_at,
         )
     return pages
 
@@ -587,6 +603,10 @@ def content_hash(job: JobPage) -> str:
         job.salary_min, job.salary_max, job.salary_currency, job.valid_through, job.company_domain,
         job.company_key,
     ]
+    # Only when closed, so an open job's hash stays what it was before
+    # closed jobs kept their pages (no mass re-render).
+    if job.closed_at is not None:
+        fields.append(job.closed_at.isoformat())
     return hashlib.sha256(json.dumps(fields, default=str).encode()).hexdigest()[:16]
 
 
@@ -805,7 +825,14 @@ def meta_description(job: JobPage) -> str:
 def _lead(job: JobPage) -> str:
     where = f" in {job.location}" if job.location else ""
     article = "an" if job.title[:1].lower() in "aeiou" else "a"
-    return f"{job.company_display} is hiring {article} {job.title}{where}. Posted {job.date_posted.strftime('%B %-d, %Y')}."
+    posted = f"Posted {job.date_posted.strftime('%B %-d, %Y')}."
+    if job.closed_at is not None:
+        return f"{job.company_display} was hiring {article} {job.title}{where}. {posted} Closed {_closed_date(job)}."
+    return f"{job.company_display} is hiring {article} {job.title}{where}. {posted}"
+
+
+def _closed_date(job: JobPage) -> str | None:
+    return job.closed_at.strftime("%B %-d, %Y") if job.closed_at else None
 
 
 def _glance(job: JobPage) -> list[tuple[str, str]]:
@@ -818,7 +845,8 @@ def _glance(job: JobPage) -> list[tuple[str, str]]:
         ("Sector", (_sector_link(job.sector) or (None, None))[1]),
         ("Posted", job.date_posted.strftime("%B %-d, %Y")),
         ("First scanned", job.first_scanned_at.strftime("%B %-d, %Y") if job.first_scanned_at else None),
-        ("Apply by", job.expires.strftime("%B %-d, %Y") if _parse_date(job.valid_through) else None),
+        ("Apply by", job.expires.strftime("%B %-d, %Y") if _parse_date(job.valid_through) and not job.closed_at else None),
+        ("Closed", _closed_date(job)),
     ]
     return [(label, value) for label, value in rows if value]
 
@@ -969,11 +997,15 @@ def generate_job_pages(
 
     # New pages first: a job without a page is invisible, while an outdated
     # page only shows yesterday's version of itself. Already-published pages
-    # are only looked at when rescanned (or with --full), and re-rendered
+    # are only looked at when rescanned, closed or reopened (or with --full),
+    # and re-rendered
     # only if their own content changed (content_hash).
     new_ids = [i for i in index if i not in previous]
     removed_ids = [i for i in previous if i not in index]
-    check_ids = [i for i in index if i in previous and (full or previous[i].scanned != index[i].scanned)]
+    check_ids = [
+        i for i in index
+        if i in previous and (full or previous[i].scanned != index[i].scanned or previous[i].closed != index[i].closed)
+    ]
     deferred = 0
     if max_renders is not None and len(new_ids) > max_renders:
         deferred = len(new_ids) - max_renders
@@ -984,7 +1016,9 @@ def generate_job_pages(
     # plus this run's new pages. Deferred new jobs aren't linked from
     # anywhere until they're published.
     live_ids = (set(previous) & set(index)) | set(new_ids)
-    live = [index[i] for i in live_ids]
+    # Hubs and related-job lists only list open jobs; a closed job keeps its
+    # own page but isn't sent anyone's way.
+    live = [index[i] for i in live_ids if not index[i].closed]
     hub_plan = static_hub_pages.plan_hubs(live)
 
     result = JobPagesResult(
@@ -1041,7 +1075,7 @@ def generate_job_pages(
         list(pool.map(lambda kv: upload_html(kv[0], kv[1], CACHE_CONTROL), uploads))
         pages.update(
             (i, ManifestEntry(str(PAGE_VERSION), index[i].scanned, index[i].path, rendered_at,
-                              content_hash(loaded[i])).dump())
+                              content_hash(loaded[i]), index[i].closed).dump())
             for i in ids
         )
 
@@ -1056,7 +1090,7 @@ def generate_job_pages(
             changed = []
             for i, job in loaded.items():
                 if not full and content_hash(job) == previous[i].content_hash:
-                    pages[i] = replace(previous[i], scanned=index[i].scanned).dump()
+                    pages[i] = replace(previous[i], scanned=index[i].scanned, closed=index[i].closed).dump()
                     result.rescanned_unchanged += 1
                 else:
                     changed.append(i)

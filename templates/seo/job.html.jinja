@@ -36,7 +36,7 @@
         {% if job.location %}<p class="meta-line">{{ job.location }}</p>{% endif %}
         {# The facts as the app's chips (pay in lime), then the dates side by
            side in one panel. Company and location are already in the head. #}
-        {% set dates = ["Posted", "First scanned", "Apply by"] %}
+        {% set dates = ["Posted", "First scanned", "Apply by", "Closed"] %}
         <section class="job-glance" aria-labelledby="glance-h">
           <h2 id="glance-h" class="sr">Job at a glance</h2>
           <dl class="job-facts">
@@ -48,6 +48,16 @@
         </section>
         <p class="job-lead">{{ lead }}</p>
         <div class="job-cta">
+          {# A closed job keeps its page, but there's nothing left to apply to. #}
+          {% if job.closed_at %}
+          <div class="job-cta__text">
+            <strong>This job closed {{ job.closed_at.strftime("%B %-d, %Y") }}</strong>
+            <span>The employer is no longer taking applications. Sign in free to find similar jobs and get alerts for new ones.</span>
+          </div>
+          <div class="job-cta__buttons">
+            <a class="btn btn--sunset" href="{{ base_url }}/jobs/{{ job.url_id }}" data-track="closed">See it on Yabot Jobs</a>
+          </div>
+          {% else %}
           <div class="job-cta__text">
             <strong>Apply with a resume that fits</strong>
             <span>Sign in free to get the application link, save the job, or tailor your resume to it.</span>
@@ -56,6 +66,7 @@
             <a class="btn btn--chip" href="{{ base_url }}/jobs/{{ job.url_id }}" data-track="save">Save this job</a>
             <a class="btn btn--sunset" href="{{ base_url }}/jobs/{{ job.url_id }}" data-track="apply">Apply on Yabot Jobs</a>
           </div>
+          {% endif %}
         </div>
 
         <section class="job-desc" aria-labelledby="about-h">
