@@ -178,8 +178,9 @@ jobs:
       # GOOGLE_FUNCTION_SOURCE is required because this repo's own main.py
       # is the FastAPI app, not the worker entry points.
       #
-      # Instance caps (worker 30, crawl-worker 10): every instance holds a
-      # Cloud SQL connection and the database (db-custom-1-3840) has ~100.
+      # Instance caps (worker 30, crawl-worker 10 concurrent crawls): every
+      # in-flight request holds a Cloud SQL connection and the database
+      # (db-custom-1-3840) has ~100.
       # At the old hand-set 55/35, every twice-daily crawl burst (1pm/9pm
       # ET, crawl_dispatcher.py) hit the ceiling; 30 + 10 is ~50 connections
       # at full burst. --max-instances caps each *revision*, and a deploy
@@ -233,11 +234,18 @@ jobs:
             --source=. \
             --entry-point=handle_crawl_request \
             --set-build-env-vars=GOOGLE_FUNCTION_SOURCE=crawl_worker.py \
-            --max-instances=10 \
+            --cpu=1 \
+            --memory=2Gi \
+            --concurrency=4 \
+            --max-instances=3 \
             --update-labels=function=crawl-worker
 
+      # 3 instances x 4 concurrent crawls = 12, about the old 10 x 1, so the
+      # DB connection budget above is unchanged. Crawls mostly wait on the
+      # network, so sharing an instance cuts billed time and cold starts.
+      # 2Gi: one crawl peaked at 58% of the old 1Gi.
       - name: Cap crawl-worker across revisions
-        run: gcloud run services update crawl-worker --region="$REGION" --project="$PROJECT_ID" --max=10
+        run: gcloud run services update crawl-worker --region="$REGION" --project="$PROJECT_ID" --max=3
 
   deploy-crawl-dispatcher:
     needs: build
