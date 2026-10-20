@@ -43,7 +43,7 @@
             {% for label, value in glance if label not in dates and label not in ["Company", "Location"] %}<div{% if label == "Pay" %} class="job-facts__pay"{% endif %}><dt class="sr">{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}
           </dl>
           <dl class="job-dates">
-            {% for label, value in glance if label in dates %}<div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}
+            {% for label, value in glance if label in dates %}<div{% if label == "Closed" %} class="job-dates__closed"{% endif %}><dt>{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}
           </dl>
         </section>
         <p class="job-lead">{{ lead }}</p>

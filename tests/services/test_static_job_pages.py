@@ -325,7 +325,7 @@ class TestGenerate:
         assert result.updated == 1 and result.removed == 0
         assert _path(store, row.id) == path
         assert "noindex" not in page and "Build <strong>things</strong>." in page
-        assert f"<div><dt>Closed</dt><dd>{NOW:%B %-d, %Y}</dd></div>" in page
+        assert f'<div class="job-dates__closed"><dt>Closed</dt><dd>{NOW:%B %-d, %Y}</dd></div>' in page
         assert "Apply on Yabot Jobs" not in page
         assert _ld(page)["validThrough"] == NOW.date().isoformat()
         assert str(row.id).encode() in store.get("sitemap-job-pages-1.xml")

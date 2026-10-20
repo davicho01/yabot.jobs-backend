@@ -21,6 +21,9 @@
   .job-dates > div + div { border-left: 1px solid var(--line); }
   .job-dates dt { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
   .job-dates dd { margin: 0.1rem 0 0; font-size: 0.95rem; font-weight: 700; }
+  /* The app's rose, as on its Closed badge. */
+  .job-dates__closed dt, .job-dates__closed dd { color: #d70015; }
+  @media (prefers-color-scheme: dark) { .job-dates__closed dt, .job-dates__closed dd { color: #ff453a; } }
   @media (prefers-color-scheme: dark) { .job-facts__pay dd { background: color-mix(in srgb, var(--lime) 16%, transparent); } }
   .job-desc { overflow-wrap: anywhere; }
   .job-desc h3 { font-size: 1.08rem; margin: 1.5rem 0 0.4rem; }
