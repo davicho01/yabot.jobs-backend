@@ -852,7 +852,7 @@ def _glance(job: JobPage) -> list[tuple[str, str]]:
         ("Posted", job.date_posted.strftime("%B %-d, %Y")),
         # A static page can't know its visitor's zone (the SPA shows their
         # local time), so the time says it's Eastern.
-        ("First scanned", eastern(job.first_scanned_at).strftime("%B %-d, %Y, %-I:%M %p ET") if job.first_scanned_at else None),
+        ("First found", eastern(job.first_scanned_at).strftime("%B %-d, %Y, %-I:%M %p ET") if job.first_scanned_at else None),
         ("Apply by", job.expires.strftime("%B %-d, %Y") if _parse_date(job.valid_through) and not job.closed_at else None),
         ("Closed", _closed_date(job)),
     ]
