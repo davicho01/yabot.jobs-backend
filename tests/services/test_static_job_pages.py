@@ -658,6 +658,14 @@ class TestContent:
         assert '<h2 id="glance-h" class="sr">Job at a glance</h2>' in page and '<h2 id="about-h">About the job</h2>' in page
         assert '<div class="job-facts__pay"><dt class="sr">Pay</dt><dd>$100,000 – $120,000</dd></div>' in page
 
+    def test_posted_says_not_listed_without_an_employer_date(self, db, make_job):
+        found = datetime(2026, 10, 19, 14, 0, tzinfo=timezone.utc)
+        page = self._page(db, make_job, posted_at=None, first_scanned_at=found)
+        assert '<div class="job-dates__missing"><dt>Posted</dt><dd>Not listed</dd></div>' in page
+        assert _ld(page)["datePosted"]  # Google still gets the day it was found
+        dated = self._page(db, make_job, posted_at=date(2026, 10, 18))
+        assert "<div><dt>Posted</dt><dd>October 18, 2026</dd></div>" in dated
+
     def test_dates_are_eastern_days_not_utc_days(self, db, make_job):
         # 00:36 UTC on Oct 20 is still Oct 19 in Eastern time (EDT, UTC-4).
         evening = datetime(2026, 10, 20, 0, 36, tzinfo=timezone.utc)

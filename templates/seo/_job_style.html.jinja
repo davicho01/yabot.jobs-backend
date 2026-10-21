@@ -36,6 +36,8 @@
   .job-dates > div + div { border-left: 1px solid var(--line); }
   .job-dates dt { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
   .job-dates dd { margin: 0.1rem 0 0; font-size: 0.95rem; font-weight: 700; }
+  /* "Not listed": no date from the employer, in the labels' grey. */
+  .job-dates__missing dd { font-weight: 500; color: var(--ink-soft); }
   /* The app's rose, as on its Closed badge. */
   .job-dates__closed dt, .job-dates__closed dd { color: #d70015; }
   @media (prefers-color-scheme: dark) { .job-dates__closed dt, .job-dates__closed dd { color: #ff453a; } }
