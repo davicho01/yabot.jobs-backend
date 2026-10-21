@@ -87,7 +87,7 @@ logger = logging.getLogger("app.static_job_pages")
 
 # Which rendering a page came from. Informational: bumping it re-renders
 # nothing by itself (run the backfill job, --full, for that).
-PAGE_VERSION = 4
+PAGE_VERSION = 5
 MANIFEST_KEY = "_meta/job-pages.json"
 SITEMAP_INDEX_KEY = "sitemap-job-pages.xml"
 SITEMAP_SHARD_SIZE = 45_000  # under the sitemap protocol's 50,000-URL cap
@@ -491,6 +491,8 @@ class JobPage:
     # When its board stopped listing it, or a rescan found it expired
     # (app.services.jobs) — None while open.
     closed_at: datetime | None = None
+    # The posting on the employer's own site, for the page's Job site button.
+    job_url: str | None = None
 
     @property
     def company_logo_url(self) -> str | None:
@@ -556,7 +558,8 @@ def load_job_pages(db: Session, url_ids: Iterable[str]) -> dict[str, JobPage]:
     # job, a lot of bytes off a small database for nothing.
     stmt = (
         select(
-            JobPostingUrl.id, JobPostingUrl.domain, JobPostingUrl.created_at, JobPostingUrl.closed_at,
+            JobPostingUrl.id, JobPostingUrl.url.label("job_url"), JobPostingUrl.domain, JobPostingUrl.created_at,
+            JobPostingUrl.closed_at,
             JobPosting.title, JobPosting.company_name, JobPosting.location, JobPosting.locations,
             JobPosting.workplace_type, JobPosting.employment_type, JobPosting.sector, JobPosting.description,
             JobPosting.posted_at, JobPosting.first_scanned_at,
@@ -594,6 +597,7 @@ def load_job_pages(db: Session, url_ids: Iterable[str]) -> dict[str, JobPage]:
             company_key=row.company_key,
             company_logo_key=row.company_logo_key,
             closed_at=row.closed_at,
+            job_url=row.job_url,
         )
     return pages
 

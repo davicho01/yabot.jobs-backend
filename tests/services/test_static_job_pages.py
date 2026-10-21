@@ -179,9 +179,9 @@ class TestRendering:
         page = sjp.render_job_page(sjp.load_job_pages(db, [str(row.id)])[str(row.id)])
         assert "<h1>Software Engineer</h1>" in page
         assert f'<link rel="canonical" href="https://yabot.jobs/job/{row.id}" />' in page
-        assert f'href="https://yabot.jobs/jobs/{row.id}" data-track="apply">Apply on Yabot Jobs</a>' in page
+        assert f'href="https://yabot.jobs/jobs/{row.id}/apply" data-track="apply">Apply on Yabot Jobs</a>' in page
         assert "<strong>things</strong>" in page
-        assert "https://example.com/jobs/" not in page  # the apply URL stays behind login
+        assert f'<a class="btn btn--chip" href="{row.url}" target="_blank" rel="noopener" data-track="job_site">Job site ↗</a>' in page
 
     def test_json_ld_is_a_valid_job_posting(self, db, make_job):
         ld = _ld(self._page(db, make_job, salary_min=120000, salary_max=150000, posted_at=date(2026, 9, 30)))
@@ -892,7 +892,7 @@ class TestSharedChrome:
         assert "noreferrer" not in page
         assert 'src="https://yabot.jobs/jobs/_assets/analytics.js" async data-page-type="job"' in page
         assert "googletagmanager" not in page  # only in the shared script
-        assert 'data-track="save"' in page
+        assert 'data-track="job_site"' in page
 
     def test_gone_page_says_what_it_is(self):
         assert 'data-page-type="job_gone"' in sjp.render_job_gone(None)

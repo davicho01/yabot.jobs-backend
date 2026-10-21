@@ -60,11 +60,11 @@
           {% else %}
           <div class="job-cta__text">
             <strong>Apply with a resume that fits</strong>
-            <span>Sign in free to get the application link, save the job, or tailor your resume to it.</span>
+            <span>See the posting on the company's site, or sign in free to tailor your resume to it and apply.</span>
           </div>
           <div class="job-cta__buttons">
-            <a class="btn btn--chip" href="{{ base_url }}/jobs/{{ job.url_id }}" data-track="save">Save this job</a>
-            <a class="btn btn--sunset" href="{{ base_url }}/jobs/{{ job.url_id }}" data-track="apply">Apply on Yabot Jobs</a>
+            {% if job.job_url %}<a class="btn btn--chip" href="{{ job.job_url }}" target="_blank" rel="noopener" data-track="job_site">Job site ↗</a>{% endif %}
+            <a class="btn btn--sunset" href="{{ base_url }}/jobs/{{ job.url_id }}/apply" data-track="apply">Apply on Yabot Jobs</a>
           </div>
           {% endif %}
         </div>
