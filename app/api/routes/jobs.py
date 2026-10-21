@@ -30,6 +30,11 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 COUNT_AHEAD = 1000
 
 
+def _is_own_site(host: str | None) -> bool:
+    host = (host or "").lower().rstrip(".")
+    return host == "yabot.jobs" or host.endswith(".yabot.jobs")
+
+
 @router.post(
     "",
     response_model=JobDetailRead,
@@ -42,6 +47,13 @@ def submit_job_url(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> JobDetailRead:
+    # A link to one of our own job pages isn't a posting to scan — ask for
+    # the employer's original URL instead.
+    if _is_own_site(payload.url.host):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That's a yabot.jobs link — please submit the employer's original job posting URL instead.",
+        )
     try:
         posting, url_row = get_or_create_job_posting(db, str(payload.url), current_user.id)
     except RateLimitExceeded as exc:
