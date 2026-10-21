@@ -181,7 +181,7 @@ class TestRendering:
         assert f'<link rel="canonical" href="https://yabot.jobs/job/{row.id}" />' in page
         assert f'href="https://yabot.jobs/jobs/{row.id}/apply" data-track="apply">Apply on Yabot Jobs</a>' in page
         assert "<strong>things</strong>" in page
-        assert f'<a class="btn btn--chip" href="{row.url}" target="_blank" rel="noopener" data-track="job_site">Job site ↗</a>' in page
+        assert f'<a class="job-apply" href="{row.url}" target="_blank" rel="noopener" data-track="job_site">Apply ↗</a>' in page
 
     def test_json_ld_is_a_valid_job_posting(self, db, make_job):
         ld = _ld(self._page(db, make_job, salary_min=120000, salary_max=150000, posted_at=date(2026, 9, 30)))
@@ -328,7 +328,7 @@ class TestGenerate:
         assert _path(store, row.id) == path
         assert "noindex" not in page and "Build <strong>things</strong>." in page
         assert f'<div class="job-dates__closed"><dt>Closed</dt><dd>{NOW:%B %-d, %Y}</dd></div>' in page
-        assert "Apply on Yabot Jobs" not in page
+        assert "Apply on Yabot Jobs" not in page and 'class="job-apply"' not in page
         assert _ld(page)["validThrough"] == NOW.date().isoformat()
         assert str(row.id).encode() in store.get("sitemap-job-pages-1.xml")
         assert f"/{path}" in result.touched_paths
