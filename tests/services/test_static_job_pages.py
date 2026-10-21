@@ -179,9 +179,9 @@ class TestRendering:
         page = sjp.render_job_page(sjp.load_job_pages(db, [str(row.id)])[str(row.id)])
         assert "<h1>Software Engineer</h1>" in page
         assert f'<link rel="canonical" href="https://yabot.jobs/job/{row.id}" />' in page
-        assert f'href="https://yabot.jobs/jobs/{row.id}" data-track="apply">Apply on Yabot Jobs</a>' in page
+        assert f'href="https://yabot.jobs/jobs/{row.id}/apply" data-track="apply">Apply on Yabot Jobs</a>' in page
         assert "<strong>things</strong>" in page
-        assert "https://example.com/jobs/" not in page  # the apply URL stays behind login
+        assert f'<a class="job-apply" href="{row.url}" target="_blank" rel="noopener" data-track="job_site">Apply ↗</a>' in page
 
     def test_json_ld_is_a_valid_job_posting(self, db, make_job):
         ld = _ld(self._page(db, make_job, salary_min=120000, salary_max=150000, posted_at=date(2026, 9, 30)))
@@ -328,7 +328,7 @@ class TestGenerate:
         assert _path(store, row.id) == path
         assert "noindex" not in page and "Build <strong>things</strong>." in page
         assert f'<div class="job-dates__closed"><dt>Closed</dt><dd>{NOW:%B %-d, %Y}</dd></div>' in page
-        assert "Apply on Yabot Jobs" not in page
+        assert "Apply on Yabot Jobs" not in page and 'class="job-apply"' not in page
         assert _ld(page)["validThrough"] == NOW.date().isoformat()
         assert str(row.id).encode() in store.get("sitemap-job-pages-1.xml")
         assert f"/{path}" in result.touched_paths
@@ -658,6 +658,14 @@ class TestContent:
         assert '<h2 id="glance-h" class="sr">Job at a glance</h2>' in page and '<h2 id="about-h">About the job</h2>' in page
         assert '<div class="job-facts__pay"><dt class="sr">Pay</dt><dd>$100,000 – $120,000</dd></div>' in page
 
+    def test_posted_says_not_listed_without_an_employer_date(self, db, make_job):
+        found = datetime(2026, 10, 19, 14, 0, tzinfo=timezone.utc)
+        page = self._page(db, make_job, posted_at=None, first_scanned_at=found)
+        assert '<div class="job-dates__missing"><dt>Posted</dt><dd>Not listed</dd></div>' in page
+        assert _ld(page)["datePosted"]  # Google still gets the day it was found
+        dated = self._page(db, make_job, posted_at=date(2026, 10, 18))
+        assert "<div><dt>Posted</dt><dd>October 18, 2026</dd></div>" in dated
+
     def test_dates_are_eastern_days_not_utc_days(self, db, make_job):
         # 00:36 UTC on Oct 20 is still Oct 19 in Eastern time (EDT, UTC-4).
         evening = datetime(2026, 10, 20, 0, 36, tzinfo=timezone.utc)
@@ -892,7 +900,7 @@ class TestSharedChrome:
         assert "noreferrer" not in page
         assert 'src="https://yabot.jobs/jobs/_assets/analytics.js" async data-page-type="job"' in page
         assert "googletagmanager" not in page  # only in the shared script
-        assert 'data-track="save"' in page
+        assert 'data-track="job_site"' in page
 
     def test_gone_page_says_what_it_is(self):
         assert 'data-page-type="job_gone"' in sjp.render_job_gone(None)

@@ -44,7 +44,7 @@ def _list(db, **kwargs):
     params = dict(
         q=None, location=None, metro=None, radius=25, company=None, posted_within_days=None,
         workplace_type=None, sector=None, salary_min=None, salary_max=None, page=1, page_size=2,
-        current_user=None, db=db,
+        db=db,
     )
     return list_job_urls(**{**params, **kwargs})
 

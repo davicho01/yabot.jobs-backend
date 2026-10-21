@@ -431,18 +431,6 @@ def test_to_job_detail_includes_the_url_by_default(scan_db):
     assert detail.posting.apply_url == posting.url.url
 
 
-def test_to_job_detail_strips_the_url_for_anonymous_callers(scan_db):
-    posting = _make_posting(scan_db)
-
-    detail = to_job_detail(posting.url, include_url=False)
-
-    assert detail.url.url is None
-    assert detail.posting.apply_url is None
-    # Everything else is untouched.
-    assert detail.posting.title == posting.title
-    assert detail.posting.company_name == posting.company_name
-
-
 def test_to_job_detail_hides_flag_fields_by_default(scan_db):
     posting = _make_posting(scan_db)
     flag_job_url(scan_db, posting.url, uuid.uuid4(), FlagReason.WRONG_DETAILS, "location is missing")
