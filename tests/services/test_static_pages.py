@@ -9,6 +9,7 @@ hitting the network.
 
 import itertools
 import json
+import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
@@ -459,6 +460,31 @@ class TestGenerateForDate:
         monkeypatch.setattr(sp, "invalidate_paths", _boom)
         result = sp.generate_for_date(db, date(2026, 9, 26), invalidate=False)
         assert "/jobs/us/engineering-tech/2026-09-26" in result.touched_paths
+
+
+    def test_a_job_without_a_published_page_waits_for_a_later_run(self, db, make_posting, monkeypatch):
+        published = make_posting(created_at=MIDDAY)
+        make_posting(created_at=MIDDAY)  # scanned after this run's job pages: no page yet
+        uploaded: dict[str, str] = {}
+        monkeypatch.setattr(sp, "read_manifest", lambda: {})
+        monkeypatch.setattr(sp, "upload_html", lambda key, html: uploaded.__setitem__(key, html))
+        monkeypatch.setattr(sp, "upload_xml", lambda key, xml: None)
+        monkeypatch.setattr(sp, "write_manifest", lambda manifest: None)
+        path = f"jobs/us/engineering-tech/2026-09-26/engineer-{published.id}"
+
+        result = sp.generate_for_date(
+            db, date(2026, 9, 26), invalidate=False, job_paths={str(published.id): path}
+        )
+
+        assert result.job_counts == {"us/engineering-tech": 1}
+        day = uploaded["jobs/us/engineering-tech/2026-09-26"]
+        assert f'href="https://yabot.jobs/{path}"' in day
+        assert not re.search(r'href="https://yabot\.jobs/jobs/[0-9a-f-]{36}"', day)  # no app links
+
+    def test_dry_run_counts_jobs_whether_or_not_they_have_pages(self, db, make_posting):
+        make_posting(created_at=MIDDAY)
+        result = sp.generate_for_date(db, date(2026, 9, 26), dry_run=True, job_paths={})
+        assert result.job_counts == {"us/engineering-tech": 1}
 
 
 class TestCollapseInvalidationPaths:

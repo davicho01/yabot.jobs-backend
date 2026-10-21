@@ -496,10 +496,15 @@ def generate_for_date(
             jobs = jobs_for_sector_day(db, country_iso2, sector, target_date)
             if job_paths is not None:
                 # Each job links to wherever its page was published
-                # (static_job_pages); one not published yet (over a run's
-                # render cap) links to the app's own page for it instead.
+                # (static_job_pages). One with no page yet (scanned after
+                # this run's job pages, or over its render cap) is left off
+                # until a later run publishes it: linking the app's page
+                # instead would stick if it was the day's last run. A dry
+                # run publishes nothing, so it keeps them all in its counts.
+                if not dry_run:
+                    jobs = [job for job in jobs if job.url_id in job_paths]
                 for job in jobs:
-                    job.path = job_paths.get(job.url_id) or f"jobs/{job.url_id}"
+                    job.path = job_paths.get(job.url_id)
             if not jobs:
                 continue
             sector_slug = SECTOR_SLUGS[sector]
