@@ -28,7 +28,8 @@
   .job-cta__text span { font-size: 0.88rem; color: var(--ink-soft); }
   .job-cta__buttons { display: flex; flex-wrap: wrap; gap: 0.5rem; }
   .job-facts { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0 0; }
-  .job-facts dd { margin: 0; padding: 0.3rem 0.75rem; border-radius: 999px; background: var(--chip); font-size: 0.82rem; font-weight: 600; }
+  /* One height for every pill, the pay pill's bigger type included (as on the job board). */
+  .job-facts dd { box-sizing: border-box; display: inline-flex; align-items: center; height: 1.8rem; margin: 0; padding: 0 0.75rem; line-height: 1.2; border-radius: 999px; background: var(--chip); font-size: 0.82rem; font-weight: 600; }
   .job-facts__pay dd { color: var(--pay-ink); background: color-mix(in srgb, var(--lime) 45%, transparent); font-weight: 500; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
   .job-dates { display: flex; flex-wrap: wrap; margin: 1rem 0 1.25rem; padding: 0.8rem 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
   .job-dates > div { flex: 1 1 0; min-width: 8rem; padding: 0 1rem; }
