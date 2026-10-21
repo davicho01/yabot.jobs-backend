@@ -25,6 +25,11 @@
   .job-dates__closed dt, .job-dates__closed dd { color: #d70015; }
   @media (prefers-color-scheme: dark) { .job-dates__closed dt, .job-dates__closed dd { color: #ff453a; } }
   @media (prefers-color-scheme: dark) { .job-facts__pay dd { background: color-mix(in srgb, var(--lime) 16%, transparent); } }
+  /* Job site stays a white pill in dark mode too, the light theme's colors. */
+  @media (prefers-color-scheme: dark) {
+    .job-cta .btn--chip { background: #ffffff; color: #0a0a0a; }
+    .job-cta .btn--chip:hover { color: #d1007c; }
+  }
   .job-desc { overflow-wrap: anywhere; }
   .job-desc h3 { font-size: 1.08rem; margin: 1.5rem 0 0.4rem; }
   .job-desc a { color: var(--focus); }
