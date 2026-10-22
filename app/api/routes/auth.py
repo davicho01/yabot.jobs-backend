@@ -5,7 +5,13 @@ from app.api.deps import get_current_user, get_db
 from app.core.config import settings
 from app.core.rate_limit import RateLimitExceeded
 from app.models.user import User
-from app.schemas.auth import AuthResponse, MagicLinkRequest, MagicLinkVerifyRequest, UserUpdate
+from app.schemas.auth import (
+    AuthResponse,
+    GoogleSignInRequest,
+    MagicLinkRequest,
+    MagicLinkVerifyRequest,
+    UserUpdate,
+)
 from app.schemas.user import UserRead
 from app.services import auth as auth_service
 from app.services.email import send_magic_link_email
@@ -48,6 +54,27 @@ def verify_magic_link(
 ) -> AuthResponse:
     try:
         user = auth_service.redeem_magic_link(db, payload.token)
+    except auth_service.AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    session_token = auth_service.create_session(
+        db, user, user_agent=request.headers.get("user-agent"), ip_address=request.client.host if request.client else None
+    )
+    _set_session_cookie(response, session_token)
+    return AuthResponse(user=UserRead.model_validate(user))
+
+
+@router.post("/google", response_model=AuthResponse)
+def sign_in_with_google(
+    payload: GoogleSignInRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> AuthResponse:
+    if not settings.google_client_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Google sign-in isn't enabled.")
+    try:
+        user = auth_service.sign_in_with_google(db, payload.credential)
     except auth_service.AuthError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

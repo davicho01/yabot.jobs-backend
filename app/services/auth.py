@@ -1,6 +1,8 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.oauth2 import id_token as google_id_token
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -96,10 +98,38 @@ def redeem_magic_link(db: Session, raw_token: str) -> User:
     user = db.get(User, link.user_id)
     if user is None:
         raise AuthError("Invalid or expired link.")
+    _mark_logged_in(user)
+    return user
+
+
+def sign_in_with_google(db: Session, credential: str) -> User:
+    """Verify a Google Identity Services ID token and return its user.
+
+    Identity is still the email: a Google sign-in for an address that
+    already has an account (e.g. from a magic link) lands in that same
+    account, via get_or_create_user. Safe only because Google has verified
+    the address, hence the email_verified check.
+    """
+    try:
+        claims = google_id_token.verify_oauth2_token(
+            credential, GoogleAuthRequest(), settings.google_client_id
+        )
+    except ValueError as exc:
+        raise AuthError("Google sign-in failed. Try again.") from exc
+    if not claims.get("email") or not claims.get("email_verified"):
+        raise AuthError("Your Google account's email isn't verified.")
+
+    user = get_or_create_user(db, claims["email"])
+    if not user.display_name and claims.get("name"):
+        user.display_name = claims["name"][:120]
+    _mark_logged_in(user)
+    return user
+
+
+def _mark_logged_in(user: User) -> None:
     if user.status == UserStatus.INVITED:
         user.status = UserStatus.ACTIVE
     user.last_login_at = datetime.now(timezone.utc)
-    return user
 
 
 def create_session(db: Session, user: User, user_agent: str | None, ip_address: str | None) -> str:

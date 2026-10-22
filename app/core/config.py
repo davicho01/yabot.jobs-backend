@@ -195,8 +195,15 @@ class Settings(BaseSettings):
     email_sender_access_key_id: str | None = None
     email_sender_secret_access_key: str | None = None
 
-    magic_link_ttl_minutes: int = 15
+    # 60 rather than 15: links expiring unread in slow inboxes / spam
+    # folders were a real share of sign-in drop-off (Oct 2026).
+    magic_link_ttl_minutes: int = 60
     session_ttl_days: int = 30
+
+    # OAuth client ID (web application type) for "Continue with Google"
+    # (POST /auth/google). Unset disables that endpoint; it's not a secret
+    # — the frontend embeds the same ID as VITE_GOOGLE_CLIENT_ID.
+    google_client_id: str = ""
 
     # Throttles against magic-link abuse (SES send cost, spam to one inbox,
     # one client cycling through many addresses) — see
