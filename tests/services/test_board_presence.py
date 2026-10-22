@@ -8,7 +8,7 @@ import crawl_worker
 from app.models import CrawlSource, JobPosting, JobPostingUrl
 from app.models.enums import ScanStatus
 from app.services import jobs as jobs_service
-from app.services.adapters.base import ScanResult
+from app.services.adapters.base import BoardListing, ScanResult
 from app.services.jobs import _apply_scan_result, build_job_search_statement, bulk_register_discovered_urls, record_board_presence
 
 URLS = [f"https://example.com/jobs/{i}" for i in range(3)]
@@ -104,8 +104,8 @@ def test_presence_is_scoped_to_its_own_source(scan_db, make_source, now):
     assert _rows(scan_db, b)[URLS[1]].closed_at is None
 
 
-def _crawl(monkeypatch, scan_db, source, urls, when):
-    monkeypatch.setattr(crawl_worker, "list_job_urls", lambda ats_type, board_url: urls)
+def _crawl(monkeypatch, scan_db, source, urls, when, complete=True):
+    monkeypatch.setattr(crawl_worker, "list_board", lambda ats_type, board_url: BoardListing(urls, complete=complete))
     monkeypatch.setattr(crawl_worker, "enqueue_source_scan", lambda source_id, lanes=1: None)
     real = jobs_service.record_board_presence
     monkeypatch.setattr(
@@ -136,6 +136,19 @@ def test_crawl_worker_skips_closing_when_coverage_is_low(monkeypatch, scan_db, m
     _crawl(monkeypatch, scan_db, source, URLS[:1], now + timedelta(hours=40))
 
     assert all(r.closed_at is None for r in _rows(scan_db, source).values())
+
+
+def test_crawl_worker_skips_closing_on_a_partial_listing(monkeypatch, scan_db, make_source, now):
+    # A recent-only (or capped) listing drops a job once it ages out, while
+    # the job is still open on the board: seen ones are stamped, none closed.
+    source = make_source()
+    _crawl(monkeypatch, scan_db, source, URLS, now, complete=False)
+    later = now + timedelta(hours=40)
+    _crawl(monkeypatch, scan_db, source, URLS[:1], later, complete=False)
+
+    rows = _rows(scan_db, source)
+    assert all(r.closed_at is None for r in rows.values())
+    assert rows[URLS[0]].last_seen_at.replace(tzinfo=None) == later.replace(tzinfo=None)
 
 
 def test_crawl_worker_skips_closing_on_an_empty_listing(monkeypatch, scan_db, make_source, now):
@@ -232,7 +245,7 @@ def test_recently_seen_rows_are_not_rewritten(scan_db, make_source, now):
 def test_a_presence_failure_does_not_fail_the_crawl(monkeypatch, scan_db, make_source, now):
     source = make_source()
     wakeups = []
-    monkeypatch.setattr(crawl_worker, "list_job_urls", lambda ats_type, board_url: URLS)
+    monkeypatch.setattr(crawl_worker, "list_board", lambda ats_type, board_url: BoardListing(URLS))
     monkeypatch.setattr(crawl_worker, "enqueue_source_scan", lambda source_id, lanes=1: wakeups.append(source_id))
 
     def broken(*a, **k):

@@ -1,5 +1,5 @@
 from app.services.adapters import ADAPTERS
-from app.services.adapters.base import AtsAdapter, limit_job_urls
+from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, AtsAdapter, BoardListing, limit_job_urls
 
 _ADAPTERS_BY_TYPE: dict[str, AtsAdapter] = {adapter.ats_type: adapter for adapter in ADAPTERS}
 _EMBEDDED_MATCH_ADAPTERS = [adapter for adapter in ADAPTERS if adapter.embedded_match is not None]
@@ -34,11 +34,12 @@ def board_key_for(ats_type: str, board_url: str) -> str | None:
     return key_fn(board_url) if key_fn else None
 
 
-def list_job_urls(ats_type: str, board_url: str) -> list[str]:
-    """Discovery only: return every current job-posting URL for a company's
-    board. Field extraction (title, salary, etc.) is left entirely to the
-    existing scan pipeline (app.services.job_scanner) once each URL is
-    submitted via get_or_create_job_posting — this just finds the URLs.
+def list_board(ats_type: str, board_url: str) -> BoardListing:
+    """Discovery only: every current job-posting URL for a company's board,
+    and whether that's the whole board (see BoardListing). Field extraction
+    (title, salary, etc.) is left entirely to the existing scan pipeline
+    (app.services.job_scanner) once each URL is submitted via
+    get_or_create_job_posting — this just finds the URLs.
 
     Takes the board's stored URL rather than a pre-extracted key — every
     platform's adapter (see app.services.adapters) knows how to re-derive
@@ -50,7 +51,18 @@ def list_job_urls(ats_type: str, board_url: str) -> list[str]:
     key = board_key_for(ats_type, board_url)
     if key is None:
         raise ValueError(f"board_url={board_url!r} doesn't look like a {ats_type} board")
-    return limit_job_urls(adapter.fetch_jobs(key))
+    fetched = adapter.fetch_jobs(key)
+    listing = fetched if isinstance(fetched, BoardListing) else BoardListing(fetched)
+    urls = limit_job_urls(listing.urls)
+    # A listing that reached the cap most likely had more past it — most
+    # adapters slice to the cap themselves, so this can't tell "exactly 500"
+    # from "cut off at 500", and errs on the side of closing nothing.
+    return BoardListing(urls, complete=listing.complete and len(urls) < DEFAULT_MAX_JOBS_PER_CRAWL)
+
+
+def list_job_urls(ats_type: str, board_url: str) -> list[str]:
+    """list_board's URLs alone, for callers that don't close anything."""
+    return list_board(ats_type, board_url).urls
 
 
 def board_url_for_key(ats_type: str, board_key: str, submitted_url: str) -> str:

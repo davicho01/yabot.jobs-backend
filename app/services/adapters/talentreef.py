@@ -10,6 +10,7 @@ from app.services.adapters.base import (
     RECENT_WINDOW_DAYS,
     TIMEOUT,
     AtsAdapter,
+    BoardListing,
     ExtractedJobFields,
     ScanResult,
     get_with_retry,
@@ -100,7 +101,7 @@ def _search(
     return response.json()
 
 
-def _fetch_jobs(host: str) -> list[str]:
+def _fetch_jobs(host: str) -> list[str] | BoardListing:
     homepage = get_with_retry(f"https://{host}", timeout=TIMEOUT, follow_redirects=True)
     homepage.raise_for_status()
     client_id = _client_id(homepage.text)
@@ -131,7 +132,8 @@ def _fetch_jobs(host: str) -> list[str]:
             if rel_url:
                 urls.append(f"https://{host}{rel_url}")
         from_ += len(batch)
-    return limit_job_urls(urls)
+    # Recent postings only, so never the whole board (see BoardListing).
+    return BoardListing(limit_job_urls(urls), complete=False)
 
 
 def _detect_embedded(url: str) -> str | None:

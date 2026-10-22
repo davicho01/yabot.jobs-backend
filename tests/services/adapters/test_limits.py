@@ -16,6 +16,29 @@ def test_every_adapter_is_capped_at_discovery_boundary(monkeypatch, adapter):
     assert ats_adapters.list_job_urls(adapter.ats_type, 'https://example.com') == urls[:500]
 
 
+def _listing(monkeypatch, fetched):
+    adapter = ADAPTERS[0]
+    bounded = replace(adapter, board_key=lambda _: 'board', fetch_jobs=lambda _: fetched)
+    monkeypatch.setitem(ats_adapters._ADAPTERS_BY_TYPE, adapter.ats_type, bounded)
+    return ats_adapters.list_board(adapter.ats_type, 'https://example.com')
+
+
+def test_a_listing_under_the_cap_is_the_whole_board(monkeypatch):
+    listing = _listing(monkeypatch, ['a', 'b'])
+    assert listing == base.BoardListing(['a', 'b'], complete=True)
+
+
+def test_a_listing_at_the_cap_may_be_cut_off(monkeypatch):
+    urls = [f'https://example.com/job/{i}' for i in range(510)]
+    assert _listing(monkeypatch, urls).complete is False
+    assert _listing(monkeypatch, urls[:500]).complete is False
+
+
+def test_an_adapters_partial_listing_stays_partial(monkeypatch):
+    listing = _listing(monkeypatch, base.BoardListing(['a'], complete=False))
+    assert listing == base.BoardListing(['a'], complete=False)
+
+
 def test_cap_reads_shared_setting_and_stops_consuming_after_unique_limit(monkeypatch):
     monkeypatch.setattr(base, 'DEFAULT_MAX_JOBS_PER_CRAWL', 2)
 

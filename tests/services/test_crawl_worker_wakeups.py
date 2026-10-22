@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import crawl_worker
 from app.models import JobPostingUrl
 from app.models.enums import ScanStatus
+from app.services.adapters.base import BoardListing
 
 
 def _run_crawl(monkeypatch, scan_db, source, urls):
@@ -26,7 +27,7 @@ def _run_crawl(monkeypatch, scan_db, source, urls):
         db.flush()
         return 0, len(raw_urls)
 
-    monkeypatch.setattr(crawl_worker, "list_job_urls", lambda ats_type, board_url: urls)
+    monkeypatch.setattr(crawl_worker, "list_board", lambda ats_type, board_url: BoardListing(urls))
     monkeypatch.setattr(crawl_worker, "bulk_register_discovered_urls", fake_bulk_register)
     monkeypatch.setattr(crawl_worker, "enqueue_source_scan", lambda source_id, lanes=1: wakeups.append((source_id, lanes)))
 
@@ -53,7 +54,7 @@ def test_crawl_with_nothing_to_scan_wakes_no_lanes(monkeypatch, scan_db, make_so
 
 def test_crawl_still_records_its_stats_when_waking_lanes_fails(monkeypatch, scan_db, make_source):
     source = make_source()
-    monkeypatch.setattr(crawl_worker, "list_job_urls", lambda ats_type, board_url: ["https://example.com/jobs/1"])
+    monkeypatch.setattr(crawl_worker, "list_board", lambda ats_type, board_url: BoardListing(["https://example.com/jobs/1"]))
 
     def fake_bulk_register(db, raw_urls, crawl_source_id):
         for url in raw_urls:
@@ -112,7 +113,7 @@ def test_crawl_clears_the_dispatch_claim_even_when_listing_jobs_fails(monkeypatc
     def broken(ats_type, board_url):
         raise RuntimeError("ATS API down")
 
-    monkeypatch.setattr(crawl_worker, "list_job_urls", broken)
+    monkeypatch.setattr(crawl_worker, "list_board", broken)
 
     crawl_worker._crawl_source(scan_db, source.id)  # must not raise
     scan_db.commit()
@@ -142,7 +143,7 @@ def test_failed_listing_keeps_the_interval(monkeypatch, scan_db, make_source):
     def broken(ats_type, board_url):
         raise RuntimeError("ATS API down")
 
-    monkeypatch.setattr(crawl_worker, "list_job_urls", broken)
+    monkeypatch.setattr(crawl_worker, "list_board", broken)
 
     crawl_worker._crawl_source(scan_db, source.id)
     scan_db.commit()

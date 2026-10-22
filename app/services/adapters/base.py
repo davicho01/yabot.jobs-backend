@@ -31,6 +31,20 @@ RECENT_WINDOW_DAYS = 7
 DEFAULT_MAX_JOBS_PER_CRAWL = 500
 
 
+@dataclass(frozen=True)
+class BoardListing:
+    """What one crawl saw of a board. complete=False when `urls` is knowingly
+    only part of it — the adapter kept just recent postings, or stopped at
+    DEFAULT_MAX_JOBS_PER_CRAWL — so a URL missing from it may still be open,
+    and record_board_presence must not close anything on its say-so.
+
+    An adapter's fetch_jobs may return a plain list[str] instead, meaning
+    "the whole board" (list_board still marks it incomplete at the cap)."""
+
+    urls: list[str]
+    complete: bool = True
+
+
 def posting_date(value: object) -> date | None:
     if isinstance(value, datetime):
         return value.astimezone(timezone.utc).date() if value.tzinfo else value.date()
@@ -247,7 +261,7 @@ class AtsAdapter:
     """
 
     ats_type: str
-    fetch_jobs: Callable[[str], list[str]] | None = None
+    fetch_jobs: Callable[[str], "list[str] | BoardListing"] | None = None
     match: Callable[[str], str | None] | None = None
     board_key: Callable[[str], str | None] | None = None
     to_board_url: Callable[[str], str] | None = None

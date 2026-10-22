@@ -11,6 +11,7 @@ from app.services.adapters.base import (
     RECENT_WINDOW_DAYS,
     TIMEOUT,
     AtsAdapter,
+    BoardListing,
     ExtractedJobFields,
     ScanResult,
     get_with_retry,
@@ -74,7 +75,7 @@ def _detect_embedded(url: str) -> str | None:
     return f"{host_match.group(1)}/{site_match.group(1)}"
 
 
-def _fetch_jobs(board_key: str) -> list[str]:
+def _fetch_jobs(board_key: str) -> BoardListing:
     # Free, public, unauthenticated REST API — the same one Oracle's own
     # candidate-experience UI calls client-side, no key required.
     # PostedDate is a per-job field (verified sortBy=POSTING_DATES_DESC
@@ -113,7 +114,8 @@ def _fetch_jobs(board_key: str) -> list[str]:
             break
         offset += _ORACLE_FUSION_PAGE_SIZE
 
-    return urls[:_ORACLE_FUSION_MAX_JOBS]
+    # Recent postings only, so never the whole board (see BoardListing).
+    return BoardListing(urls[:_ORACLE_FUSION_MAX_JOBS], complete=False)
 
 
 # Oracle Fusion's CandidateExperience job page is a client-rendered SPA:

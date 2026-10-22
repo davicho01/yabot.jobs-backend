@@ -10,6 +10,7 @@ from app.services.adapters.base import (
     RECENT_WINDOW_DAYS,
     TIMEOUT,
     AtsAdapter,
+    BoardListing,
     ExtractedJobFields,
     ScanResult,
     post_with_retry,
@@ -76,7 +77,7 @@ def _posted_age_days(posted_on: str | None) -> int | None:
     return int(days)
 
 
-def _fetch_jobs(board_key: str) -> list[str]:
+def _fetch_jobs(board_key: str) -> BoardListing:
     # Free, public, unauthenticated API — no key required.
     company, instance, site = board_key.split("/")
     jobs_url = _WORKDAY_JOBS_URL.format(company=company, instance=instance, site=site)
@@ -92,6 +93,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
     # _posted_age_days(None) is always None. Detected from the first page;
     # None means "not yet known."
     filter_by_recency: bool | None = None
+    reached_end = False
     # Bounds requests-per-crawl to _WORKDAY_MAX_JOBS / _WORKDAY_PAGE_SIZE
     # regardless of tenant size or behavior — see below for why this counts
     # postings *scanned* (offset), not URLs collected.
@@ -105,6 +107,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
         response.raise_for_status()
         postings = response.json().get("jobPostings", [])
         if not postings:
+            reached_end = True
             break
 
         if filter_by_recency is None:
@@ -142,10 +145,13 @@ def _fetch_jobs(board_key: str) -> list[str]:
                 job_base_url + posting["externalPath"] for posting in postings if posting.get("externalPath")
             )
         if len(postings) < _WORKDAY_PAGE_SIZE:
+            reached_end = True
             break  # last page
         offset += _WORKDAY_PAGE_SIZE
 
-    return urls
+    # The whole board only when every posting was kept (no recency filter)
+    # and paging ran to the end rather than into _WORKDAY_MAX_JOBS.
+    return BoardListing(urls, complete=reached_end and not filter_by_recency)
 
 
 def _detect_embedded(url: str) -> str | None:

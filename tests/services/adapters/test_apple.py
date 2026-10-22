@@ -36,7 +36,7 @@ def test_fetch_jobs_keeps_postings_within_window_and_stops_at_boundary(monkeypat
         return FakeResponse(text=_hydration_page(postings))
 
     monkeypatch.setattr(apple, "get_with_retry", fake_get)
-    urls = apple._fetch_jobs("apple")
+    urls = apple._fetch_jobs("apple").urls
     assert urls == [
         apple._APPLE_JOB_URL.format(position_id="1", slug="role-1"),
         apple._APPLE_JOB_URL.format(position_id="2", slug="role-2"),

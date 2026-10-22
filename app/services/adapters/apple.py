@@ -12,6 +12,7 @@ from app.services.adapters.base import (
     RECENT_WINDOW_DAYS,
     TIMEOUT,
     AtsAdapter,
+    BoardListing,
     ExtractedJobFields,
     ScanResult,
     get_with_retry,
@@ -32,7 +33,7 @@ def _match(url: str) -> str | None:
     return "apple" if _APPLE_URL_RE.search(url) else None
 
 
-def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company board, fixed key, no key needed
+def _fetch_jobs(board_key: str) -> BoardListing:  # noqa: ARG001 - single-company board, fixed key, no key needed
     # No public API — the search page server-renders full job data into a
     # `window.__staticRouterHydrationData = JSON.parse("...")` blob (a React
     # Router hydration payload): a double-escaped JSON string, more fragile
@@ -75,7 +76,8 @@ def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company b
             break
         page += 1
 
-    return urls[:_APPLE_MAX_JOBS]
+    # Recent postings only, so never the whole board (see BoardListing).
+    return BoardListing(urls[:_APPLE_MAX_JOBS], complete=False)
 
 
 # jobs.apple.com is a client-rendered SPA, but the initial HTML still
