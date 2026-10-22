@@ -87,7 +87,7 @@ logger = logging.getLogger("app.static_job_pages")
 
 # Which rendering a page came from. Informational: bumping it re-renders
 # nothing by itself (run the backfill job, --full, for that).
-PAGE_VERSION = 5
+PAGE_VERSION = 6
 MANIFEST_KEY = "_meta/job-pages.json"
 SITEMAP_INDEX_KEY = "sitemap-job-pages.xml"
 SITEMAP_SHARD_SIZE = 45_000  # under the sitemap protocol's 50,000-URL cap
@@ -848,6 +848,16 @@ def _closed_date(job: JobPage) -> str | None:
 NOT_LISTED = "Not listed"
 
 
+_SHORT_DATE = "%b %-d, %Y"
+
+
+def _first_found_time(job: JobPage) -> str | None:
+    """First found's time, under its date in grey as on the job board. A
+    static page can't know its visitor's zone (the SPA shows their local
+    time), so the time says it's Eastern."""
+    return eastern(job.first_scanned_at).strftime("%-I:%M %p ET") if job.first_scanned_at else None
+
+
 def _glance(job: JobPage) -> list[tuple[str, str]]:
     rows = [
         ("Company", job.company_display),
@@ -858,12 +868,12 @@ def _glance(job: JobPage) -> list[tuple[str, str]]:
         ("Sector", (_sector_link(job.sector) or (None, None))[1]),
         # The employer's own date, or "Not listed" (the JSON-LD's datePosted
         # still falls back to the day it was found; Google needs one).
-        ("Posted", job.posted_at.strftime("%B %-d, %Y") if job.posted_at else NOT_LISTED),
-        # A static page can't know its visitor's zone (the SPA shows their
-        # local time), so the time says it's Eastern.
-        ("First found", eastern(job.first_scanned_at).strftime("%B %-d, %Y, %-I:%M %p ET") if job.first_scanned_at else None),
-        ("Apply by", job.expires.strftime("%B %-d, %Y") if _parse_date(job.valid_through) and not job.closed_at else None),
-        ("Closed", _closed_date(job)),
+        # Short months, as on the job board's dates strip.
+        ("Posted", job.posted_at.strftime(_SHORT_DATE) if job.posted_at else NOT_LISTED),
+        # The time goes on its own line under this (_first_found_time).
+        ("First found", eastern(job.first_scanned_at).strftime(_SHORT_DATE) if job.first_scanned_at else None),
+        ("Apply by", job.expires.strftime(_SHORT_DATE) if _parse_date(job.valid_through) and not job.closed_at else None),
+        ("Closed", eastern(job.closed_at).strftime(_SHORT_DATE) if job.closed_at else None),
     ]
     return [(label, value) for label, value in rows if value]
 
@@ -891,6 +901,7 @@ def render_job_page(job: JobPage, path: str | None = None, links: PageLinks | No
         meta_description=meta_description(job),
         lead=_lead(job),
         glance=_glance(job),
+        first_found_time=_first_found_time(job),
         closed_date=_closed_date(job),
         description_html=description_html,
         job_ld_json=ld_json([_job_ld(job, description_html, page_url), breadcrumb_ld(trail, page_url)]),
