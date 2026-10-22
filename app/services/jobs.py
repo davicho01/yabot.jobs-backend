@@ -3,6 +3,7 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Iterable
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import Date, DateTime, and_, case, false, func, or_, select, true, update
@@ -387,6 +388,13 @@ def get_or_create_job_posting(
         # Backfill for a URL row that predates eager posting creation.
         posting = _create_pending_posting(db, url_row)
         db.flush()
+    elif url_row.scan_status == ScanStatus.SKIPPED and submitted_by_user_id is not None:
+        # An uncapped crawl recorded it without scanning (too old to import);
+        # someone asking for it is reason enough to scan it after all.
+        url_row.scan_status = posting.extraction_status = ScanStatus.PENDING
+        db.commit()
+        if enqueue:
+            enqueue_scan(url_row.id)
     return posting, url_row
 
 
@@ -444,8 +452,8 @@ def record_board_presence(
     """
     now = now or datetime.now(timezone.utc)
     parsed, _ = _parse_discovered_urls(raw_urls)
-    if parsed:
-        listed = (JobPostingUrl.crawl_source_id == crawl_source_id, JobPostingUrl.url_hash.in_(parsed.keys()))
+    for chunk in _chunks(list(parsed)):
+        listed = (JobPostingUrl.crawl_source_id == crawl_source_id, JobPostingUrl.url_hash.in_(chunk))
         # Only rows not stamped recently: a re-delivered or back-to-back
         # crawl then rewrites almost nothing, instead of every row on the
         # board each time (dead tuples and vacuum work on a small instance).
@@ -500,7 +508,40 @@ def record_board_presence(
     return result.rowcount or 0
 
 
-def bulk_register_discovered_urls(db: Session, raw_urls: list[str], crawl_source_id: uuid.UUID) -> tuple[int, int]:
+# An uncapped crawl (CrawlSource.uncapped) scans only postings this recent;
+# older ones it records as SKIPPED.
+UNCAPPED_IMPORT_WINDOW_DAYS = 14
+# Hashes per IN (...) list: an uncapped board can list tens of thousands of
+# URLs, past what one statement's bind parameters allow (65,535 in Postgres).
+_IN_CHUNK = 10_000
+
+
+def _chunks(items: list[str]) -> Iterable[list[str]]:
+    for i in range(0, len(items), _IN_CHUNK):
+        yield items[i : i + _IN_CHUNK]
+
+
+def _skip_new_url(raw_url: str, posted: dict[str, date], baseline: bool, today: date) -> bool:
+    """An uncapped crawl's import rule for a URL it hasn't seen before: scan
+    it if it was posted within UNCAPPED_IMPORT_WINDOW_DAYS, or — with no
+    posted date in the listing — if the board's baseline is already set, so
+    it's genuinely new since then. Everything else is old, and skipped."""
+    day = posted.get(raw_url)
+    if day is not None:
+        return day < today - timedelta(days=UNCAPPED_IMPORT_WINDOW_DAYS)
+    return not baseline
+
+
+def bulk_register_discovered_urls(
+    db: Session,
+    raw_urls: list[str],
+    crawl_source_id: uuid.UUID,
+    *,
+    uncapped: bool = False,
+    posted: dict[str, date] | None = None,
+    baseline: bool = False,
+    now: datetime | None = None,
+) -> tuple[int, int]:
     """Crawl-worker version of get_or_create_job_posting for a whole board at
     once: registers every URL a crawl discovered with a small, fixed number
     of round-trips instead of one SELECT+INSERT+COMMIT per URL.
@@ -532,21 +573,28 @@ def bulk_register_discovered_urls(db: Session, raw_urls: list[str], crawl_source
     would need its own, separate test setup for no real benefit over
     letting this one rare case fall back to a whole-batch retry.
 
+    uncapped: the crawl listed the whole board (CrawlSource.uncapped), so a
+    new URL is scanned only per _skip_new_url — by `posted` (raw URL ->
+    posted date, from the listing) or, without one, only once `baseline` is
+    set — and recorded SKIPPED otherwise.
+
     Returns (failed, created): how many URLs failed to normalize/hash, for
-    the caller's last_error reporting, and how many were genuinely new, for
-    the source's adaptive crawl schedule (see app.services.crawl_schedule).
+    the caller's last_error reporting, and how many were genuinely new (and
+    queued to scan), for the source's adaptive crawl schedule (see
+    app.services.crawl_schedule).
     """
     parsed, failed = _parse_discovered_urls(raw_urls)
     if not parsed:
         return failed, 0
 
-    existing_hashes = set(
-        db.scalars(select(JobPostingUrl.url_hash).where(JobPostingUrl.url_hash.in_(parsed.keys())))
-    )
+    existing_hashes: set[str] = set()
+    for chunk in _chunks(list(parsed)):
+        existing_hashes.update(db.scalars(select(JobPostingUrl.url_hash).where(JobPostingUrl.url_hash.in_(chunk))))
     new_items = {h: v for h, v in parsed.items() if h not in existing_hashes}
     if not new_items:
         return failed, 0
 
+    today = (now or datetime.now(timezone.utc)).date()
     new_url_rows = [
         JobPostingUrl(
             url=raw_url,
@@ -554,14 +602,19 @@ def bulk_register_discovered_urls(db: Session, raw_urls: list[str], crawl_source
             url_hash=hashed,
             domain=domain_of(normalized),
             crawl_source_id=crawl_source_id,
+            scan_status=(
+                ScanStatus.SKIPPED
+                if uncapped and _skip_new_url(raw_url, posted or {}, baseline, today)
+                else ScanStatus.PENDING
+            ),
         )
         for hashed, (raw_url, normalized) in new_items.items()
     ]
     db.add_all(new_url_rows)
     db.flush()  # assigns each row's id
-    db.add_all(JobPosting(url_id=row.id, extraction_status=ScanStatus.PENDING) for row in new_url_rows)
+    db.add_all(JobPosting(url_id=row.id, extraction_status=row.scan_status) for row in new_url_rows)
     db.flush()
-    return failed, len(new_url_rows)
+    return failed, sum(row.scan_status == ScanStatus.PENDING for row in new_url_rows)
 
 
 def _enforce_submission_rate_limit(db: Session, user_id: uuid.UUID, now: datetime | None = None) -> None:

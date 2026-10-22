@@ -4,7 +4,7 @@ from typing import Any
 import httpx
 
 from app.models.enums import AtsType, EmploymentType
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, ScanResult, get_with_retry
+from app.services.adapters.base import TIMEOUT, AtsAdapter, ScanResult, get_with_retry, max_jobs_per_crawl
 from app.services.adapters.text import clean_text
 
 # Toss's own public API mirrors a Greenhouse-backed job board server-side
@@ -18,7 +18,6 @@ from app.services.adapters.text import clean_text
 # we need directly, so there's no board key to resolve at all.
 _TOSS_JOB_GROUPS_URL = "https://api-public.toss.im/api/v3/ipd-eggnog/career/job-groups"
 _TOSS_URL_RE = re.compile(r"toss\.im", re.IGNORECASE)
-_TOSS_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _JOB_ID_RE = re.compile(r"gh_jid=(\d+)")
 
 # Toss Corp ("토스커뮤니티") operates several subsidiaries under this one
@@ -60,7 +59,7 @@ def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company b
         for group in groups
         if (url := (group.get("primary_job") or {}).get("absolute_url"))
     ]
-    return urls[:_TOSS_MAX_JOBS]
+    return urls[:max_jobs_per_crawl()]
 
 
 # Metadata field *names* are the custom Greenhouse question text an admin

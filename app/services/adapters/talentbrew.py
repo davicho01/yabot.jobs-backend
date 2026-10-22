@@ -7,12 +7,11 @@ import httpx
 
 from app.models.enums import AtsType
 from app.services.adapters import base
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, ScanResult, get_with_retry
+from app.services.adapters.base import TIMEOUT, AtsAdapter, ScanResult, get_with_retry, max_jobs_per_crawl
 from app.services.adapters.text import clean_text, extract_balanced_div, html_to_formatted_text
 
 _TALENTBREW_SIGNATURE = "tbcdn.talentbrew.com"
 _TALENTBREW_RECORDS_PER_PAGE = 15
-_TALENTBREW_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 # Some tenants' job hrefs carry a locale prefix (Walgreens: "/en/job/..."),
 # others don't (Ford: "/job/..." bare) — verified live across five tenants,
 # accept either.
@@ -80,7 +79,7 @@ def _fetch_jobs(host: str) -> list[str]:
     # endpoint is only a fallback, and only where robots.txt permits it.
     urls = _sitemap_job_urls(host)
     if urls or not _search_allowed(host):
-        return urls[:_TALENTBREW_MAX_JOBS]
+        return urls[:max_jobs_per_crawl()]
     return _search_job_urls(host)
 
 
@@ -113,7 +112,7 @@ def _search_allowed(host: str) -> bool:
 def _search_job_urls(host: str) -> list[str]:
     urls: list[str] = []
     page = 1
-    while len(urls) < _TALENTBREW_MAX_JOBS:
+    while len(urls) < max_jobs_per_crawl():
         response = get_with_retry(
             f"https://{host}/search-jobs/results",
             params={**_TALENTBREW_RESULTS_PARAMS, "CurrentPage": str(page)},
@@ -126,7 +125,7 @@ def _search_job_urls(host: str) -> list[str]:
         if len(hrefs) < _TALENTBREW_RECORDS_PER_PAGE:
             break
         page += 1
-    return urls[:_TALENTBREW_MAX_JOBS]
+    return urls[:max_jobs_per_crawl()]
 
 
 def _detect_embedded(url: str) -> str | None:

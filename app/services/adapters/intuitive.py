@@ -2,7 +2,7 @@ import re
 from xml.etree import ElementTree
 
 from app.models.enums import AtsType
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry, limit_job_urls
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry, limit_job_urls, max_jobs_per_crawl
 
 _INTUITIVE_URL_RE = re.compile(r"careers\.intuitive\.com", re.IGNORECASE)
 _INTUITIVE_SITEMAP_URL = "https://careers.intuitive.com/sitemap.xml"
@@ -30,7 +30,7 @@ def _fetch_jobs(_board_key: str) -> list[str]:
     root = ElementTree.fromstring(response.content)
     ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
     urls = (loc.text for loc in root.findall(".//sm:loc", ns) if loc.text and _EN_JOB_URL_RE.match(loc.text))
-    return limit_job_urls(urls)[:DEFAULT_MAX_JOBS_PER_CRAWL]
+    return limit_job_urls(urls)[:max_jobs_per_crawl()]
 
 
 # No scan_job_url: every job page publishes a complete schema.org JobPosting

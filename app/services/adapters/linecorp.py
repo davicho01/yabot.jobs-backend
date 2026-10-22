@@ -6,12 +6,12 @@ import httpx
 
 from app.models.enums import AtsType, EmploymentType
 from app.services.adapters.base import (
-    DEFAULT_MAX_JOBS_PER_CRAWL,
     EMPLOYMENT_TYPE_MAP,
     TIMEOUT,
     AtsAdapter,
     ScanResult,
     get_with_retry,
+    max_jobs_per_crawl,
 )
 from app.services.adapters.text import clean_text, html_to_formatted_text
 
@@ -29,7 +29,6 @@ _LINE_JOB_URL = "https://careers.linecorp.com/jobs/{job_id}/"
 _LINE_URL_RE = re.compile(r"careers\.linecorp\.com", re.IGNORECASE)
 # Job id extraction, only meaningful against an actual job URL.
 _LINE_JOB_ID_RE = re.compile(r"careers\.linecorp\.com/jobs/(\d+)", re.IGNORECASE)
-_LINE_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 
 
 def _match(url: str) -> str | None:
@@ -48,7 +47,7 @@ def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company b
         for edge in edges
         if (node := edge["node"]).get("publish") and node.get("strapiId")
     ]
-    return urls[:_LINE_MAX_JOBS]
+    return urls[:max_jobs_per_crawl()]
 
 
 def _posted_at_of(job: dict[str, Any]) -> date | None:

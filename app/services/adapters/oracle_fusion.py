@@ -7,22 +7,23 @@ import httpx
 from app.models.enums import AtsType, EmploymentType, WorkplaceType
 from app.services.adapters import base
 from app.services.adapters.base import (
-    DEFAULT_MAX_JOBS_PER_CRAWL,
     RECENT_WINDOW_DAYS,
     TIMEOUT,
     AtsAdapter,
     BoardListing,
     ExtractedJobFields,
     ScanResult,
+    crawling_uncapped,
     get_with_retry,
     is_recent_posting,
+    max_jobs_per_crawl,
+    posting_date,
 )
 from app.services.adapters.text import MAX_LOCATION_LENGTH, html_to_formatted_text
 
 _ORACLE_FUSION_JOBS_URL = "https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
 _ORACLE_FUSION_JOB_URL = "https://{host}/hcmUI/CandidateExperience/en/sites/{site_number}/job/{job_id}"
 _ORACLE_FUSION_PAGE_SIZE = 25
-_ORACLE_FUSION_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 # Oracle Fusion's two-part board_key (tenant host, site number) both live in
 # the path, so .search() rather than a full match recovers both straight out
 # of a full job-posting URL (.../sites/{site}/job/{id}) as readily as a bare
@@ -83,9 +84,13 @@ def _fetch_jobs(board_key: str) -> BoardListing:
     # early-exit as Workday/Amazon/Apple.
     host, _, site_number = board_key.partition("/")
 
+    # Uncapped, it pages through every requisition instead, dating each.
+    uncapped = crawling_uncapped()
     urls: list[str] = []
+    posted: dict[str, date] = {}
     offset = 0
-    while len(urls) < _ORACLE_FUSION_MAX_JOBS:
+    reached_end = False
+    while len(urls) < max_jobs_per_crawl():
         response = get_with_retry(
             _ORACLE_FUSION_JOBS_URL.format(host=host),
             params={
@@ -102,20 +107,24 @@ def _fetch_jobs(board_key: str) -> BoardListing:
         items = response.json().get("items", [])
         requisitions = items[0].get("requisitionList", []) if items else []
         if not requisitions:
+            reached_end = True
             break
 
         recent = [r for r in requisitions if is_recent_posting(r.get("PostedDate"))]
-        urls.extend(
-            _ORACLE_FUSION_JOB_URL.format(host=host, site_number=site_number, job_id=r["Id"])
-            for r in recent
-            if r.get("Id")
-        )
-        if len(recent) < len(requisitions) or len(requisitions) < _ORACLE_FUSION_PAGE_SIZE:
+        for r in requisitions if uncapped else recent:
+            if r.get("Id"):
+                urls.append(_ORACLE_FUSION_JOB_URL.format(host=host, site_number=site_number, job_id=r["Id"]))
+                if (day := posting_date(r.get("PostedDate"))) is not None:
+                    posted[urls[-1]] = day
+        if len(requisitions) < _ORACLE_FUSION_PAGE_SIZE:
+            reached_end = True
+            break
+        if not uncapped and len(recent) < len(requisitions):
             break
         offset += _ORACLE_FUSION_PAGE_SIZE
 
-    # Recent postings only, so never the whole board (see BoardListing).
-    return BoardListing(urls[:_ORACLE_FUSION_MAX_JOBS], complete=False)
+    # Capped, recent postings only, so never the whole board (see BoardListing).
+    return BoardListing(urls[:max_jobs_per_crawl()], complete=uncapped and reached_end, posted=posted)
 
 
 # Oracle Fusion's CandidateExperience job page is a client-rendered SPA:

@@ -1,7 +1,7 @@
 import re
 
 from app.models.enums import AtsType
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry, limit_job_urls
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry, limit_job_urls, max_jobs_per_crawl
 
 # Motion Recruitment's own site (motionrecruitment.com), not a multi-tenant
 # platform other companies point at — same single-company shape as
@@ -30,7 +30,7 @@ def _match(url: str) -> str | None:
 def _fetch_jobs(_board_key: str) -> list[str]:  # noqa: ARG001 - single-company board, fixed key, no key needed
     urls: list[str] = []
     start = 0
-    while len(urls) < DEFAULT_MAX_JOBS_PER_CRAWL:
+    while len(urls) < max_jobs_per_crawl():
         response = get_with_retry(_LISTING_URL, params={"start": start, "count": _PAGE_SIZE}, timeout=TIMEOUT)
         response.raise_for_status()
         page_urls = _JOB_URL_RE.findall(response.text)

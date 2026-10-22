@@ -82,6 +82,12 @@ class ScanStatus(StrEnum):
     # admin dashboard. Only a deliberate rescan (which resets the attempt count)
     # gets a row out of this state.
     NEEDS_REVIEW = "needs_review"
+    # Listed on an uncapped board but never scanned: posted too long ago, or
+    # already there when the board was first crawled uncapped (see
+    # bulk_register_discovered_urls). Recorded so its presence is tracked
+    # and it isn't taken for new on the next crawl; a user submitting the
+    # URL queues a real scan (get_or_create_job_posting).
+    SKIPPED = "skipped"
 
 
 class AtsType(StrEnum):

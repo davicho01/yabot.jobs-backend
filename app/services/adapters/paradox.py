@@ -5,9 +5,8 @@ from xml.etree import ElementTree
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry, max_jobs_per_crawl
 
-_PARADOX_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _PARADOX_SIGNATURE = "paradox.ai"
 _JOB_HREF_RE = re.compile(r'href="(/[^"]+/job/[^"]+)"')
 _SITEMAP_NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
@@ -37,7 +36,7 @@ def _fetch_jobs(host: str) -> list[str]:
     # clinch.py, no recency filtering, just the shared cap.
     urls: list[str] = []
     page = 1
-    while len(urls) < _PARADOX_MAX_JOBS:
+    while len(urls) < max_jobs_per_crawl():
         response = get_with_retry(f"https://{host}/jobs/page/{page}", timeout=TIMEOUT)
         response.raise_for_status()
         paths = dict.fromkeys(_JOB_HREF_RE.findall(response.text))
@@ -47,7 +46,7 @@ def _fetch_jobs(host: str) -> list[str]:
         page += 1
     if not urls:
         urls = _sitemap_job_urls(host)
-    return urls[:_PARADOX_MAX_JOBS]
+    return urls[:max_jobs_per_crawl()]
 
 
 def _sitemap_job_urls(host: str) -> list[str]:

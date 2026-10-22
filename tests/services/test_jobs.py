@@ -214,6 +214,62 @@ def test_bulk_register_discovered_urls_dedupes_repeats_within_the_same_batch(sca
     assert scan_db.scalar(select(func.count()).select_from(m.JobPostingUrl)) == 1
 
 
+def _statuses(scan_db) -> dict[str, str]:
+    return {row.url: row.scan_status for row in scan_db.scalars(select(m.JobPostingUrl))}
+
+
+def test_uncapped_import_scans_recent_postings_and_skips_old_ones(scan_db, make_source, now):
+    source = make_source()
+    fresh, stale = "https://example.com/jobs/fresh", "https://example.com/jobs/stale"
+    posted = {fresh: (now - timedelta(days=3)).date(), stale: (now - timedelta(days=40)).date()}
+
+    failed, created = bulk_register_discovered_urls(scan_db, [fresh, stale], source.id, uncapped=True, posted=posted, now=now)
+
+    assert (failed, created) == (0, 1)
+    assert _statuses(scan_db) == {fresh: ScanStatus.PENDING, stale: ScanStatus.SKIPPED}
+    postings = {p.url_id: p.extraction_status for p in scan_db.scalars(select(m.JobPosting))}
+    assert sorted(postings.values()) == [ScanStatus.PENDING, ScanStatus.SKIPPED]
+
+
+def test_uncapped_import_without_dates_skips_until_the_baseline_is_set(scan_db, make_source, now):
+    source = make_source()
+    first, later = "https://example.com/jobs/on-the-board", "https://example.com/jobs/new-since"
+
+    bulk_register_discovered_urls(scan_db, [first], source.id, uncapped=True, baseline=False, now=now)
+    _, created = bulk_register_discovered_urls(scan_db, [first, later], source.id, uncapped=True, baseline=True, now=now)
+
+    assert created == 1
+    assert _statuses(scan_db) == {first: ScanStatus.SKIPPED, later: ScanStatus.PENDING}
+
+
+def test_capped_import_scans_every_new_url_regardless_of_dates(scan_db, make_source, now):
+    source = make_source()
+    stale = "https://example.com/jobs/stale"
+
+    _, created = bulk_register_discovered_urls(
+        scan_db, [stale], source.id, posted={stale: (now - timedelta(days=40)).date()}, now=now
+    )
+
+    assert created == 1
+    assert _statuses(scan_db) == {stale: ScanStatus.PENDING}
+
+
+def test_submitting_a_skipped_url_queues_its_scan(scan_db, make_source, now, monkeypatch):
+    from app.services import jobs as jobs_service
+
+    queued = []
+    monkeypatch.setattr(jobs_service, "enqueue_scan", queued.append)
+    source = make_source()
+    stale = "https://example.com/jobs/stale"
+    bulk_register_discovered_urls(scan_db, [stale], source.id, uncapped=True, now=now)
+    scan_db.commit()
+
+    posting, url_row = get_or_create_job_posting(scan_db, stale, uuid.uuid4(), now=now)
+
+    assert url_row.scan_status == posting.extraction_status == ScanStatus.PENDING
+    assert queued == [url_row.id]
+
+
 def test_bulk_register_discovered_urls_counts_unparseable_urls_without_aborting_the_batch(scan_db, make_source):
     source = make_source()
 

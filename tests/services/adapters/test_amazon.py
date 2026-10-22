@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from app.services.adapters import amazon
-from app.services.adapters.base import RECENT_WINDOW_DAYS
+from app.services.adapters.base import RECENT_WINDOW_DAYS, uncapped_crawl
 from tests.conftest import FakeResponse
 
 
@@ -49,6 +49,19 @@ def test_fetch_jobs_stops_after_500_recent_jobs(monkeypatch):
     assert len(urls) == 500
     assert len(set(urls)) == 500
     assert calls == [0, 100, 200, 300, 400]
+
+
+def test_uncapped_fetch_jobs_lists_old_postings_too_with_their_dates(monkeypatch):
+    pages = {0: [_dated(f"/new/{i}", 0) for i in range(99)] + [_dated("/old", 40)], 100: [_dated("/older", 90)]}
+    monkeypatch.setattr(
+        amazon, "get_with_retry", lambda url, params, **k: FakeResponse(json_data={"jobs": pages.get(params["offset"], [])})
+    )
+    with uncapped_crawl():
+        listing = amazon._fetch_jobs("amazon")
+    old = amazon._AMAZON_JOB_BASE_URL + "/older"
+    assert len(listing.urls) == 101
+    assert listing.complete is True
+    assert listing.posted[old] == datetime.now(timezone.utc).date() - timedelta(days=90)
 
 
 def _job_page(location_line: str) -> str:

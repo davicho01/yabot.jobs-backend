@@ -105,7 +105,7 @@ def test_presence_is_scoped_to_its_own_source(scan_db, make_source, now):
 
 
 def _crawl(monkeypatch, scan_db, source, urls, when, complete=True):
-    monkeypatch.setattr(crawl_worker, "list_board", lambda ats_type, board_url: BoardListing(urls, complete=complete))
+    monkeypatch.setattr(crawl_worker, "list_board", lambda ats_type, board_url, **_: BoardListing(urls, complete=complete))
     monkeypatch.setattr(crawl_worker, "enqueue_source_scan", lambda source_id, lanes=1: None)
     real = jobs_service.record_board_presence
     monkeypatch.setattr(
@@ -116,6 +116,53 @@ def _crawl(monkeypatch, scan_db, source, urls, when, complete=True):
         ),
     )
     crawl_worker._crawl_source(scan_db, source.id)
+
+
+def test_an_uncapped_source_crawls_uncapped_and_sets_its_baseline_once(monkeypatch, scan_db, make_source, now):
+    source = make_source()
+    source.uncapped = True
+    scan_db.commit()
+    calls = []
+
+    def fake_list_board(ats_type, board_url, *, uncapped=False):
+        calls.append(uncapped)
+        return BoardListing(URLS)
+
+    monkeypatch.setattr(crawl_worker, "enqueue_source_scan", lambda source_id, lanes=1: None)
+    monkeypatch.setattr(crawl_worker, "list_board", fake_list_board)
+
+    crawl_worker._crawl_source(scan_db, source.id)
+    scan_db.expire_all()
+    baseline = scan_db.get(CrawlSource, source.id).uncapped_baseline_at
+    crawl_worker._crawl_source(scan_db, source.id)
+    scan_db.expire_all()
+
+    assert calls == [True, True]
+    assert baseline is not None
+    assert scan_db.get(CrawlSource, source.id).uncapped_baseline_at == baseline  # set by the first crawl only
+    # The first uncapped crawl only records the board: nothing undated is scanned.
+    assert {r.scan_status for r in _rows(scan_db, source).values()} == {ScanStatus.SKIPPED}
+
+
+def test_a_browser_rendered_board_stays_capped_even_when_set_uncapped(monkeypatch, scan_db, make_source, now):
+    source = make_source()
+    source.ats_type, source.uncapped = "bestbuy", True
+    scan_db.commit()
+    calls = []
+
+    def fake_list_board(ats_type, board_url, *, uncapped=False):
+        calls.append(uncapped)
+        return BoardListing(URLS)
+
+    monkeypatch.setattr(crawl_worker, "enqueue_source_scan", lambda source_id, lanes=1: None)
+    monkeypatch.setattr(crawl_worker, "list_board", fake_list_board)
+
+    crawl_worker._crawl_source(scan_db, source.id)
+    scan_db.expire_all()
+
+    assert calls == [False]
+    assert scan_db.get(CrawlSource, source.id).uncapped_baseline_at is None
+    assert {r.scan_status for r in _rows(scan_db, source).values()} == {ScanStatus.PENDING}
 
 
 def test_crawl_worker_closes_on_a_healthy_crawl(monkeypatch, scan_db, make_source, now):
@@ -245,7 +292,7 @@ def test_recently_seen_rows_are_not_rewritten(scan_db, make_source, now):
 def test_a_presence_failure_does_not_fail_the_crawl(monkeypatch, scan_db, make_source, now):
     source = make_source()
     wakeups = []
-    monkeypatch.setattr(crawl_worker, "list_board", lambda ats_type, board_url: BoardListing(URLS))
+    monkeypatch.setattr(crawl_worker, "list_board", lambda ats_type, board_url, **_: BoardListing(URLS))
     monkeypatch.setattr(crawl_worker, "enqueue_source_scan", lambda source_id, lanes=1: wakeups.append(source_id))
 
     def broken(*a, **k):

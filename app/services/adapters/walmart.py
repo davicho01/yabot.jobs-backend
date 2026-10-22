@@ -11,18 +11,17 @@ import httpx
 from app.models.enums import AtsType, EmploymentType
 from app.services.adapters import base
 from app.services.adapters.base import (
-    DEFAULT_MAX_JOBS_PER_CRAWL,
     EMPLOYMENT_TYPE_MAP,
     TIMEOUT,
     AtsAdapter,
     ExtractedJobFields,
     ScanResult,
     get_with_retry,
+    max_jobs_per_crawl,
 )
 from app.services.adapters.text import MAX_LOCATION_LENGTH, clean_text, html_to_formatted_text
 
 _WALMART_SITEMAP_URL = "https://careers.walmart.com/sitemap.xml"
-_WALMART_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _WALMART_URL_RE = re.compile(r"careers\.walmart\.com", re.IGNORECASE)
 # Unquoted attribute, verified live: <script id=__NEXT_DATA__ type="application/json">
 _NEXT_DATA_RE = re.compile(r'<script id=["\']?__NEXT_DATA__["\']?[^>]*>(.*?)</script>', re.DOTALL)
@@ -39,7 +38,7 @@ def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company b
     # discovery source. It lists every live posting under /us/en/jobs/{id}
     # but with no lastmod/date per URL, and at ~16k entries vastly exceeds
     # our per-crawl cap. Taking a fixed slice would return the exact same
-    # _WALMART_MAX_JOBS URLs forever (get_or_create_job_posting no-ops on
+    # max_jobs_per_crawl() URLs forever (get_or_create_job_posting no-ops on
     # already-seen URLs, so nothing new would ever surface) — sampling a
     # different date-seeded slice each day instead cycles the whole board
     # through over ~32 days, giving newly-added postings a chance to appear
@@ -53,10 +52,10 @@ def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company b
         for loc in root.findall(".//sm:loc", ns)
         if loc.text and urlsplit(loc.text).path.startswith("/us/en/jobs/")
     ]
-    if len(urls) <= _WALMART_MAX_JOBS:
+    if len(urls) <= max_jobs_per_crawl():
         return urls
     today = datetime.now(timezone.utc).date()
-    return random.Random(today.toordinal()).sample(urls, _WALMART_MAX_JOBS)
+    return random.Random(today.toordinal()).sample(urls, max_jobs_per_crawl())
 
 
 # The job detail page is a client-rendered Next.js app, but the initial HTML

@@ -9,17 +9,16 @@ import httpx
 from app.models.enums import AtsType, EmploymentType
 from app.services.adapters import base
 from app.services.adapters.base import (
-    DEFAULT_MAX_JOBS_PER_CRAWL,
     TIMEOUT,
     AtsAdapter,
     ExtractedJobFields,
     ScanResult,
     get_with_retry,
     limit_job_urls,
+    max_jobs_per_crawl,
 )
 from app.services.adapters.text import html_to_formatted_text
 
-_RIPPLING_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _RIPPLING_URL_RE = re.compile(r"ats\.rippling\.com/([a-zA-Z0-9_-]+)", re.IGNORECASE)
 _BOARD_URL = "https://ats.rippling.com/{slug}/jobs"
 # Rippling's board is a Next.js app: the listing page server-renders the
@@ -81,7 +80,7 @@ def _job_posts_query(next_data: dict[str, Any]) -> dict[str, Any] | None:
 def _fetch_jobs(slug: str) -> list[str]:
     urls: list[str] = []
     page = 0
-    while len(urls) < _RIPPLING_MAX_JOBS:
+    while len(urls) < max_jobs_per_crawl():
         response = get_with_retry(_board_url(slug), params={"page": page}, timeout=TIMEOUT, follow_redirects=True)
         response.raise_for_status()
         next_data = _next_data(response.text)

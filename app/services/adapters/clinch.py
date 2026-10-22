@@ -4,9 +4,8 @@ from xml.etree import ElementTree
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry, max_jobs_per_crawl
 
-_CLINCH_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _CLINCH_SIGNATURE = "clinchtalent.com"
 
 
@@ -30,7 +29,7 @@ def _fetch_jobs(host: str) -> list[str]:
     # live instance). Small volume in practice (~100 jobs), so no "today
     # only" filtering — just a safety cap like every other adapter's
     # _MAX_JOBS.
-    return _sitemap_job_urls(host)[:_CLINCH_MAX_JOBS]
+    return _sitemap_job_urls(host)[:max_jobs_per_crawl()]
 
 
 def _is_own_job_url(url: str, host: str) -> bool:

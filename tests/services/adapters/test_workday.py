@@ -1,6 +1,8 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
-from app.services.adapters import workday
+from app.services.adapters import base, workday
 from tests.conftest import FakeResponse
 
 
@@ -123,8 +125,19 @@ def test_fetch_jobs_without_posted_on_lists_the_whole_board(monkeypatch):
     assert listing.complete is True
 
 
+def test_uncapped_fetch_jobs_lists_old_postings_too_with_their_dates(monkeypatch):
+    page = [_posting("/job/a", "Posted Today"), _posting("/job/b", "Posted 30+ Days Ago")]
+    monkeypatch.setattr(workday, "post_with_retry", lambda *a, **k: FakeResponse(json_data={"jobPostings": page}))
+    with base.uncapped_crawl():
+        listing = workday._fetch_jobs("acme/wd1/Careers")
+    old = "https://acme.wd1.myworkdayjobs.com/Careers/job/b"
+    assert len(listing.urls) == 2
+    assert listing.complete is True
+    assert listing.posted[old] == datetime.now(timezone.utc).date() - timedelta(days=30)
+
+
 def test_fetch_jobs_without_posted_on_is_partial_when_paging_hits_the_bound(monkeypatch):
-    monkeypatch.setattr(workday, "_WORKDAY_MAX_JOBS", workday._WORKDAY_PAGE_SIZE)
+    monkeypatch.setattr(base, "DEFAULT_MAX_JOBS_PER_CRAWL", workday._WORKDAY_PAGE_SIZE)
     page = [{"externalPath": f"/job/{i}"} for i in range(workday._WORKDAY_PAGE_SIZE)]
     monkeypatch.setattr(workday, "post_with_retry", lambda *a, **k: FakeResponse(json_data={"jobPostings": page}))
     assert workday._fetch_jobs("acme/wd1/Careers").complete is False

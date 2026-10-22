@@ -4,9 +4,8 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry, max_jobs_per_crawl
 
-_ATTRAX_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _ATTRAX_SIGNATURE = "attrax"
 # Attrax (a Microsoft-stack career-site CMS, white-labeled onto each
 # customer's own domain, e.g. careers.abbvie.com) usually locale-prefixes
@@ -48,7 +47,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
     jobs_path = f"/{locale}/jobs" if locale else "/jobs"
     urls: list[str] = []
     page = 1
-    while len(urls) < _ATTRAX_MAX_JOBS:
+    while len(urls) < max_jobs_per_crawl():
         response = get_with_retry(f"https://{host}{jobs_path}", params={"page": page}, timeout=TIMEOUT)
         response.raise_for_status()
         paths = dict.fromkeys(path for path, _job_id in _JOB_LINK_RE.findall(response.text))
@@ -56,7 +55,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
             break
         urls.extend(f"https://{host}{path}" for path in paths)
         page += 1
-    return urls[:_ATTRAX_MAX_JOBS]
+    return urls[:max_jobs_per_crawl()]
 
 
 # No to_board_url — like Oracle Fusion/Clinch/SuccessFactors, Attrax is

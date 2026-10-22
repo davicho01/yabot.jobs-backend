@@ -11,7 +11,7 @@ from app.services.adapters.base import BoardListing
 def _run_crawl(monkeypatch, scan_db, source, urls):
     wakeups: list[tuple] = []
 
-    def fake_bulk_register(db, raw_urls, crawl_source_id):
+    def fake_bulk_register(db, raw_urls, crawl_source_id, **_):
         # What the real function leaves behind for brand-new URLs: PENDING rows.
         for url in raw_urls:
             db.add(
@@ -27,7 +27,7 @@ def _run_crawl(monkeypatch, scan_db, source, urls):
         db.flush()
         return 0, len(raw_urls)
 
-    monkeypatch.setattr(crawl_worker, "list_board", lambda ats_type, board_url: BoardListing(urls))
+    monkeypatch.setattr(crawl_worker, "list_board", lambda ats_type, board_url, **_: BoardListing(urls))
     monkeypatch.setattr(crawl_worker, "bulk_register_discovered_urls", fake_bulk_register)
     monkeypatch.setattr(crawl_worker, "enqueue_source_scan", lambda source_id, lanes=1: wakeups.append((source_id, lanes)))
 
@@ -54,9 +54,9 @@ def test_crawl_with_nothing_to_scan_wakes_no_lanes(monkeypatch, scan_db, make_so
 
 def test_crawl_still_records_its_stats_when_waking_lanes_fails(monkeypatch, scan_db, make_source):
     source = make_source()
-    monkeypatch.setattr(crawl_worker, "list_board", lambda ats_type, board_url: BoardListing(["https://example.com/jobs/1"]))
+    monkeypatch.setattr(crawl_worker, "list_board", lambda ats_type, board_url, **_: BoardListing(["https://example.com/jobs/1"]))
 
-    def fake_bulk_register(db, raw_urls, crawl_source_id):
+    def fake_bulk_register(db, raw_urls, crawl_source_id, **_):
         for url in raw_urls:
             db.add(
                 JobPostingUrl(
@@ -110,7 +110,7 @@ def test_crawl_clears_the_dispatch_claim_even_when_listing_jobs_fails(monkeypatc
     source.crawl_claimed_at = datetime.now(timezone.utc)
     scan_db.commit()
 
-    def broken(ats_type, board_url):
+    def broken(ats_type, board_url, **_):
         raise RuntimeError("ATS API down")
 
     monkeypatch.setattr(crawl_worker, "list_board", broken)
@@ -140,7 +140,7 @@ def test_failed_listing_keeps_the_interval(monkeypatch, scan_db, make_source):
     source.crawl_interval_minutes = 720
     scan_db.commit()
 
-    def broken(ats_type, board_url):
+    def broken(ats_type, board_url, **_):
         raise RuntimeError("ATS API down")
 
     monkeypatch.setattr(crawl_worker, "list_board", broken)

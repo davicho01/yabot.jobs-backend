@@ -39,6 +39,26 @@ def test_an_adapters_partial_listing_stays_partial(monkeypatch):
     assert listing == base.BoardListing(['a'], complete=False)
 
 
+def test_an_uncapped_listing_keeps_going_past_500(monkeypatch):
+    urls = [f'https://example.com/job/{i}' for i in range(510)]
+    adapter = ADAPTERS[0]
+    seen_caps = []
+
+    def fetch(_):
+        seen_caps.append(base.max_jobs_per_crawl())
+        return base.BoardListing(urls, posted={urls[0]: datetime(2026, 1, 1).date()})
+
+    monkeypatch.setitem(
+        ats_adapters._ADAPTERS_BY_TYPE, adapter.ats_type, replace(adapter, board_key=lambda _: 'board', fetch_jobs=fetch)
+    )
+    listing = ats_adapters.list_board(adapter.ats_type, 'https://example.com', uncapped=True)
+
+    assert seen_caps == [base.UNCAPPED_MAX_JOBS_PER_CRAWL]
+    assert len(listing.urls) == 510 and listing.complete is True
+    assert listing.posted == {urls[0]: datetime(2026, 1, 1).date()}
+    assert base.max_jobs_per_crawl() == base.DEFAULT_MAX_JOBS_PER_CRAWL  # back to capped afterwards
+
+
 def test_cap_reads_shared_setting_and_stops_consuming_after_unique_limit(monkeypatch):
     monkeypatch.setattr(base, 'DEFAULT_MAX_JOBS_PER_CRAWL', 2)
 

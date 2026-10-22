@@ -9,18 +9,17 @@ import httpx
 from app.models.enums import AtsType, EmploymentType, WorkplaceType
 from app.services.adapters import base
 from app.services.adapters.base import (
-    DEFAULT_MAX_JOBS_PER_CRAWL,
     TIMEOUT,
     AtsAdapter,
     ExtractedJobFields,
     ScanResult,
     get_with_retry,
+    max_jobs_per_crawl,
 )
 from app.services.adapters.text import html_to_formatted_text
 from app.services.job_dedup import clean_company_name
 
 _EIGHTFOLD_SEARCH_PAGE_SIZE = 20
-_EIGHTFOLD_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _SITEMAP_NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 _ROBOTS_SITEMAP_RE = re.compile(r"^Sitemap:\s*(\S+)", re.MULTILINE | re.IGNORECASE)
 # Eightfold's white-label career sites (e.g. jobs.twilio.com,
@@ -125,9 +124,9 @@ def _sitemap_job_urls(host: str) -> list[str]:
             for u in sitemap_root.findall(".//sm:url/sm:loc", _SITEMAP_NS)
             if u.text and urlsplit(u.text).path.startswith("/careers/job/")
         )
-        if len(urls) >= DEFAULT_MAX_JOBS_PER_CRAWL:
+        if len(urls) >= max_jobs_per_crawl():
             break
-    return urls[:DEFAULT_MAX_JOBS_PER_CRAWL]
+    return urls[:max_jobs_per_crawl()]
 
 
 def _fetch_jobs(host: str) -> list[str]:
@@ -142,7 +141,7 @@ def _fetch_jobs(host: str) -> list[str]:
     if domain is None:
         sitemap_urls = _sitemap_job_urls(host)
         if sitemap_urls:
-            return sitemap_urls[:_EIGHTFOLD_MAX_JOBS]
+            return sitemap_urls[:max_jobs_per_crawl()]
         raise ValueError(f"Couldn't resolve an Eightfold tenant domain for host={host!r}")
 
     urls: list[str] = []
@@ -153,7 +152,7 @@ def _fetch_jobs(host: str) -> list[str]:
     # regardless — so pagination advances by however many actually came
     # back each time, and stops using the response's own "count" rather
     # than assuming a fixed page size.
-    while len(urls) < _EIGHTFOLD_MAX_JOBS and (total is None or start < total):
+    while len(urls) < max_jobs_per_crawl() and (total is None or start < total):
         response = get_with_retry(
             f"https://{host}/api/pcsx/search",
             params={"domain": domain, "start": start, "num": _EIGHTFOLD_SEARCH_PAGE_SIZE},
@@ -168,7 +167,7 @@ def _fetch_jobs(host: str) -> list[str]:
         urls.extend(f"https://{host}{p['positionUrl']}" for p in positions if p.get("positionUrl"))
         start += len(positions)
 
-    return urls[:_EIGHTFOLD_MAX_JOBS]
+    return urls[:max_jobs_per_crawl()]
 
 
 def _detect_embedded(url: str) -> str | None:

@@ -134,5 +134,14 @@ class CrawlSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     coverage_low_streak: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     coverage_flagged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Crawl the whole board instead of DEFAULT_MAX_JOBS_PER_CRAWL recent
+    # postings or a sample (see app.services.ats_adapters.list_board), and
+    # import only what's new (see bulk_register_discovered_urls). Switched on
+    # per board while rolling it out. uncapped_baseline_at: when its first
+    # uncapped crawl recorded the board as it stood — until then a listed URL
+    # without a posted date is presumed old, not new.
+    uncapped: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    uncapped_baseline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     def __repr__(self) -> str:
         return f"<CrawlSource name={self.name!r} ats_type={self.ats_type!r} board_url={self.board_url!r} status={self.status!r}>"

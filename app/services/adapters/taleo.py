@@ -8,13 +8,13 @@ from app.models.enums import AtsType
 from app.services import geo
 from app.services.adapters import base
 from app.services.adapters.base import (
-    DEFAULT_MAX_JOBS_PER_CRAWL,
     TIMEOUT,
     AtsAdapter,
     ExtractedJobFields,
     ScanResult,
     get_with_retry,
     limit_job_urls,
+    max_jobs_per_crawl,
     post_with_retry,
 )
 from app.services.adapters.text import clean_text, extract_balanced_div, html_to_formatted_text
@@ -27,7 +27,6 @@ from app.services.browser_fetch import fetch_rendered_html
 # Workday's "company/instance/site" or CSOD's "corp/site".
 _TALEO_HOST_RE = re.compile(r"([a-z0-9-]+)\.taleo\.net", re.IGNORECASE)
 _SECTION_RE = re.compile(r"/careersection/([^/]+)/", re.IGNORECASE)
-_TALEO_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _SEARCH_URL = "https://{tenant}.taleo.net/careersection/rest/jobboard/searchjobs"
 _JOBSEARCH_URL = "https://{tenant}.taleo.net/careersection/{section}/jobsearch.ftl?lang=en"
 _JOB_URL = "https://{tenant}.taleo.net/careersection/{section}/jobdetail.ftl?job={job_id}&lang=en"
@@ -109,7 +108,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
     job_ids: list[str] = []
     page_no = 1
     total = None
-    while len(job_ids) < _TALEO_MAX_JOBS and (total is None or len(job_ids) < total):
+    while len(job_ids) < max_jobs_per_crawl() and (total is None or len(job_ids) < total):
         data = _search(tenant, portal_no, page_no=page_no)
         total = data.get("pagingData", {}).get("totalCount", 0)
         batch = data.get("requisitionList", [])

@@ -6,16 +6,15 @@ import httpx
 from app.models.enums import AtsType, EmploymentType
 from app.services.adapters import base
 from app.services.adapters.base import (
-    DEFAULT_MAX_JOBS_PER_CRAWL,
     TIMEOUT,
     AtsAdapter,
     ExtractedJobFields,
     ScanResult,
+    max_jobs_per_crawl,
     parse_month_day_year,
     post_with_retry,
 )
 
-_ECHO_JOBS_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 # "Echo Jobs" (by Dorian Solutions Group) is a self-hosted WordPress plugin,
 # not a shared multi-tenant host — every tenant runs on its own domain, same
 # as Clinch/Oracle Fusion, so there's no static URL shape to match() on.
@@ -48,7 +47,7 @@ def _get_jobs(host: str) -> list[dict[str, Any]]:
 
 def _fetch_jobs(host: str) -> list[str]:
     urls = [job["permalink"] for job in _get_jobs(host) if isinstance(job.get("permalink"), str)]
-    return urls[:_ECHO_JOBS_MAX_JOBS]
+    return urls[:max_jobs_per_crawl()]
 
 
 def _detect_embedded(url: str) -> str | None:

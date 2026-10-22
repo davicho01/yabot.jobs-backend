@@ -7,18 +7,17 @@ import httpx
 from app.models.enums import AtsType, EmploymentType, WorkplaceType
 from app.services.adapters import base
 from app.services.adapters.base import (
-    DEFAULT_MAX_JOBS_PER_CRAWL,
     TIMEOUT,
     AtsAdapter,
     ExtractedJobFields,
     ScanResult,
     get_with_retry,
+    max_jobs_per_crawl,
 )
 from app.services.adapters.text import clean_text, html_to_formatted_text
 from app.services.browser_fetch import fetch_rendered_page
 from app.services.company_logos import hiring_org_url
 
-_AVATURE_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _AVATURE_URL_RE = re.compile(r"([a-zA-Z0-9-]+\.avature\.net)", re.IGNORECASE)
 # Most tenants link job details by slug/id path segment
 # (/careers/JobDetail/Some-Title/12345); some (verified live:
@@ -299,7 +298,7 @@ def _fetch_jobs(host: str) -> list[str]:
     urls: list[str] = []
     offset = 0
     page_size = _DEFAULT_PAGE_SIZE
-    while len(urls) < _AVATURE_MAX_JOBS:
+    while len(urls) < max_jobs_per_crawl():
         page_url = f"{careers_url}/SearchJobs/?jobRecordsPerPage={page_size}&jobOffset={offset}"
         # Tenants that need the browser fallback at all (verified live:
         # careers.ibm.com) render this page's results in via a separate AJAX
@@ -319,7 +318,7 @@ def _fetch_jobs(host: str) -> list[str]:
         if len(links) < page_size:
             break
         offset += len(links)
-    return urls[:_AVATURE_MAX_JOBS]
+    return urls[:max_jobs_per_crawl()]
 
 
 def extract(html: str) -> ExtractedJobFields:

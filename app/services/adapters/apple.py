@@ -8,15 +8,16 @@ import httpx
 from app.models.enums import AtsType, EmploymentType, WorkplaceType
 from app.services.adapters import base
 from app.services.adapters.base import (
-    DEFAULT_MAX_JOBS_PER_CRAWL,
     RECENT_WINDOW_DAYS,
     TIMEOUT,
     AtsAdapter,
     BoardListing,
     ExtractedJobFields,
     ScanResult,
+    crawling_uncapped,
     get_with_retry,
     is_recent_posting,
+    max_jobs_per_crawl,
     parse_month_day_year,
 )
 from app.services.adapters.text import MAX_LOCATION_LENGTH, clean_text, html_to_formatted_text
@@ -25,7 +26,6 @@ _APPLE_JOBS_URL = "https://jobs.apple.com/en-us/search"
 _APPLE_JOB_URL = "https://jobs.apple.com/en-us/details/{position_id}/{slug}"
 _APPLE_HYDRATION_RE = re.compile(r'window\.__staticRouterHydrationData = JSON\.parse\("(.*?)"\);', re.DOTALL)
 _APPLE_PAGE_SIZE = 20
-_APPLE_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _APPLE_URL_RE = re.compile(r"jobs\.apple\.com", re.IGNORECASE)
 
 
@@ -44,9 +44,13 @@ def _fetch_jobs(board_key: str) -> BoardListing:  # noqa: ARG001 - single-compan
     # as Workday/Amazon applies — using postingDate (a stable per-job date),
     # NOT postDateInGMT, which turned out to change on every request for
     # the same job (a live response timestamp, not a stored value).
+    # Uncapped, it pages through every posting instead, dating each.
+    uncapped = crawling_uncapped()
     urls: list[str] = []
+    posted_on: dict[str, date] = {}
     page = 1
-    while len(urls) < _APPLE_MAX_JOBS:
+    reached_end = False
+    while len(urls) < max_jobs_per_crawl():
         response = get_with_retry(_APPLE_JOBS_URL, params={"sort": "newest", "page": page}, timeout=TIMEOUT)
         response.raise_for_status()
         match = _APPLE_HYDRATION_RE.search(response.text)
@@ -59,25 +63,29 @@ def _fetch_jobs(board_key: str) -> BoardListing:  # noqa: ARG001 - single-compan
         search_data = json.loads(json.loads('"' + match.group(1) + '"'))["loaderData"]["search"]
         postings = search_data.get("searchResults", [])
         if not postings:
+            reached_end = True
             break
 
-        recent_postings = [
-            posting
-            for posting in postings
-            if (posted := parse_month_day_year(posting.get("postingDate"), month_style="%b %d, %Y")) is not None
-            and is_recent_posting(posted)
-        ]
-        urls.extend(
-            _APPLE_JOB_URL.format(position_id=posting["positionId"], slug=posting["transformedPostingTitle"])
-            for posting in recent_postings
-            if posting.get("positionId") and posting.get("transformedPostingTitle")
-        )
-        if len(recent_postings) < len(postings) or len(postings) < _APPLE_PAGE_SIZE:
+        recent = 0
+        for posting in postings:
+            posted = parse_month_day_year(posting.get("postingDate"), month_style="%b %d, %Y")
+            is_recent = posted is not None and is_recent_posting(posted)
+            recent += is_recent
+            if (uncapped or is_recent) and posting.get("positionId") and posting.get("transformedPostingTitle"):
+                urls.append(
+                    _APPLE_JOB_URL.format(position_id=posting["positionId"], slug=posting["transformedPostingTitle"])
+                )
+                if posted is not None:
+                    posted_on[urls[-1]] = posted
+        if len(postings) < _APPLE_PAGE_SIZE:
+            reached_end = True
+            break
+        if not uncapped and recent < len(postings):
             break
         page += 1
 
-    # Recent postings only, so never the whole board (see BoardListing).
-    return BoardListing(urls[:_APPLE_MAX_JOBS], complete=False)
+    # Capped, recent postings only, so never the whole board (see BoardListing).
+    return BoardListing(urls[:max_jobs_per_crawl()], complete=uncapped and reached_end, posted=posted_on)
 
 
 # jobs.apple.com is a client-rendered SPA, but the initial HTML still
