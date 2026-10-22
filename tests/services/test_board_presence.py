@@ -144,6 +144,27 @@ def test_an_uncapped_source_crawls_uncapped_and_sets_its_baseline_once(monkeypat
     assert {r.scan_status for r in _rows(scan_db, source).values()} == {ScanStatus.SKIPPED}
 
 
+def test_a_browser_rendered_board_stays_capped_even_when_set_uncapped(monkeypatch, scan_db, make_source, now):
+    source = make_source()
+    source.ats_type, source.uncapped = "bestbuy", True
+    scan_db.commit()
+    calls = []
+
+    def fake_list_board(ats_type, board_url, *, uncapped=False):
+        calls.append(uncapped)
+        return BoardListing(URLS)
+
+    monkeypatch.setattr(crawl_worker, "enqueue_source_scan", lambda source_id, lanes=1: None)
+    monkeypatch.setattr(crawl_worker, "list_board", fake_list_board)
+
+    crawl_worker._crawl_source(scan_db, source.id)
+    scan_db.expire_all()
+
+    assert calls == [False]
+    assert scan_db.get(CrawlSource, source.id).uncapped_baseline_at is None
+    assert {r.scan_status for r in _rows(scan_db, source).values()} == {ScanStatus.PENDING}
+
+
 def test_crawl_worker_closes_on_a_healthy_crawl(monkeypatch, scan_db, make_source, now):
     source = make_source()
     _crawl(monkeypatch, scan_db, source, URLS, now)

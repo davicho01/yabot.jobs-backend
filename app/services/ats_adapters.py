@@ -1,10 +1,20 @@
-from app.services.adapters import ADAPTERS
 from contextlib import nullcontext
 
+from app.services.adapters import ADAPTERS
 from app.services.adapters.base import AtsAdapter, BoardListing, limit_job_urls, max_jobs_per_crawl, uncapped_crawl
 
 _ADAPTERS_BY_TYPE: dict[str, AtsAdapter] = {adapter.ats_type: adapter for adapter in ADAPTERS}
 _EMBEDDED_MATCH_ADAPTERS = [adapter for adapter in ADAPTERS if adapter.embedded_match is not None]
+
+# Platforms that list or scan through the browser service as a matter of
+# course (not just as a fallback for a blocked fetch). An uncapped crawl
+# brings in a whole board's new jobs, and renders cost far more than plain
+# fetches, so these stay capped whatever CrawlSource.uncapped says.
+BROWSER_RENDERED_ATS_TYPES = frozenset({"avature", "bestbuy", "talemetry", "taleo", "ultipro"})
+
+
+def can_crawl_uncapped(ats_type: str) -> bool:
+    return ats_type not in BROWSER_RENDERED_ATS_TYPES
 
 
 def detect_ats_source(url: str) -> tuple[str, str]:

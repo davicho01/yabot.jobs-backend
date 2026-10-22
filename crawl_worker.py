@@ -39,7 +39,7 @@ from app.core.config import settings
 from app.core.log_config import configure_logging
 from app.db.session import SessionLocal
 from app.models.crawl_source import CrawlSource
-from app.services.ats_adapters import list_board
+from app.services.ats_adapters import can_crawl_uncapped, list_board
 from app.services.coverage_monitor import update_coverage
 from app.services.crawl_schedule import closed_after_hours, schedule_next_crawl
 from app.services.crawl_queue import ensure_topic_and_subscription, subscriber_client, subscription_path
@@ -61,6 +61,9 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
         return
 
     uncapped, baseline = source.uncapped, source.uncapped_baseline_at is not None
+    if uncapped and not can_crawl_uncapped(source.ats_type):
+        logger.warning("%s is set uncapped, but %s boards render in a browser; crawling it capped.", source.name, source.ats_type)
+        uncapped = False
     try:
         listing = list_board(source.ats_type, source.board_url, uncapped=uncapped)
     except Exception as exc:
