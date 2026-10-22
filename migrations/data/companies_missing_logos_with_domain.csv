@@ -9,26 +9,26 @@ cd2fb42f-1583-425f-ac76-a410e81f0391,34 Columbia Gas of Ohio Inc,nisource.com,lo
 4347c525-6338-4688-a0d5-5c0113b59f2c,AFP Cuprum,principal.com,logos/afp-cuprum-9bd80ceb.png,https://www.principal.com/modules/custom/pfg_core/assets/principal_full_bynder.png,found
 417640a7-3c8e-4e28-b7dc-5fce5ac9ae5d,Allstate Insurance Company of Canada - Permanent,allstateinvestors.com,,"allstateinvestors.com does not resolve; allstate.ca/allstate.com icons too small or favicon upscaled from 48px was a cropped letter, rejected",not_found
 4e3d0345-de5c-4bc4-845e-e9769b8c06ca,Almaviva website,almavivadebelgique.be,,almavivadebelgique.be redirects to almaviva.it; only a blurry low-res favicon was available,not_found
-d5300302-f419-4a41-b101-5f9a135232b5,American Honda Motor Company,honda.com,,"honda.com blocks fetch/render; Google favicon is a wide wordmark, no square icon found",not_found
+d5300302-f419-4a41-b101-5f9a135232b5,American Honda Motor Company,honda.com,,,
 327f2447-a70e-4f91-899a-099691a1ff66,"AMERILIFE US, LLC",amerilife.com,logos/amerilife-us-llc-c9e6d854.png,https://amerilife.com/apple-icon.png?apple-icon.5189ac28.png,found
 cadd9569-5ed2-46a0-8627-97ff3e8c0a4d,Appalachian Power Company,appalachianpower.com,,"favicon only 16x10, upscaled too wide; render picked a cookie-banner icon (rejected)",not_found
-eabad704-a225-40ad-a951-97c3195bd113,"ARES Enterprise Services Argentina, S.R.L. *",dxc.com,,dxc.com icons are wide strips; render cropped a bare T (wrong); web search found no square icon,not_found
+eabad704-a225-40ad-a951-97c3195bd113,"ARES Enterprise Services Argentina, S.R.L. *",dxc.com,,,
 d6173be7-96a7-4e27-8980-7835dc7eaecb,Arthouse Hotel New York City,highgate.com,logos/arthouse-hotel-new-york-city-aafa68f0.png,https://www.highgate.com/app/themes/highgate-corporate/dist/images/favicon/apple-touch-icon.png,found
 a8a761d8-d94f-4546-bb53-534d866cb1c6,Arthur J. Gallagher and Co.,ajg.com,logos/arthur-j-gallagher-and-co-844dd25d.png,https://www.ajg.com/assetbundles/GSC.Site.Gallagher.2/img/favicon/apple-touch-icon.png,found
 1cc8fe95-d400-482c-b448-024be1f4775c,Astranis,astranis.org,logos/astranis-e960d81a.png,"https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://astranis.com&size=256",found
 43f105b2-cf17-4123-912c-17d551f8ab96,Attentive,attentive.com,logos/attentive-936534b5.png,https://cdn.prod.website-files.com/684306b795a2c402456e92ba/6a0b489cbf561cc597df3337_favicon.png,found
-4f7767b9-2dea-47ce-a4a2-88ff40684816,Baltimore Gas and Electric Company,exeloncorp.com,,"exeloncorp.com refuses connections; bge.com favicon (32px upscaled) is a broken-looking fragment, rejected",not_found
-b6c8e65f-ded1-4986-8cb0-7f830ad6d875,"Bellagio, LLC",hc-bellagio.com,,hc-bellagio.com has no favicon; render picked a TripAdvisor logo (wrong brand),not_found
-5fb00db4-ae12-4c9e-b26d-f5a9a887e7f2,BGEU DXC Bulgaria EOOD,dxc.com,,dxc.com icons are wide strips; render cropped a bare T (wrong); web search found no square icon,not_found
-e9d425fd-b2d8-4fdf-bbca-9b9a593689ec,"Big Heart Pet Brands, Inc.",bigheartpet.com,,bigheartpet.com refuses connections; no Google favicon,not_found
+4f7767b9-2dea-47ce-a4a2-88ff40684816,Baltimore Gas and Electric Company,bge.com,,,
+b6c8e65f-ded1-4986-8cb0-7f830ad6d875,"Bellagio, LLC",bellagio.com,,,
+5fb00db4-ae12-4c9e-b26d-f5a9a887e7f2,BGEU DXC Bulgaria EOOD,dxc.com,,,
+e9d425fd-b2d8-4fdf-bbca-9b9a593689ec,"Big Heart Pet Brands, Inc.",bigheartpet.com,,,
 4946e85c-112c-4c70-a086-ffcbfebb3100,BlackSky,blacksky.com,logos/blacksky-92930b70.png,https://blacksky.com/wp-content/uploads/2025/01/cropped-blacksky-favicon-1-180x180.png,found
 c37a3e25-5c69-456c-a85a-f285e5ac25f7,BNY,bnyphoto.com,logos/bny-cec5b1f0.png,https://www.bny.com/content/dam/bnymellon/web/favicons/favicon-152.png,found
-29c67f32-43a3-4ba5-b891-1db3ac162d6d,BR50 Enterprise Services Brasil Servicos,dxc.com,,"dxc.com: favicons are 180x30 wordmarks, no apple-touch-icon, header crop gave a stray 'T' from the wordmark; no square icon found via search",not_found
+29c67f32-43a3-4ba5-b891-1db3ac162d6d,BR50 Enterprise Services Brasil Servicos,dxc.com,,,
 af8cd689-46cf-4922-8ba7-c41468f08901,BRANDAD Group AG,brandad-systems.de,,"only icon found is a blank yellow rounded square (apple-touch-icon/google favicon), not a recognizable mark; render found only wide wordmarks",not_found
 92a5452e-9ca3-479f-a55b-55597202bf42,"Burlington Coat Factory of TX, Inc.",burlington.ca,logos/burlington-coat-factory-of-tx-inc-f94f2c59.png,https://www.burlington.com/apple-icon.png?apple-icon.42q8ww2fgirae.png,found
-042933f5-d3a4-473d-a27b-acffc0cb12b3,CAES DXC Technology Canada Co.,dxc.com,,"dxc.com: favicons are 180x30 wordmarks, no apple-touch-icon, header crop gave a stray 'T' from the wordmark; no square icon found via search",not_found
+042933f5-d3a4-473d-a27b-acffc0cb12b3,CAES DXC Technology Canada Co.,dxc.com,,,
 be65ab08-eb82-4b62-a5c0-d1b89309ea6b,"Canacre USA, LLC",canacre.com,logos/canacre-usa-llc-dedcf6e1.png,https://images.squarespace-cdn.com/content/v1/5f3bcbcd66c85c78d1206ecc/1597760954725-IHOMUWUPZCA5R2WB1S26/favicon.ico?format=100w,found
-5460ef2e-d4cd-414d-925c-0e0ec7f060a1,Candu Energy Inc.,canduenergy.ca,,canduenergy.ca and candu.com unreachable; atkinsrealis.com (parent) has only a 32px/transparent favicon; search found no icon,not_found
+5460ef2e-d4cd-414d-925c-0e0ec7f060a1,Candu Energy Inc.,canduenergy.ca,,,
 8926e936-b932-45ab-9548-1cc6004621c6,Canyons School District,canyonsdistrict.org,logos/canyons-school-district-9f014423.png,https://www.canyonsdistrict.org/wp-content/uploads/2020/05/cropped-canyons-district-logo-icon-180x180.png,found
 991be0db-177a-4e63-96f0-57a4c5cf8460,CBA NZ Holdings Limited,commbank.com.vn,logos/cba-nz-holdings-limited-dde7d3de.png,https://www.commbank.com.au/content/dam/commbank/commBank-logo.svg,found
 cb337649-7ff0-47de-add0-5ccde4d7af7a,CBA Services Private Limited,commbank.com.vn,logos/cba-services-private-limited-dde7d3de.png,https://www.commbank.com.au/content/dam/commbank/commBank-logo.svg,found
@@ -37,52 +37,52 @@ f8fd0d37-060a-495d-9be6-93064e93c8e1,Cencosud Brasil,cencosud.com.br,logos/cenco
 edb8e236-47a5-419a-b0f3-7ede2352dca1,Chubb External,chubb.com,logos/chubb-external-bbf85e51.png,https://www.chubb.com/content/dam/aem-chubb-global/logo/favicon.ico,found
 5ce3b459-a1b3-46c9-ab81-097e42fb06ba,Cimed,cimedremedios.com.br,,"Homepage icon is the WordPress default; no brand icon via fetch, render, or Google favicon",not_found
 0843d829-611b-4d2b-87fa-fac838c6607e,"Clearlink Technologies, LLC",clearlink.com,logos/clearlink-technologies-llc-5eac8574.png,https://www.clearlink.com/icons/icon-512x512.png?v=18d5b9f9b3d10b161dd99c133367ab95,found
-a5b93418-a623-4e78-9dd6-d785ca5e8390,CLES Enterprise Services Chile Comercial Limitada,dxc.com,,"dxc.com: favicons are wide wordmark strips, render crop gave a cut-off 'T'; no usable square icon found",not_found
+a5b93418-a623-4e78-9dd6-d785ca5e8390,CLES Enterprise Services Chile Comercial Limitada,dxc.com,,,
 db8ab951-aa50-43dc-94d2-4357e220f13a,Cleveland Metropolitan School District,clevelandmetroschools.org,,"Favicon is a wide 62x39 icon, logos are wide wordmarks, no apple-touch-icon; fetch, render, google favicon, allow-small all rejected",not_found
-43d86760-e7d3-476f-9ba3-c92a7ef4fdcf,"CMP-090 Tri-State de Mexico, S. de R.L. de C.V.",lmana.com,,lmana.com timed out on fetch and render; Google favicon 404; web search found nothing,not_found
-029654be-96e5-4e17-8020-6ac11217788f,"CNB1 Bokai Enterprise Services (Wuhan)Co.,Ltd 伯凯企业服务（武汉）有限公司",dxc.com,,"dxc.com: favicons are wide wordmark strips, render crop gave a cut-off 'T'; no usable square icon found",not_found
-4835c041-57f2-459e-ab01-990b02ea50fd,"CNES Beijing Bokai Technology Co., Ltd.",dxc.com,,"dxc.com: favicons are wide wordmark strips, render crop gave a cut-off 'T'; no usable square icon found",not_found
+43d86760-e7d3-476f-9ba3-c92a7ef4fdcf,"CMP-090 Tri-State de Mexico, S. de R.L. de C.V.",lmana.com,,,
+029654be-96e5-4e17-8020-6ac11217788f,"CNB1 Bokai Enterprise Services (Wuhan)Co.,Ltd 伯凯企业服务（武汉）有限公司",dxc.com,,,
+4835c041-57f2-459e-ab01-990b02ea50fd,"CNES Beijing Bokai Technology Co., Ltd.",dxc.com,,,
 b58c6285-d6c5-491c-b2f2-3fb6b824fd8a,Coda,coda.io,logos/coda-5c10e9a9.png,https://cdn.coda.io/icons/png/color/coda-512.png,found
-2de53b9b-52cd-4796-8699-e7c5bf2e8fa2,CodeAI,codeai.com,,codeai.com did not resolve (DNS failure); Google favicon 404,not_found
-2e8bca7e-c414-4074-b4d0-17ad009056c2,COES Enterprise Services Colombia S.A.S.,dxc.com,,"dxc.com: favicons are wide wordmark strips, render crop gave a cut-off 'T'; no usable square icon found",not_found
+2de53b9b-52cd-4796-8699-e7c5bf2e8fa2,CodeAI,codeai.com,,,
+2e8bca7e-c414-4074-b4d0-17ad009056c2,COES Enterprise Services Colombia S.A.S.,dxc.com,,,
 77861740-87f1-4c76-848d-4c923d35722d,Cognizant,cognizant.com,logos/cognizant-5f31975a.png,https://www.cognizant.com/content/dam/cognizant-dot-com/favicon/default-favicon/180x180.png,found
 a4fdc00c-eee5-4b6c-b185-bc8d25e315a1,ComEd,exeloncorp.com,,"exeloncorp.com refused connections (fetch and render); Google favicon only 32px, too small to be a square icon",not_found
 ca44c31d-e358-4f2e-b16f-86ed8fb2c4ff,Commonwealth Bank of Australia,commbank.com.vn,logos/commonwealth-bank-of-australia-d04a5cf8.png,https://www.commbank.com.au/etc/designs/commbank/favicon.ico,found
 838450cf-17d7-4485-ba35-c93bb0aa08fc,"Commonwealth Bank of Australia, Americas",commbank.com.vn,logos/commonwealth-bank-of-australia-americas-d04a5cf8.png,https://www.commbank.com.au/etc/designs/commbank/favicon.ico,found
-f048c5af-74eb-4950-a497-f5839058d64b,Concora Credit Inc.,concoracredit.com,,concoracredit.com homepage answered HTTP 425 (with and without www); Google favicon 404,not_found
+f048c5af-74eb-4950-a497-f5839058d64b,Concora Credit Inc.,concoracredit.com,,,
 040c8291-b1b7-4437-9eb5-37d4aefee723,"Corporate J. Crew Group, LLC",jcrew.com,logos/corporate-j-crew-group-llc-2c931e3f.png,https://www.jcrew.com/next-static/images/apple-touch-icon-jcrew.png,found
 6124869f-5534-4bbc-bb03-43fa538b3c05,Cowboy Space Corp.,cowboyspace.com,logos/cowboy-space-corp-ef75c461.png,https://framerusercontent.com/images/sWnMj5M5KoHlX2ldG4opPYLWE4.png,found
-21f30233-3702-4232-9902-4d79e143f6f7,"CRES EntServ Costa Rica, Limitada",dxc.com,,dxc.com: only wide wordmarks/16px favicons; render crop gave a bare 'T' fragment; Wikimedia logo too wide,not_found
-bdf181c0-ee03-422c-b89d-da2ef760ff4f,Customer Operations,spectrum.com,,spectrum.com: homepage timed out (fetch and render); google favicon 20x30; Wikimedia 429,not_found
+21f30233-3702-4232-9902-4d79e143f6f7,"CRES EntServ Costa Rica, Limitada",dxc.com,,,
+bdf181c0-ee03-422c-b89d-da2ef760ff4f,Customer Operations,spectrum.com,,,
 44205afa-0024-4c0f-bfd6-8af59914bccb,DEUNA,deuna.com,logos/deuna-fe8e2f9e.png,https://cdn.prod.website-files.com/66269d6696cb4969aa25e070/663ac650777d6c76690e337f_WEBCLIP.webp,found
 c693f4d2-7a43-4971-b746-05a6540e9811,"Dick's Merch & Supply Chain, Inc",dickssportinggoods.com,,dickssportinggoods.com: site blocks fetch/render (403/reset); google favicon 16px; Wikipedia logo too wide,not_found
 d01676ec-9f06-40a5-9614-0c0f050831a5,DigitalOcean,digitalocean.com,logos/digitalocean-0c982ea3.png,https://www.digitalocean.com/_do-www-marketing/a8a9a0b5/_next/static/media/apple-touch-icon.9537f22a.png,found
-19d5aa78-bcae-4860-810b-6eb2db44a256,Domain Holdings Australia Pty Limited,process-pay.com,,"process-pay.com does not resolve (DNS), domain looks wrong for Domain Holdings Australia; no brand to verify",not_found
+19d5aa78-bcae-4860-810b-6eb2db44a256,Domain Holdings Australia Pty Limited,domain.com.au,,,
 957d69d4-8417-4635-95e8-7da7403b6cb4,doTERRA,conthhato.site,logos/doterra-6afe63a1.png,https://www.doterra.com/_ui/desktop/common/images/apple-touch-icon-200x200.png,found
-fd242a3f-5c34-4d75-9e02-6ef3b213928b,DXC Technology,dxc.com,,dxc.com: only wide wordmarks/16px favicons; render crop gave a bare 'T' fragment; Wikimedia logo too wide,not_found
+fd242a3f-5c34-4d75-9e02-6ef3b213928b,DXC Technology,dxc.com,,,
 0d62ead3-7e99-43c5-a6a4-700fbb507f23,E11EVEN Club Hotel & Residences,highgate.com,logos/e11even-club-hotel-residences-aafa68f0.png,https://www.highgate.com/app/themes/highgate-corporate/dist/images/favicon/apple-touch-icon.png,found
-1a659725-e42b-4a28-a234-9a4620cddf94,Eastman,eastman.com,,eastman.com: favicon 41x48; header render returned a Facebook icon (wrong); no apple-touch-icon,not_found
-73d05b0b-90ff-49fb-bbd7-f35b7d22bef6,EC Source,mastec.com,,"mastec.com (parent): 16px favicon only, header logo 293x84 wide, no square icon found",not_found
-716a4b60-1112-4b5a-91a1-1b197acce094,EG45 Electronic Data Systems (Egypt) SAE,dxc.com,,dxc.com: only wide wordmarks/16px favicons; render crop gave a bare 'T' fragment; Wikimedia logo too wide,not_found
+1a659725-e42b-4a28-a234-9a4620cddf94,Eastman,eastman.com,,,
+73d05b0b-90ff-49fb-bbd7-f35b7d22bef6,EC Source,mastec.com,,,
+716a4b60-1112-4b5a-91a1-1b197acce094,EG45 Electronic Data Systems (Egypt) SAE,dxc.com,,,
 699d9a01-a649-4b7e-a458-5c5c4fea8043,EL Costa Rica S.R.L.,edwards.com,logos/el-costa-rica-s-r-l-c3134fcf.png,https://assets-us-01.kc-usercontent.com/6239a81e-8f0f-0040-a1df-b4932a10f6ae/261e0bb6-68dd-4f07-8798-cce9b0c42cc3/logo.svg?q=75&w=96&auto=format&fm=webp&lossless=true,found
 a477fdfc-3936-44a9-901c-9b01a68224eb,Emergent Holdings,emergentholdingsinc.com,logos/emergent-holdings-6b8972c2.png,https://emergentholdingsinc.com/wp-content/uploads/2026/07/EH_clr_mrk.png,found
 c5cfafb4-acaf-4eac-bb81-dc446096f10e,Eneba,eneba.com,logos/eneba-86d91cd2.png,https://static.eneba.games/icon_512x512.1116fbe57fb071d8348e986b108fd268.png,found
-bc803016-58a8-47fb-ae19-a477833f9137,"ES87 Enterprise Solutions Outsourcing España, S.L.U.",dxc.com,,dxc.com: only wide wordmarks/16px favicons; render crop gave a bare 'T' fragment; Wikimedia logo too wide,not_found
-f18e151c-e3c1-4a06-a9da-fc9362ee6c0c,"ES88 Enterprise Solutions Consultoría y Aplicaciones España, S.L.U.",dxc.com,,dxc.com: only wide wordmarks/16px favicons; render crop gave a bare 'T' fragment; Wikimedia logo too wide,not_found
+bc803016-58a8-47fb-ae19-a477833f9137,"ES87 Enterprise Solutions Outsourcing España, S.L.U.",dxc.com,,,
+f18e151c-e3c1-4a06-a9da-fc9362ee6c0c,"ES88 Enterprise Solutions Consultoría y Aplicaciones España, S.L.U.",dxc.com,,,
 d5c27076-86d6-488a-8f70-a1ce944eb0b7,Ether.fi,ether.fi,,ether.fi: homepage HTTP 429 for fetch; render found no logo; web search found no official asset,not_found
 fbb254c8-e880-4f56-a675-80cfda762e39,European Dynamics,eurodyn.com,,eurodyn.com: homepage HTTP 202 for fetch; render failed on navigation; web search found no logo file,not_found
 32d65f15-c03b-43ca-b46e-6678346d183e,Everfield,everfield.com,logos/everfield-95728606.png,https://everfield.com/hubfs/Everfield%20Favicon.png,found
-6251f649-ec63-4326-8176-e1ef4342afad,Evolent Health International Private Limited,evolent-health.com,,evolent-health.com doesn't resolve; evolent.com has only a 16px favicon (upscale is a blank dark square) and wide header logos; search found only third-party logo aggregators,not_found
-8f11421d-89a2-4b25-bd3b-8e9797c7a11d,Evolent Health LLC,evolent-health.com,,evolent-health.com doesn't resolve; evolent.com has only a 16px favicon (upscale is a blank dark square) and wide header logos; search found only third-party logo aggregators,not_found
-67b58172-fada-44bd-9d58-633f63fbbc75,"Evolent Specialty Services, Inc",evolent-health.com,,evolent-health.com doesn't resolve; evolent.com has only a 16px favicon (upscale is a blank dark square) and wide header logos; search found only third-party logo aggregators,not_found
+6251f649-ec63-4326-8176-e1ef4342afad,Evolent Health International Private Limited,evolent.com,,,
+8f11421d-89a2-4b25-bd3b-8e9797c7a11d,Evolent Health LLC,evolent.com,,,
+67b58172-fada-44bd-9d58-633f63fbbc75,"Evolent Specialty Services, Inc",evolent.com,,,
 b8651f69-7a10-4dbe-a2dd-1d57d8a34395,Expedia Group,expediagroupinc.com,logos/expedia-group-ffb09c2f.png,https://www.expediagroup.com/content/experience-fragments/expediagroup/live-copies/en-us/header/master/_jcr_content/root/header/logo.coreimg.svg/1779134972973/expedia-group-logo-24.svg,found
 2f5e0f8b-f87d-4908-b146-8b32cfa0f516,Fair Haven Community Health Care,fhchc.org,logos/fair-haven-community-health-care-1f3e2acf.png,https://irp.cdn-website.com/97eee729/dms3rep/multi/FHCHC-Favicon--281-29.png,found
 cdb9bef9-1c66-4e6c-a3dc-dab35f08202b,First Hawaiian Bank,fhb.com,,"fhb.com: favicon only 48x24 / 128x64 (not square), no apple-touch-icon, header logo is a wide wordmark; google favicon 48x24; search found only third-party aggregators",not_found
 8628ad64-84cf-4c77-a407-2e42854ed172,FIRST STUDENT MANAGEMENT LLC,firststudentmanagement.com,logos/first-student-management-llc-a5556f36.png,https://firststudentinc.com/wp-content/uploads/cropped-android-chrome-256x256-1-180x180.png,found
 b3bafdfa-d7e7-4e60-99de-2606be2ce5df,Flatiron Health,flatiron.com,logos/flatiron-health-983ff990.png,rendered inline SVG on https://flatiron.com,found
-cc3a7455-8ea2-48f2-8f16-4a89963d101b,"FORWARD, INC.",forwardinc.net,,"forwardinc.net doesn't resolve (DNS), forwardinc.com connection reset, google favicon 404; web search found no official logo",not_found
+cc3a7455-8ea2-48f2-8f16-4a89963d101b,"FORWARD, INC.",forwardinc.net,,,
 62ff3ab6-c0bb-4283-8d7e-bf0a0d684812,Frost Bank,frost-bank.live,logos/frost-bank-158701b3.png,https://www.frostbank.com/web-app-manifest-512x512.png,found
-5430e3ca-0617-4ff3-8d49-e4855e895bad,GBA5 EntServ UK Limited,dxc.com,,"dxc.com: favicons are wide strips (180x30), rendered header crop gave a wrong 'T' fragment, no apple-touch-icon; search found only third-party aggregators",not_found
+5430e3ca-0617-4ff3-8d49-e4855e895bad,GBA5 EntServ UK Limited,dxc.com,,,
 dda72c91-d537-4868-a32f-54528b8d0eb9,Generate,generatecapital.com,logos/generate-6fbf8cd5.png,https://generatecapital.com/wp-content/uploads/2026/08/cropped-favicon2-180x180.png,found
 c306ce4a-31f7-43ae-87b7-cec76c8ba16d,Geneva Rock Products,clydeinc.com,logos/geneva-rock-products-8d10382c.png,https://www.clydeinc.com/wp-content/smush-webp/cropped-favicon-180x180.png.webp,found
 ae000a59-2db6-456e-942a-6b11d83f9e2c,GiveCampus,givecampus.co,logos/givecampus-caa48663.png,"https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://givecampus.com&size=256",found
@@ -92,7 +92,7 @@ ae000a59-2db6-456e-942a-6b11d83f9e2c,GiveCampus,givecampus.co,logos/givecampus-c
 a91dd507-a765-4394-88d3-86f7b42f2121,GovWell,govwell.com,logos/govwell-8e57154a.png,https://cdn.prod.website-files.com/697732d0a9e7ed6e5a43811f/698f56cdef10bc5513ab554a_Webclip.png,found
 c448538a-1614-4175-8e18-38ecd04e72a4,Hayes Locums,hayeslocums.com,logos/hayes-locums-44de636c.png,https://www.hayeslocums.com/wp-content/uploads/2024/12/HayesLocums_300x300_Logo.png,found
 d55f7fca-5c2a-400b-814d-b78fd289a65a,"HBK Engineering, LLC",hbkengineering.com,,"hbkengineering.com: favicon 32x20 only (not square), rendered result was LinkedIn's icon, google favicon 32x20",not_found
-8971b5b2-e6da-4a02-b5c2-00c68a8feaa5,Hendricks Community Hospital,hendrickshospital.org,,"hendrickshospital.org doesn't resolve; real site hendrickshosp.org has only Wix default favicon, render found nothing; web search found no usable icon",not_found
+8971b5b2-e6da-4a02-b5c2-00c68a8feaa5,Hendricks Community Hospital,hendrickshospital.org,,,
 8ea87c87-2945-44af-a23e-80091cd4db5c,Highgate Hotels Corporate Office - NY,highgate.com,logos/highgate-hotels-corporate-office-ny-aafa68f0.png,https://www.highgate.com/app/themes/highgate-corporate/dist/images/favicon/apple-touch-icon.png,found
 9316cf13-4667-4b0d-ad0d-7d95e418907f,Hollywood Casino Morgantown,pennentertainment.com,logos/hollywood-casino-morgantown-e0b469e1.png,https://upload.wikimedia.org/wikipedia/commons/e/ec/Penn_Entertainment_logo.svg,found
 c0d883e9-fc1a-4261-a583-279aafc8d3b1,HU00 DXC Technology Magyarország Kft,dxc.com,logos/hu00-dxc-technology-magyarorsz-g-kft-e5a28ace.png,https://upload.wikimedia.org/wikipedia/commons/7/73/DXC_Tech.png,found
@@ -109,7 +109,7 @@ a61d81c7-6fbe-42ee-89c8-b89131ac28dc,Insurify,insurify.com,logos/insurify-7e9e5f
 ca7d495d-9caa-479b-b65e-98cb8e01b921,IT40 Enterprise Services Italia S.r.l.,dxc.com,logos/it40-enterprise-services-italia-s-r-l-e5a28ace.png,https://upload.wikimedia.org/wikipedia/commons/7/73/DXC_Tech.png,found
 755aa977-715f-497c-a819-4e31e2d071a1,IT43 Enterprise Tech Partners Italia S.r.l.,dxc.com,logos/it43-enterprise-tech-partners-italia-s-r-l-e5a28ace.png,https://upload.wikimedia.org/wikipedia/commons/7/73/DXC_Tech.png,found
 e1d7f2b9-a0fa-4450-8969-15239bbc1676,"JPES DXC Technology Japan, Ltd.",dxc.com,logos/jpes-dxc-technology-japan-ltd-e5a28ace.png,https://upload.wikimedia.org/wikipedia/commons/7/73/DXC_Tech.png,found
-8560f7ca-d5b5-4fc5-beb8-dc39c958d6b2,"JRJ Investments, Inc.",desertaudi.com,,desertaudi.com refuses connections (fetch and render); web search found no logo,not_found
+8560f7ca-d5b5-4fc5-beb8-dc39c958d6b2,"JRJ Investments, Inc.",desertaudi.com,,,
 d7d20b65-646d-472e-a281-0755527e28ee,Juicebox,juicebox.ai,logos/juicebox-dcaac43e.png,https://framerusercontent.com/images/5F0RNyA1458EzA6e5GLvfY7hTS8.png,found
 7363dab7-2a4c-4b75-b71e-431907ac83eb,Key West Collection,davidsonhospitality.com,logos/key-west-collection-35d08a58.png,https://www.davidsonhospitality.com/content/themes/base/assets/img/favicon/apple-icon-180x180.png,found
 721a5fb4-2cbc-4085-8642-83c927b767fc,Ladgov Corporation,ladgov.com,logos/ladgov-corporation-479a2986.png,"https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://ladgov.com&size=256",found
@@ -137,8 +137,8 @@ bd8f1d7f-f112-46fb-b88f-25596fd328da,Medline International Two Australia Pty Ltd
 94e694b6-667a-45a0-9b60-dda16a514167,Medline Operations Germany GmbH,lmana.com,logos/medline-operations-germany-gmbh-a804fb67.png,https://static.captcha-delivery.com/captcha/assets/set/b22762c8240618fb720db4661212cb8ed09ea44d/logo.png?update_cache=645033690244757058,found
 a68aa5ed-1b6d-4cc5-8fe6-436b05876886,Medline Vietnam Trading Company Limited,lmana.com,logos/medline-vietnam-trading-company-limited-a804fb67.png,https://static.captcha-delivery.com/captcha/assets/set/b22762c8240618fb720db4661212cb8ed09ea44d/logo.png?update_cache=645033690244757058,found
 46761957-db35-45cb-bd27-672fd7ded1ee,Medtrans LLC,medtrans.ai,,medtrans.ai only has the Squarespace default favicon and a wide wordmark (1314x171); no square icon found,not_found
-69fd96e3-1d75-40fd-8e5e-d2c54f3d28bd,Microtek Dominicana SAS,lmana.com,,"Microtek is a distinct brand; lmana.com is unreachable and only the Medline logo was found, which would be the wrong brand",not_found
-27e3d4e1-e3a9-48ba-b937-12053c0684da,"MKTG, Inc",mktginc.com,,"mktginc.com refused connections (fetch, render, favicon); no icon found",not_found
+69fd96e3-1d75-40fd-8e5e-d2c54f3d28bd,Microtek Dominicana SAS,lmana.com,,,
+27e3d4e1-e3a9-48ba-b937-12053c0684da,"MKTG, Inc",mktginc.com,,,
 d2d246e0-f85a-44b6-99c8-49cd4179d4b9,MNTN,mountain.com,logos/mntn-4f7b8cc9.png,https://mountain.com/wp-content/themes/mountain/img/favicons/apple-touch-icon.png,found
 b93898a4-8b70-47b8-8e60-0176abead4ec,"Moog Australia Pty., Ltd.",moog.com.au,logos/moog-australia-pty-ltd-36adb0df.png,https://www.moog.com/etc.clientlibs/moog/clientlibs/moog.all-components/resources/images/favicon.ico,found
 9805b3ba-d03a-4c6c-a082-9b3b1b4bafe4,Moog Controls (India) Pvt. Ltd.,moog.de,logos/moog-controls-india-pvt-ltd-36adb0df.png,https://www.moog.com/etc.clientlibs/moog/clientlibs/moog.all-components/resources/images/favicon.ico,found
@@ -151,41 +151,41 @@ f58ad757-577c-4905-b2e0-4d5fc4ffd037,Moog Military Aircraft LLC,moog.de,logos/mo
 8f248b66-5969-4e2c-be83-f08626e41423,Moog Wolverhampton Limited,moog.de,logos/moog-wolverhampton-limited-36adb0df.png,https://www.moog.com/etc.clientlibs/moog/clientlibs/moog.all-components/resources/images/favicon.ico,found
 0f98e9eb-cdcd-4014-a0f9-a57441de5557,"MSM-174 Medline Soluciones Medicas, S. de R.L. de C.V.",lmana.com,logos/msm-174-medline-soluciones-medicas-s-de-r-l-de-c-v-a804fb67.png,https://static.captcha-delivery.com/captcha/assets/set/b22762c8240618fb720db4661212cb8ed09ea44d/logo.png?update_cache=645033690244757058,found
 a67ebdb2-a0b5-4ab4-9ece-069e6c277d66,"MXC-686 Productos Medline Mexicali, S. de R.L. de C.V.",lmana.com,logos/mxc-686-productos-medline-mexicali-s-de-r-l-de-c-v-a804fb67.png,https://static.captcha-delivery.com/captcha/assets/set/b22762c8240618fb720db4661212cb8ed09ea44d/logo.png?update_cache=645033690244757058,found
-39472940-f31e-4ff1-924c-a348ead9eb9e,MXES Entserv Enterprise Services Mexico S. de R.L. de C.V.,dxc.com,,dxc.com favicons are wide strips; header crop produced a wrong 'T' fragment; web search found no direct square icon,not_found
+39472940-f31e-4ff1-924c-a348ead9eb9e,MXES Entserv Enterprise Services Mexico S. de R.L. de C.V.,dxc.com,,,
 695f3aa8-78e3-49d7-b87a-0362687f9862,MY20 EntServ Malaysia Sdn. Bhd.,dxc.com,logos/my20-entserv-malaysia-sdn-bhd-03212097.png,https://avatars.githubusercontent.com/u/6401996?s=256&v=4,found
 228d1471-d4bc-44c0-811a-b07e986d163d,Mysten Labs,mystenlabs.com,logos/mysten-labs-fc9ebccb.png,https://avatars.githubusercontent.com/u/88845815?s=256&v=4,found
 36511718-afbd-4d6f-8625-4d136c71cbc4,National Reconnaissance Office (NRO),nro.gov,,nro.gov unreachable (DNS/403); Google favicon 404; Wikimedia seal URLs 404/400,not_found
-324310f4-7638-4f68-83e0-16a6bf30ed3f,Network Technology Services,spectrum.com,,spectrum.com timed out; Google favicon too small; GitHub avatar was a generic identicon,not_found
+324310f4-7638-4f68-83e0-16a6bf30ed3f,Network Technology Services,spectrum.com,,,
 fb4081aa-5ad8-4999-8c8c-03254471ea0c,Newsela,newsela.com,logos/newsela-06d1cd91.png,https://cdn.prod.website-files.com/6643998773f47007e008ebae/66f1805da7952f0e6ee76574_Webclip.png,found
 01b4420a-984c-4eb1-aee8-47400effa9a9,NiSource,nisource.com,logos/nisource-dfbc3621.png,https://www.nisource.com/favicon.ico,found
-dd5adf2d-b8c8-48f5-9f87-798b3ba03536,"NLDC-173 Nuevo Laredo Directo Al Cliente, S. de R.L. de C.V.",lmana.com,,lmana.com timed out (plain and render); Google favicon 404; no brand icon found,not_found
+dd5adf2d-b8c8-48f5-9f87-798b3ba03536,"NLDC-173 Nuevo Laredo Directo Al Cliente, S. de R.L. de C.V.",lmana.com,,,
 ded59ed9-f087-4298-b4d7-9d031f3165a2,"NLEX Enterprise Services International Trade B.V., Saudi Arabian Branch",dxc.com,logos/nlex-enterprise-services-international-trade-b-v-saudi-arabian-branch-03212097.png,https://avatars.githubusercontent.com/u/6401996?s=256&v=4,found
 b1e5251f-2abb-49bb-83d3-e81648d21b5f,North Houston Pole Line LP,nhplc.com,logos/north-houston-pole-line-lp-e372af18.png,https://www.nhplc.com/wp-content/uploads/2022/03/cropped-NHPL600x100-2-540x90-1-180x180.png,found
 0245b775-d9c1-44a2-8334-2c5ffd616357,"Northstar Energy Solutions, LLC.",nses.com,logos/northstar-energy-solutions-llc-98749567.png,https://www.nses.com/wp-content/themes/northstar-services/apple-touch-icon.png?v=1.0.90,found
 46d8e44d-1a5c-4ec1-822d-a691b85a0acc,Numa,numastays.com,logos/numa-c81b1c47.png,"https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://numastays.com&size=256",found
 512adcf4-82d4-4ead-8302-80de95a1a4bf,NZES DXC Enterprise NZ,dxc.com,logos/nzes-dxc-enterprise-nz-03212097.png,https://avatars.githubusercontent.com/u/6401996?s=256&v=4,found
-97d6a884-d123-4fda-963d-98766a2bc244,Ohio State University,osuwexmedlivingdonor.org,,site returns 403 for icons; Google favicon 404; no brand icon found,not_found
+97d6a884-d123-4fda-963d-98766a2bc244,Ohio State University,osu.edu,,,
 327cd202-d802-4183-ae54-2aa0831442bd,Omni Hotels & Resorts,omnihotels.com,logos/omni-hotels-resorts-4d9e04d6.png,"https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://omnihotels.com&size=256",found
 3518d7f9-b084-4e0b-ac63-114865ea47af,OpenRouter,openrouter.ai,logos/openrouter-e5948990.png,https://openrouter.ai/icon-pwa-512.png,found
 cbd826a1-bdd6-461b-9a83-69da8d927ac7,"PA20 Enterprise Services Panama, S. de R.L.",dxc.com,logos/pa20-enterprise-services-panama-s-de-r-l-03212097.png,https://avatars.githubusercontent.com/u/6401996?s=256&v=4,found
 2d71fd19-5180-40fb-bfe3-142de91a2d04,PainPoint Health,painpointhealth.com,logos/painpoint-health-69ea3fae.png,https://painpointhealth.com/wp-content/uploads/2021/06/cropped-ppicon-300x300.png,found
 10f6110f-3e2b-445b-a9e8-02b63421c136,Palm Beach Gardens Medical Center,tenethealth.com,,tenethealth.com 403 (plain and render); Google favicon only 107x47 wide; no direct square icon URL found,not_found
-7eb3e51c-1395-47a8-8da5-d193a86e158e,PDM-110 Productos Medline S.A. de C.V.,lmana.com,,lmana.com timed out; Google favicon 404; GitHub avatar was a generic identicon,not_found
-af7e654c-82fa-4539-a5c5-2ed51c5bf10f,Pentalver Transport Ltd,pentalvergroup.com,,pentalvergroup.com does not resolve; Google favicon 404; web search found no direct image,not_found
+7eb3e51c-1395-47a8-8da5-d193a86e158e,PDM-110 Productos Medline S.A. de C.V.,lmana.com,,,
+af7e654c-82fa-4539-a5c5-2ed51c5bf10f,Pentalver Transport Ltd,pentalvergroup.com,,,
 21fd9470-136f-47a9-b1b6-d88b5178ffda,Perficient,perficient.com,logos/perficient-80d51354.png,"https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://perficient.com&size=256",found
-07765c40-f845-4882-bd77-5b7d650eb803,"PHES EntServ Philippines, Inc.",dxc.com,,dxc.com: only 26px-high wide favicons; header render cropped a wrong 'T' fragment; web search gave only aggregator pages,not_found
-6e538353-9651-4f2b-9800-34c4c027abb0,"PHET Enterprise Services (AP) Limited, Philippines Regional Operating Headquarters",dxc.com,,dxc.com: only 26px-high wide favicons; header render cropped a wrong 'T' fragment; web search gave only aggregator pages,not_found
-f2e36b66-6945-4ad1-bce1-960268af3f1b,PLES DXC TECHNOLOGY POLSKA sp. z o.o.,dxc.com,,dxc.com: only 26px-high wide favicons; header render cropped a wrong 'T' fragment; web search gave only aggregator pages,not_found
+07765c40-f845-4882-bd77-5b7d650eb803,"PHES EntServ Philippines, Inc.",dxc.com,,,
+6e538353-9651-4f2b-9800-34c4c027abb0,"PHET Enterprise Services (AP) Limited, Philippines Regional Operating Headquarters",dxc.com,,,
+f2e36b66-6945-4ad1-bce1-960268af3f1b,PLES DXC TECHNOLOGY POLSKA sp. z o.o.,dxc.com,,,
 08b3b975-c575-4e57-80b6-ede1d77b785a,POL Aptiv Services Poland S.A.,aptiv.com,logos/pol-aptiv-services-poland-s-a-787428ec.png,https://www.aptiv.com/web-app-manifest-512x512.png,found
 91efb432-8837-484f-96e8-acaf84f0e52a,Principal,principal.com,logos/principal-9bd80ceb.png,https://www.principal.com/modules/custom/pfg_core/assets/principal_full_bynder.png,found
 b829f6c9-f894-47db-a11b-818427da835e,Pro-Pak Foods Ltd,pro-pakfoods.co.uk,,"pro-pakfoods.co.uk: favicon 16px/transparent, only a wide 170x85 logo, google favicon 16px",not_found
 da988470-f5fd-4406-8d6b-a1be73cbcfc5,Radiant,radiant.co,logos/radiant-146d11da.png,https://cdn.prod.website-files.com/690a89e276b0d65618a2b915/691e531f3f4b7270eb2017ca_webclip.png,found
-f9ff6d15-7969-4131-8a4c-cdf0f046c501,"RCI-147 RCI Hudson de Mexico, S. de R.L. de C.V.",lmana.com,,lmana.com: homepage fetch timed out,not_found
+f9ff6d15-7969-4131-8a4c-cdf0f046c501,"RCI-147 RCI Hudson de Mexico, S. de R.L. de C.V.",lmana.com,,,
 916175d1-93fd-47b8-aa2b-c961735ceb9f,RC Willey,rcwilley.com,logos/rc-willey-f9868b4a.png,https://www.rcwilley.com/favicons/apple-touch-icon-180x180.png,found
 33d773ce-9016-4d65-b131-254baeba0f39,RC Willey Home Furnishings,rcwilley.com,logos/rc-willey-home-furnishings-f9868b4a.png,https://www.rcwilley.com/favicons/apple-touch-icon-180x180.png,found
 618b09af-2ff7-4aca-8fc8-c6f0800c612f,Real REMAX Group,realremaxgroup.com,,realremaxgroup.com: favicon 48px/unreadable; header render gave an invisible white R; remax.com blocked,not_found
-d2712f75-083e-48d9-bcf3-40ebf4a81018,Regeneron GmbH,regeneronpro.uk,,"regeneronpro.uk: only 48px favicon, google favicon 404",not_found
-d6853c7b-462a-417a-bcfa-fedf2e4377ec,REI (Recreational Equipment Inc.),rei.jobs,,rei.jobs: 16px favicon only; rei.com timed out; web search gave no direct image,not_found
+d2712f75-083e-48d9-bcf3-40ebf4a81018,Regeneron GmbH,regeneron.com,,,
+d6853c7b-462a-417a-bcfa-fedf2e4377ec,REI (Recreational Equipment Inc.),rei.com,,,
 a7a4a56d-3b95-4f43-884a-d1da601eea30,Resend,resend.dev,logos/resend-d5d6925a.png,https://resend.com/static/favicons/favicon-marketing@180x180.png?v=1,found
 2597227d-879e-4e74-9d38-e4d73d14e060,Residence Inn Salem,highgate.com,logos/residence-inn-salem-aafa68f0.png,https://www.highgate.com/app/themes/highgate-corporate/dist/images/favicon/apple-touch-icon.png,found
 90188666-5b55-42b7-ac60-0053c74e23a2,Royal Canin Belux,mars.com,,mars.com blocked (403); royalcanin.com 42x24 favicon only; web search gave no direct image,not_found
@@ -197,31 +197,31 @@ ec710596-e123-45d7-aa70-cd4258be567b,SailPoint Technologies fz-llc,sailpoint.io,
 b8a0af22-f45f-408a-9970-34767f71cef6,SailPoint Technologies Korea Limited,sailpoint.io,logos/sailpoint-technologies-korea-limited-92f87b15.png,https://www.sailpoint.com/icon.png?icon.2hpqfovpzbyty.png,found
 ac6da5f1-9463-4486-bb14-faa8fb1856a4,SailPoint Technologies UK Ltd,sailpoint.io,logos/sailpoint-technologies-uk-ltd-92f87b15.png,https://www.sailpoint.com/icon.png?icon.2hpqfovpzbyty.png,found
 e82de8cc-1663-45c7-998e-c60283677332,SailPoint Tecnologia Spain S.L.,sailpoint.io,logos/sailpoint-tecnologia-spain-s-l-92f87b15.png,https://www.sailpoint.com/icon.png?icon.2hpqfovpzbyty.png,found
-88874ce2-66de-4f16-a8dc-84cb401f7382,Saint Vincent Health Center,svhs.org,,svhs.org does not resolve (DNS); no favicon; Google favicon 404,not_found
+88874ce2-66de-4f16-a8dc-84cb401f7382,Saint Vincent Health Center,svhs.org,,,
 de816b9e-1c89-4d63-85ec-2d38091daf84,Sales and Marketing,q5.marketing,,"q5.marketing does not resolve (DNS); generic name, no brand identifiable",not_found
-2b688b47-d450-4017-b873-8cd5da72a42d,"Service Finance Company, LLC",truistmanagedfdns.org,,"domain truistmanagedfdns.org has no icon; rendered header only gave a cropped letter T of the Truist wordmark, not Service Finance's brand",not_found
-89a172e0-0300-480e-875c-326107602527,SG45 DXC Technology Services Singapore Pte. Ltd,dxc.com,,"dxc.com favicons are wide strips (<=26px tall), render crop produced just a letter fragment, no square icon found",not_found
-1b94421d-0339-451e-bf76-b045f28074aa,SKES DXC Technology Slovakia s.r.o,dxc.com,,"dxc.com favicons are wide strips (<=26px tall), render crop produced just a letter fragment, no square icon found",not_found
+2b688b47-d450-4017-b873-8cd5da72a42d,"Service Finance Company, LLC",svcfin.com,,,
+89a172e0-0300-480e-875c-326107602527,SG45 DXC Technology Services Singapore Pte. Ltd,dxc.com,,,
+1b94421d-0339-451e-bf76-b045f28074aa,SKES DXC Technology Slovakia s.r.o,dxc.com,,,
 b13a740a-5f01-4227-8106-501ffa3b1b52,Sol Systems,solsystems.com,logos/sol-systems-5ff9303f.png,https://www.solsystems.com/wp-content/uploads/2017/02/favicon.png,found
 8e54b339-a850-4524-8963-6005e6912c3a,Strava,strava.com,logos/strava-e1f9f84f.png,https://d3nn82uaxijpm6.cloudfront.net/apple-touch-icon-180x180.png?v=dLlWydWlG8,found
-648e9c1a-ae5e-4bac-b845-e759ee044679,Sutter Coast Hospital,suttercoast.org,,suttercoast.org connection refused; sutterhealth.org favicon only 48px (not retried as it is a different brand site),not_found
-59fbca62-0bb2-4f18-8f29-b492757df9d6,Sutter Valley Medical Foundation,srmf.com,,srmf.com connection refused; no icon reachable,not_found
+648e9c1a-ae5e-4bac-b845-e759ee044679,Sutter Coast Hospital,suttercoast.org,,,
+59fbca62-0bb2-4f18-8f29-b492757df9d6,Sutter Valley Medical Foundation,sutterhealth.org,,,
 3f64020e-4aac-448a-9ab6-f0dc8e93c3f3,"Tapestry, Inc.",shoptapestryinc.com,logos/tapestry-inc-f5d027c1.png,https://www.tapestry.com/wp-content/themes/bootscore-child-main/img/favicon/cropped-tapestry-favicon-180x180.png,found
-6241c9ef-bee3-4b16-851c-d9e23232f595,"TAYMAN INDUSTRIES, INC.",taymaninc.com,,taymaninc.com does not resolve (DNS); Google favicon 404,not_found
+6241c9ef-bee3-4b16-851c-d9e23232f595,"TAYMAN INDUSTRIES, INC.",taymaninc.com,,,
 f9ff09fe-fac0-4c51-8c88-9437036b6f51,TD SYNNEX Corporation,tdsynnex.com,logos/td-synnex-corporation-bc4201ba.png,https://www.tdsynnex.com/na/us/wp-content/uploads/sites/2/2026/04/TDSYNNEXLogo-clr-@2x.png,found
 ed748f74-0d5b-4cd2-8f5e-d9c03c78920b,Teach For All,teachforall.org,logos/teach-for-all-26e16793.png,https://teachforall.org/themes/custom/tfal/favicons/apple-touch-icon.png,found
 ff28d977-a10a-4798-9806-e04ea8ec0a7b,Team Accessories Limited dba Moog MRO Services,moog.de,logos/team-accessories-limited-dba-moog-mro-services-36adb0df.png,https://www.moog.com/etc.clientlibs/moog/clientlibs/moog.all-components/resources/images/favicon.ico,found
-020ccbe8-6bdd-42d4-951a-632cff4d9d2d,The Hospitals of Providence - Sierra Campus,tenethealth.com,,tenethealth.com 403 (plain and render); Google favicon only 107x47 wide; no direct square icon found,not_found
-9b9d1a9b-c75f-462d-90e4-63522fa01f12,"The Vanguard Group, Inc.",vanguardfmgroup.com,,vanguardfmgroup.com does not resolve (ENOTFOUND); Google favicon 404; domain doesn't clearly match The Vanguard Group,not_found
-ab827576-44b6-4121-b01d-6ca7a4dfac7c,THOP,thopassessoria.com.br,,thopassessoria.com.br does not resolve (ENOTFOUND); Google favicon 404,not_found
+020ccbe8-6bdd-42d4-951a-632cff4d9d2d,The Hospitals of Providence - Sierra Campus,thehospitalsofprovidence.com,,,
+9b9d1a9b-c75f-462d-90e4-63522fa01f12,"The Vanguard Group, Inc.",vanguard.com,,,
+ab827576-44b6-4121-b01d-6ca7a4dfac7c,THOP,thopassessoria.com.br,,,
 fe844b42-426f-4f5f-8f10-d265b4dd9853,Thrive Market,thrivemarketjobs.com,logos/thrive-market-78c386dc.png,https://assets.thrivemarket.com/favicon-194x194.png?v=pgegAroPo5,found
 a537d5f9-1a33-4292-8604-5817234bc227,Tines,tines.com,logos/tines-d71832fb.png,https://www.tines.com/v5-assets/favicon.png,found
 7181e17d-43f0-419a-8c41-1d51e9051285,Trainline,trainlinegroup.com,logos/trainline-f443ce59.png,https://trainlinegroup.com/media/gpfosrnq/logo-mint-2-1.svg,found
 168af648-7a3d-49e4-89e8-1d1e02d8033e,Truist CIG LLC,truistmanagedfdns.org,logos/truist-cig-llc-1b1805b6.png,https://www.truist.com/favicon.ico,found
 1dd65132-5931-4c19-a236-c9ce83c16891,"Truist Community Capital, LLC",truistmanagedfdns.org,logos/truist-community-capital-llc-1b1805b6.png,https://www.truist.com/favicon.ico,found
-e0895ced-1bbd-4ee4-aab3-9cef1ca253db,TWES EIT Services Taiwan Co. Ltd.,dxc.com,,"dxc.com: favicons are wide strips, render crop gave a 'T' cut from the DXC wordmark (not the mark); Google favicon 180x30; web search found no direct image",not_found
+e0895ced-1bbd-4ee4-aab3-9cef1ca253db,TWES EIT Services Taiwan Co. Ltd.,dxc.com,,,
 fca1bd5b-97a1-48c9-b8f8-9f65f108c1fc,UNAVAILABLE,autenticalamichoacana.com,,autenticalamichoacana.com does not resolve (ENOTFOUND); Google favicon 404; name is a placeholder (UNAVAILABLE),not_found
-480f0fcf-77c1-439b-86d6-c1edd828114b,United Insurance Company of America,kemperhsc.com,,kemperhsc.com does not resolve; kemper.com only has a 16x16 favicon whose upscale is blank; web search gave no direct image,not_found
+480f0fcf-77c1-439b-86d6-c1edd828114b,United Insurance Company of America,kemper.com,,,
 83e8fe02-8c32-434b-93d9-f4377f5d9b43,"UpToDate, Inc.",u2d.com.br,,,
 fa23f434-3511-4bd9-84c7-3261c155a7c9,USA018 Thomson Reuters Holdings Inc.,thomsonreuters.com,,,
 ec7e783a-1324-4e0b-a6f0-59edbd243cda,USA7 DXC Technology Services LLC,dxc.com,,,
@@ -243,3 +243,26 @@ cddaba87-d086-44d9-97e3-95b50a778299,WSP,wspgroup.co.uk,,,
 0ed68027-3ddd-465b-bc57-341833bf2897,www.rei.jobs,rei.jobs,,,
 eba689c0-030d-4e83-9a57-62cde9e0591f,Yalo Inc.,yalo.ai,,,
 635f38c0-e348-4dfd-b10c-df54015dbf54,"Zoom Communications, Inc.",zoomcommunications.biz,,,
+6c2631fa-2cee-4e2d-8bdb-bac25d3de45a,Abnormal,abnormal.ai,,,
+f1a35b3c-6364-4850-9501-a6e1e6967a88,Abnormal AI,abnormal.ai,,,
+6271cf52-b1ac-44b3-a36d-fcfe62c1610d,Abrazo,abrazomarketing.com,,,
+c414b90e-86bf-4ea2-9abe-9b38be82b168,BCN Group,bcngroup.in,,,
+05b2b405-8d74-4f87-8c1d-5c70ba7ad214,Chicopee,chicopee.com,,,
+3d2687e6-7c8f-4de8-a6f4-ff7dc3b76aad,Clearlink,clearlink.com,,,
+622c9169-adf2-4c98-a315-919773dbc229,CoStar Group,costargroup.com,,,
+538dca7f-b5ca-4040-b475-f19c68ff6d5f,Department of Agriculture,lda.gov.za,,,
+2e2845f1-5a25-4353-979c-305ede923f0c,Don Coqui,doncoqui.tv,,,
+a5b4b8ff-0c26-4674-a391-91239ebb5929,ECOFLO INC,ecoflo.com.co,,,
+d5d1794a-016c-434e-9358-136f2c97fa1c,Guild Education,guild.com,,,
+6e86c8fc-af79-431f-b81c-1b1a1d56e792,HV Global Management Corporation,hgv.com,,,
+f5938b22-8976-4a6e-b6ca-94b5fae65f43,job.hdi.group,hdi.group,,,
+0e3fcf42-9609-4794-9b21-f8727bd8fba6,LINE Corporation,linecorp.com,,,
+db6d8f1d-f617-4ca1-a358-9bbf49771f0f,Oregon Steel Mills LLC,oregonsteelmills.com,,,
+1b2cf083-734a-4c68-b36d-de1156524f16,"RIVER RECYCLING, LLC",riverrecyclingind.com,,,
+4e1ddcb3-f172-4cc2-8614-7f5e9cdf7e87,San Juan School District,sanjuanschool.org,,,
+9c6bf90d-c02e-420f-be06-8c34390f975a,Seesaw,seesawcreative.co,,,
+b99af343-0a53-46c2-853f-4198b7cd4122,"Service Net Warranty, LLC",servicenet.com,,,
+c2a523dd-063f-4c82-adc0-9465a8b76f53,The Joule,thejouledallas.com,,,
+1f516e9a-f4a4-41db-9604-6f6c502eefd3,Time Doctor,timedoctor.com,,,
+e9ad4896-6374-495c-82c0-5c4c1c4d0407,Truist Securities,truist.com,,,
+79c10e55-2274-4843-98a6-bdbb74803d43,UCSF,ucsf.edu,,,
