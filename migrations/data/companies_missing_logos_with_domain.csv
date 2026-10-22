@@ -212,16 +212,16 @@ f9ff09fe-fac0-4c51-8c88-9437036b6f51,TD SYNNEX Corporation,tdsynnex.com,logos/td
 ed748f74-0d5b-4cd2-8f5e-d9c03c78920b,Teach For All,teachforall.org,logos/teach-for-all-26e16793.png,https://teachforall.org/themes/custom/tfal/favicons/apple-touch-icon.png,found
 ff28d977-a10a-4798-9806-e04ea8ec0a7b,Team Accessories Limited dba Moog MRO Services,moog.de,logos/team-accessories-limited-dba-moog-mro-services-36adb0df.png,https://www.moog.com/etc.clientlibs/moog/clientlibs/moog.all-components/resources/images/favicon.ico,found
 020ccbe8-6bdd-42d4-951a-632cff4d9d2d,The Hospitals of Providence - Sierra Campus,tenethealth.com,,tenethealth.com 403 (plain and render); Google favicon only 107x47 wide; no direct square icon found,not_found
-9b9d1a9b-c75f-462d-90e4-63522fa01f12,"The Vanguard Group, Inc.",vanguardfmgroup.com,,,
-ab827576-44b6-4121-b01d-6ca7a4dfac7c,THOP,thopassessoria.com.br,,,
-fe844b42-426f-4f5f-8f10-d265b4dd9853,Thrive Market,thrivemarketjobs.com,,,
-a537d5f9-1a33-4292-8604-5817234bc227,Tines,tines.com,,,
-7181e17d-43f0-419a-8c41-1d51e9051285,Trainline,trainlinegroup.com,,,
-168af648-7a3d-49e4-89e8-1d1e02d8033e,Truist CIG LLC,truistmanagedfdns.org,,,
-1dd65132-5931-4c19-a236-c9ce83c16891,"Truist Community Capital, LLC",truistmanagedfdns.org,,,
-e0895ced-1bbd-4ee4-aab3-9cef1ca253db,TWES EIT Services Taiwan Co. Ltd.,dxc.com,,,
-fca1bd5b-97a1-48c9-b8f8-9f65f108c1fc,UNAVAILABLE,autenticalamichoacana.com,,,
-480f0fcf-77c1-439b-86d6-c1edd828114b,United Insurance Company of America,kemperhsc.com,,,
+9b9d1a9b-c75f-462d-90e4-63522fa01f12,"The Vanguard Group, Inc.",vanguardfmgroup.com,,vanguardfmgroup.com does not resolve (ENOTFOUND); Google favicon 404; domain doesn't clearly match The Vanguard Group,not_found
+ab827576-44b6-4121-b01d-6ca7a4dfac7c,THOP,thopassessoria.com.br,,thopassessoria.com.br does not resolve (ENOTFOUND); Google favicon 404,not_found
+fe844b42-426f-4f5f-8f10-d265b4dd9853,Thrive Market,thrivemarketjobs.com,logos/thrive-market-78c386dc.png,https://assets.thrivemarket.com/favicon-194x194.png?v=pgegAroPo5,found
+a537d5f9-1a33-4292-8604-5817234bc227,Tines,tines.com,logos/tines-d71832fb.png,https://www.tines.com/v5-assets/favicon.png,found
+7181e17d-43f0-419a-8c41-1d51e9051285,Trainline,trainlinegroup.com,logos/trainline-f443ce59.png,https://trainlinegroup.com/media/gpfosrnq/logo-mint-2-1.svg,found
+168af648-7a3d-49e4-89e8-1d1e02d8033e,Truist CIG LLC,truistmanagedfdns.org,logos/truist-cig-llc-1b1805b6.png,https://www.truist.com/favicon.ico,found
+1dd65132-5931-4c19-a236-c9ce83c16891,"Truist Community Capital, LLC",truistmanagedfdns.org,logos/truist-community-capital-llc-1b1805b6.png,https://www.truist.com/favicon.ico,found
+e0895ced-1bbd-4ee4-aab3-9cef1ca253db,TWES EIT Services Taiwan Co. Ltd.,dxc.com,,"dxc.com: favicons are wide strips, render crop gave a 'T' cut from the DXC wordmark (not the mark); Google favicon 180x30; web search found no direct image",not_found
+fca1bd5b-97a1-48c9-b8f8-9f65f108c1fc,UNAVAILABLE,autenticalamichoacana.com,,autenticalamichoacana.com does not resolve (ENOTFOUND); Google favicon 404; name is a placeholder (UNAVAILABLE),not_found
+480f0fcf-77c1-439b-86d6-c1edd828114b,United Insurance Company of America,kemperhsc.com,,kemperhsc.com does not resolve; kemper.com only has a 16x16 favicon whose upscale is blank; web search gave no direct image,not_found
 83e8fe02-8c32-434b-93d9-f4377f5d9b43,"UpToDate, Inc.",u2d.com.br,,,
 fa23f434-3511-4bd9-84c7-3261c155a7c9,USA018 Thomson Reuters Holdings Inc.,thomsonreuters.com,,,
 ec7e783a-1324-4e0b-a6f0-59edbd243cda,USA7 DXC Technology Services LLC,dxc.com,,,
