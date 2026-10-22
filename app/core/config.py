@@ -154,13 +154,6 @@ class Settings(BaseSettings):
     # CloudFront distribution ID fronting seo_pages_bucket, for invalidating
     # just-written paths after each run. None skips invalidation (local dev).
     seo_pages_cloudfront_distribution_id: str | None = None
-    # Google Indexing API (app.services.google_indexing): after each run, ask
-    # Google to crawl the best of the just-published job pages. Off unless
-    # set; the function's service account must be an Owner of the site in
-    # Search Console. The quota is Google's per-project daily limit (200 by
-    # default; raise this only once Google has raised it).
-    google_indexing_enabled: bool = False
-    google_indexing_daily_quota: int = 200
 
     # Standalone Chromium-rendering service for the rare sites that need JS
     # execution to reveal their content (see app/services/browser_fetch.py).

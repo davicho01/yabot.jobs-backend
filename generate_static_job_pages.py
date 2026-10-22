@@ -60,10 +60,8 @@ import argparse
 import logging
 from datetime import date, datetime
 
-from app.core.config import settings
 from app.core.log_config import configure_logging
 from app.db.session import SessionLocal
-from app.services import google_indexing
 from app.services.company_logos import LOGO_ALIAS_PREFIX, sync_company_logos
 from app.services.static_job_pages import JobPagesResult, generate_job_pages, read_job_paths
 from app.services.static_pages import (
@@ -119,18 +117,6 @@ def main() -> None:
             logger.exception("Per-job pages failed; the day pages are still published and invalidated.")
             job_result, job_error = JobPagesResult(), exc
             job_paths, hub_links = (read_job_paths() if not args.dry_run else {}), None
-        # Ask Google to crawl the best of the new pages now (see
-        # app.services.google_indexing). Never allowed to cost the pages.
-        if not args.dry_run and settings.google_indexing_enabled and job_error is None:
-            try:
-                indexing = google_indexing.notify(job_result.new_pages, job_result.removed_paths)
-                logger.info(
-                    "Indexing API: %d updated, %d deleted, %d failed, %d left today%s.",
-                    indexing.updated, indexing.deleted, indexing.failed, indexing.left_today,
-                    f" (stopped: {indexing.stopped})" if indexing.stopped else "",
-                )
-            except Exception:
-                logger.exception("Indexing API notifications failed; pages are published regardless.")
         result = generate_for_date(
             db, target_date, dry_run=args.dry_run, invalidate=False, job_paths=job_paths, hub_links=hub_links
         )
