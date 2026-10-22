@@ -179,7 +179,7 @@ class TestRendering:
         page = sjp.render_job_page(sjp.load_job_pages(db, [str(row.id)])[str(row.id)])
         assert "<h1>Software Engineer</h1>" in page
         assert f'<link rel="canonical" href="https://yabot.jobs/job/{row.id}" />' in page
-        assert f'href="https://yabot.jobs/jobs/{row.id}/apply" data-track="apply">Apply on Yabot Jobs</a>' in page
+        assert f'href="https://yabot.jobs/jobs/{row.id}/apply" data-track="apply">Add for evaluation →</a>' in page
         assert "<strong>things</strong>" in page
         assert f'<a class="job-apply" href="{row.url}" target="_blank" rel="noopener" data-track="job_site">Apply ↗</a>' in page
 
@@ -327,8 +327,8 @@ class TestGenerate:
         assert result.updated == 1 and result.removed == 0
         assert _path(store, row.id) == path
         assert "noindex" not in page and "Build <strong>things</strong>." in page
-        assert f'<div class="job-dates__closed"><dt>Closed</dt><dd>{NOW:%B %-d, %Y}</dd></div>' in page
-        assert "Apply on Yabot Jobs" not in page and 'class="job-apply"' not in page
+        assert f'<div class="job-dates__closed"><dt>Closed</dt><dd>{NOW:%b %-d, %Y}</dd></div>' in page
+        assert "Add for evaluation" not in page and 'class="job-apply"' not in page
         assert _ld(page)["validThrough"] == NOW.date().isoformat()
         assert str(row.id).encode() in store.get("sitemap-job-pages-1.xml")
         assert f"/{path}" in result.touched_paths
@@ -348,7 +348,7 @@ class TestGenerate:
 
         page = store.get(_path(store, row.id)).decode()
         assert result.updated == 1
-        assert "Apply on Yabot Jobs" in page and "<dt>Closed</dt>" not in page
+        assert "Add for evaluation" in page and "<dt>Closed</dt>" not in page
 
     def test_a_closed_job_is_left_out_of_other_pages_related_lists(self, db, make_job, store):
         a = make_job(title="Backend Engineer")
@@ -664,13 +664,14 @@ class TestContent:
         assert '<div class="job-dates__missing"><dt>Posted</dt><dd>Not listed</dd></div>' in page
         assert _ld(page)["datePosted"]  # Google still gets the day it was found
         dated = self._page(db, make_job, posted_at=date(2026, 10, 18))
-        assert "<div><dt>Posted</dt><dd>October 18, 2026</dd></div>" in dated
+        assert "<div><dt>Posted</dt><dd>Oct 18, 2026</dd></div>" in dated
 
     def test_dates_are_eastern_days_not_utc_days(self, db, make_job):
         # 00:36 UTC on Oct 20 is still Oct 19 in Eastern time (EDT, UTC-4).
         evening = datetime(2026, 10, 20, 0, 36, tzinfo=timezone.utc)
         page = self._page(db, make_job, posted_at=date(2026, 10, 19), first_scanned_at=evening, closed_at=evening)
-        assert "<div><dt>First found</dt><dd>October 19, 2026, 8:36 PM ET</dd></div>" in page
+        assert '<div><dt>First found</dt><dd>Oct 19, 2026</dd><dd class="job-dates__time">8:36 PM ET</dd></div>' in page
+        assert '<div class="job-dates__closed"><dt>Closed</dt><dd>Oct 19, 2026</dd></div>' in page
         assert "This job closed October 19, 2026" in page
 
 

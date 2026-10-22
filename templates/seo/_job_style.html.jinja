@@ -27,6 +27,14 @@
   .job-cta__text { display: flex; flex-direction: column; gap: 0.15rem; flex: 1 1 16rem; }
   .job-cta__text span { font-size: 0.88rem; color: var(--ink-soft); }
   .job-cta__buttons { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  /* The job board's fit card (JobBoardCards.css .case-file__fit): sunset
+     washes in two corners, the "?" on a rainbow ring, the gradient button. */
+  .job-fit { flex-wrap: nowrap; gap: 1.1rem; background: radial-gradient(60% 120% at 0% 0%, rgba(236, 0, 140, 0.12), transparent 70%), radial-gradient(60% 120% at 100% 100%, rgba(252, 139, 103, 0.16), transparent 70%), var(--chip); }
+  .job-fit__dial { flex: none; display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; font-size: 1.45rem; font-weight: 600; background: radial-gradient(closest-side, var(--surface) 76%, transparent 78%), conic-gradient(#ffd46d, #fc8b67, #ec008c, #7b61ff, #364ea9, #ffd46d); }
+  .job-fit__text { flex: 1 1 0; min-width: 0; gap: 0; }
+  .job-fit__text h2 { margin: 0; font-size: 1.15rem; font-weight: 600; letter-spacing: -0.02em; }
+  .job-fit__text p { margin: 0.2rem 0 0; font-size: 0.88rem; color: var(--ink-soft); }
+  .job-fit .btn { padding: 0.75rem 1.2rem; font-size: 0.92rem; font-weight: 600; }
   .job-facts { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0 0; }
   /* One height for every pill, the pay pill's bigger type included (as on the job board). */
   .job-facts dd { box-sizing: border-box; display: inline-flex; align-items: center; height: 1.8rem; margin: 0; padding: 0 0.75rem; line-height: 1.2; border-radius: 999px; background: var(--chip); font-size: 0.82rem; font-weight: 600; }
@@ -36,7 +44,8 @@
   .job-dates > div:first-child { padding-left: 0; }
   .job-dates > div + div { border-left: 1px solid var(--line); }
   .job-dates dt { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
-  .job-dates dd { margin: 0.1rem 0 0; font-size: 0.95rem; font-weight: 700; }
+  .job-dates dd { margin: 0.2rem 0 0; font-size: 0.95rem; font-weight: 700; }
+  .job-dates .job-dates__time { margin-top: 0.1rem; font-size: 0.8rem; font-weight: 500; color: var(--ink-soft); }
   /* "Not listed": no date from the employer, in the labels' grey. */
   .job-dates__missing dd { font-weight: 500; color: var(--ink-soft); }
   /* The app's rose, as on its Closed badge. */
@@ -54,6 +63,7 @@
     .company-line { padding-right: 0; }
     /* Phones: full width on its own row, above the box. */
     .job-apply { position: static; display: flex; margin: 0 0 1rem; }
+    .job-fit { flex-wrap: wrap; }
     .job-cta__buttons { width: 100%; }
     .job-cta__buttons .btn { flex: 1 1 auto; }
   }

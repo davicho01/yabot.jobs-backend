@@ -43,15 +43,15 @@
             {% for label, value in glance if label not in dates and label not in ["Company", "Location"] %}<div{% if label == "Pay" %} class="job-facts__pay"{% endif %}><dt class="sr">{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}
           </dl>
           <dl class="job-dates">
-            {% for label, value in glance if label in dates %}<div{% if label == "Closed" %} class="job-dates__closed"{% elif value == "Not listed" %} class="job-dates__missing"{% endif %}><dt>{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}
+            {% for label, value in glance if label in dates %}<div{% if label == "Closed" %} class="job-dates__closed"{% elif value == "Not listed" %} class="job-dates__missing"{% endif %}><dt>{{ label }}</dt><dd>{{ value }}</dd>{% if label == "First found" and first_found_time %}<dd class="job-dates__time">{{ first_found_time }}</dd>{% endif %}</div>{% endfor %}
           </dl>
         </section>
         <p class="job-lead">{{ lead }}</p>
         {# The posting on the company's site, as on the job board: top right
-           under the band on desktop, full width above the box on phones.
+           under the band on desktop, full width under the summary on phones.
            Not for a closed job, whose posting is gone. #}
         {% if job.job_url and not job.closed_at %}<a class="job-apply" href="{{ job.job_url }}" target="_blank" rel="noopener" data-track="job_site">Apply ↗</a>{% endif %}
-        <div class="job-cta">
+        <div class="job-cta{% if not job.closed_at %} job-fit{% endif %}">
           {# A closed job keeps its page, but there's nothing left to apply to. #}
           {% if job.closed_at %}
           <div class="job-cta__text">
@@ -62,12 +62,15 @@
             <a class="btn btn--sunset" href="{{ base_url }}/jobs/{{ job.url_id }}" data-track="closed">See it on Yabot Jobs</a>
           </div>
           {% else %}
-          <div class="job-cta__text">
-            <strong>Apply with a resume that fits</strong>
-            <span>Sign in free to tailor your resume to it and apply.</span>
+          {# The job board's fit card, as a signed-out visitor sees it: the
+             "?" on the rainbow ring, and Add for evaluation (to sign in). #}
+          <span class="job-fit__dial" aria-hidden="true">?</span>
+          <div class="job-cta__text job-fit__text">
+            <h2>What's your fit?</h2>
+            <p>Score your resume against this job to see your fit, the gaps and the risks.</p>
           </div>
           <div class="job-cta__buttons">
-            <a class="btn btn--sunset" href="{{ base_url }}/jobs/{{ job.url_id }}/apply" data-track="apply">Apply on Yabot Jobs</a>
+            <a class="btn btn--sunset" href="{{ base_url }}/jobs/{{ job.url_id }}/apply" data-track="apply">Add for evaluation →</a>
           </div>
           {% endif %}
         </div>
