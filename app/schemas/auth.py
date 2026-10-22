@@ -14,6 +14,11 @@ class MagicLinkVerifyRequest(BaseModel):
     token: str
 
 
+class GoogleSignInRequest(BaseModel):
+    # The ID token (JWT) Google Identity Services hands the frontend.
+    credential: str
+
+
 class UserUpdate(BaseModel):
     # A true partial update — see update_current_user, which only touches a
     # field when it was actually present in the request body (model_dump's
