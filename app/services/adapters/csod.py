@@ -9,13 +9,13 @@ import httpx
 from app.models.enums import AtsType
 from app.services.adapters import base
 from app.services.adapters.base import (
-    DEFAULT_MAX_JOBS_PER_CRAWL,
     TIMEOUT,
     AtsAdapter,
     ExtractedJobFields,
     ScanResult,
     get_with_retry,
     limit_job_urls,
+    max_jobs_per_crawl,
     post_with_retry,
 )
 from app.services.adapters.text import html_to_formatted_text
@@ -29,7 +29,6 @@ from app.services.adapters.text import html_to_formatted_text
 # Workday's "company/instance/site".
 _CSOD_HOST_RE = re.compile(r"([a-z0-9-]+)\.csod\.com", re.IGNORECASE)
 _CSOD_SITE_ID_RE = re.compile(r"/careersite/(\d+)/", re.IGNORECASE)
-_CSOD_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _CSOD_PAGE_SIZE = 100
 _JOBS_API_URL = "https://us.api.csod.com/rec-job-search/external/jobs"
 _JOB_URL = "https://{corp}.csod.com/ux/ats/careersite/{site_id}/home/requisition/{req_id}?c={corp}"
@@ -74,7 +73,7 @@ def _search_requisitions(corp: str, site_id: str, context: dict[str, Any]) -> li
     requisitions: list[dict[str, Any]] = []
     page = 1
     total = None
-    while len(requisitions) < _CSOD_MAX_JOBS and (total is None or len(requisitions) < total):
+    while len(requisitions) < max_jobs_per_crawl() and (total is None or len(requisitions) < total):
         response = post_with_retry(
             _JOBS_API_URL,
             headers=headers,
@@ -106,7 +105,7 @@ def _search_requisitions(corp: str, site_id: str, context: dict[str, Any]) -> li
             break
         requisitions.extend(batch)
         page += 1
-    return requisitions[:_CSOD_MAX_JOBS]
+    return requisitions[:max_jobs_per_crawl()]
 
 
 def _fetch_jobs(board_key: str) -> list[str]:

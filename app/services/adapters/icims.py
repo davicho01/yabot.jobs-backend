@@ -1,19 +1,21 @@
 import re
+from datetime import date
 from urllib.parse import urlsplit
 
 import httpx
 
 from app.models.enums import AtsType
 from app.services.adapters.base import (
-    DEFAULT_MAX_JOBS_PER_CRAWL,
     TIMEOUT,
     AtsAdapter,
     BoardListing,
+    crawling_uncapped,
     get_with_retry,
     is_recent_posting,
+    max_jobs_per_crawl,
+    posting_date,
 )
 
-_ICIMS_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _ICIMS_URL_RE = re.compile(r"([a-zA-Z0-9-]+\.icims\.com)", re.IGNORECASE)
 
 # iCIMS actually ships (at least) two very different products under one
@@ -67,7 +69,7 @@ def _fetch_classic_jobs(host: str) -> list[str]:
     urls: dict[str, None] = {}
     page_size = None
     page = 0
-    while len(urls) < _ICIMS_MAX_JOBS:
+    while len(urls) < max_jobs_per_crawl():
         response = get_with_retry(
             _CLASSIC_SEARCH_URL.format(host=host), params={"ss": 1, "in_iframe": 1, "pr": page}, timeout=TIMEOUT
         )
@@ -81,18 +83,24 @@ def _fetch_classic_jobs(host: str) -> list[str]:
         if len(links) < page_size:
             break
         page += 1
-    return list(urls)[:_ICIMS_MAX_JOBS]
+    return list(urls)[:max_jobs_per_crawl()]
 
 
-def _fetch_jibe_jobs(host: str) -> list[str] | None:
-    # Returns None (rather than []) when the host clearly isn't running
-    # Jibe at all (verified live: classic tenants' /api/jobs just serves
-    # their classic HTML shell, not JSON) — a real Jibe tenant with zero
-    # current postings would still return valid JSON with an empty list,
-    # which is a legitimate [] result, not None.
+def _fetch_jibe_jobs(host: str) -> BoardListing | None:
+    # Returns None (rather than an empty listing) when the host clearly
+    # isn't running Jibe at all (verified live: classic tenants' /api/jobs
+    # just serves their classic HTML shell, not JSON) — a real Jibe tenant
+    # with zero current postings would still return valid JSON with an empty
+    # list, which is a legitimate empty result, not None.
+    #
+    # Capped, recent postings only, so never the whole board (see
+    # BoardListing); uncapped, every posting, dated.
+    uncapped = crawling_uncapped()
     urls: list[str] = []
+    posted: dict[str, date] = {}
     page = 1
-    while len(urls) < _ICIMS_MAX_JOBS:
+    reached_end = False
+    while len(urls) < max_jobs_per_crawl():
         try:
             response = get_with_retry(
                 _JIBE_API_URL.format(host=host),
@@ -102,38 +110,41 @@ def _fetch_jibe_jobs(host: str) -> list[str] | None:
             response.raise_for_status()
             data = response.json()
         except (httpx.HTTPError, ValueError):
-            return None if page == 1 else urls[:_ICIMS_MAX_JOBS]
+            if page == 1:
+                return None
+            break
         jobs = data.get("jobs") if isinstance(data, dict) else None
         if jobs is None:
-            return None if page == 1 else urls[:_ICIMS_MAX_JOBS]
-        if not jobs:
+            if page == 1:
+                return None
             break
-        recent = [
-            job["data"]
-            for job in jobs
-            if isinstance(job, dict) and isinstance(job.get("data"), dict) and is_recent_posting(job["data"].get("posted_date"))
-        ]
-        urls.extend(
-            _JIBE_JOB_URL.format(host=host, req_id=job_data["req_id"]) for job_data in recent if job_data.get("req_id")
-        )
-        if len(recent) < len(jobs):
+        if not jobs:
+            reached_end = True
+            break
+        listed = [job["data"] for job in jobs if isinstance(job, dict) and isinstance(job.get("data"), dict)]
+        recent = [job_data for job_data in listed if is_recent_posting(job_data.get("posted_date"))]
+        for job_data in listed if uncapped else recent:
+            if job_data.get("req_id"):
+                urls.append(_JIBE_JOB_URL.format(host=host, req_id=job_data["req_id"]))
+                if (day := posting_date(job_data.get("posted_date"))) is not None:
+                    posted[urls[-1]] = day
+        if not uncapped and len(recent) < len(jobs):
             break
         page += 1
-    return urls[:_ICIMS_MAX_JOBS]
+    return BoardListing(urls[:max_jobs_per_crawl()], complete=uncapped and reached_end, posted=posted)
 
 
 def _fetch_jobs(host: str) -> list[str] | BoardListing:
-    # Jibe lists recent postings only, so never the whole board (see
-    # BoardListing); classic search pages list everything.
-    jibe_urls = _fetch_jibe_jobs(host)
-    if jibe_urls is not None:
-        return BoardListing(jibe_urls, complete=False)
+    # Classic search pages list everything; Jibe, see _fetch_jibe_jobs.
+    jibe = _fetch_jibe_jobs(host)
+    if jibe is not None:
+        return jibe
 
     classic_urls, redirect_host = _classic_or_redirect_host(host)
     if redirect_host:
-        jibe_urls = _fetch_jibe_jobs(redirect_host)
-        if jibe_urls is not None:
-            return BoardListing(jibe_urls, complete=False)
+        jibe = _fetch_jibe_jobs(redirect_host)
+        if jibe is not None:
+            return jibe
     if classic_urls:
         return _fetch_classic_jobs(host)
     return []

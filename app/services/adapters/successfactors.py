@@ -6,10 +6,9 @@ import httpx
 
 from app.models.enums import AtsType
 from app.services.adapters import base
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, ScanResult, get_with_retry
+from app.services.adapters.base import TIMEOUT, AtsAdapter, ScanResult, get_with_retry, max_jobs_per_crawl
 from app.services.adapters.text import clean_text, extract_balanced_tag, html_to_formatted_text
 
-_SUCCESSFACTORS_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 # SAP SuccessFactors' Career Site Builder ("j2w"/Job-to-Web) is a shared
 # multi-tenant ATS, but — like Clinch/Echo Jobs — fully white-labeled onto
 # each customer's own domain (careers.firstsource.com, verified live) with
@@ -67,14 +66,14 @@ def _fetch_feed_jobs(host: str) -> list[str]:
             continue
         # A urlset can list one posting once per locale; keep the first.
         by_id.setdefault(int(job_id.group(1)), f"https://{host}{parts.path}")
-    return [by_id[job_id] for job_id in sorted(by_id, reverse=True)][:_SUCCESSFACTORS_MAX_JOBS]
+    return [by_id[job_id] for job_id in sorted(by_id, reverse=True)][:max_jobs_per_crawl()]
 
 
 def _fetch_jobs(host: str) -> list[str]:
     urls: dict[str, None] = {}
     startrow = 0
     first_page_is_successfactors = False
-    while len(urls) < _SUCCESSFACTORS_MAX_JOBS:
+    while len(urls) < max_jobs_per_crawl():
         response = get_with_retry(f"https://{host}/search/", params={"startrow": startrow}, timeout=TIMEOUT)
         response.raise_for_status()
         if startrow == 0:
@@ -92,7 +91,7 @@ def _fetch_jobs(host: str) -> list[str]:
         # Gated on the signature so _detect_embedded's /search/ probe can't
         # turn an arbitrary site's sitemap into a SuccessFactors board.
         return _fetch_feed_jobs(host)
-    return list(urls)[:_SUCCESSFACTORS_MAX_JOBS]
+    return list(urls)[:max_jobs_per_crawl()]
 
 
 def _detect_embedded(url: str) -> str | None:

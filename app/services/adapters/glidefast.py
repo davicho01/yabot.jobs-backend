@@ -4,11 +4,10 @@ import httpx
 
 from app.models.enums import AtsType, WorkplaceType
 from app.services.adapters import base
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, ScanResult, get_with_retry
+from app.services.adapters.base import TIMEOUT, AtsAdapter, ScanResult, get_with_retry, max_jobs_per_crawl
 from app.services.adapters.text import html_to_formatted_text
 
 _GLIDEFAST_CAREERS_URL = "https://glidefast.com/careers"
-_GLIDEFAST_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _URL_RE = re.compile(r"glidefast\.com/careers", re.IGNORECASE)
 _JOB_LINK_RE = re.compile(r'href="(/careers/jobs/[A-Za-z0-9]+)')
 # GlideFast's board is a bespoke HubSpot CMS page (single company, not a
@@ -35,7 +34,7 @@ def _fetch_jobs(_board_key: str) -> list[str]:  # noqa: ARG001 - single-company 
     response = get_with_retry(_GLIDEFAST_CAREERS_URL, timeout=TIMEOUT)
     response.raise_for_status()
     paths = dict.fromkeys(_JOB_LINK_RE.findall(response.text))
-    return [f"https://glidefast.com{path}" for path in paths][:_GLIDEFAST_MAX_JOBS]
+    return [f"https://glidefast.com{path}" for path in paths][:max_jobs_per_crawl()]
 
 
 def _location_and_workplace_type(formatted_description: str) -> tuple[str | None, str]:

@@ -30,19 +30,50 @@ RECENT_WINDOW_DAYS = 7
 # High-volume boards can hit this before exhausting their recent postings.
 DEFAULT_MAX_JOBS_PER_CRAWL = 500
 
+# The cap for a board crawled uncapped (CrawlSource.uncapped): a ceiling on
+# links, not a sample, so a crawl reaching it still counts as cut off.
+UNCAPPED_MAX_JOBS_PER_CRAWL = 50_000
+
+_max_jobs: ContextVar[int | None] = ContextVar("max_jobs_per_crawl", default=None)
+
+
+def max_jobs_per_crawl() -> int:
+    """The cap on the crawl in progress: DEFAULT_MAX_JOBS_PER_CRAWL, unless
+    inside uncapped_crawl()."""
+    return _max_jobs.get() or DEFAULT_MAX_JOBS_PER_CRAWL
+
+
+def crawling_uncapped() -> bool:
+    """Inside uncapped_crawl(): adapters list the whole board, not just recent
+    postings or a sample, and report posted dates where they have them."""
+    return _max_jobs.get() is not None
+
+
+@contextmanager
+def uncapped_crawl() -> Iterator[None]:
+    token = _max_jobs.set(UNCAPPED_MAX_JOBS_PER_CRAWL)
+    try:
+        yield
+    finally:
+        _max_jobs.reset(token)
+
 
 @dataclass(frozen=True)
 class BoardListing:
     """What one crawl saw of a board. complete=False when `urls` is knowingly
     only part of it — the adapter kept just recent postings, or stopped at
-    DEFAULT_MAX_JOBS_PER_CRAWL — so a URL missing from it may still be open,
-    and record_board_presence must not close anything on its say-so.
+    max_jobs_per_crawl() — so a URL missing from it may still be open, and
+    record_board_presence must not close anything on its say-so.
+
+    posted: each URL's posted date, where the listing gives one — what an
+    uncapped crawl's import rule goes by (see bulk_register_discovered_urls).
 
     An adapter's fetch_jobs may return a plain list[str] instead, meaning
     "the whole board" (list_board still marks it incomplete at the cap)."""
 
     urls: list[str]
     complete: bool = True
+    posted: dict[str, date] = field(default_factory=dict)
 
 
 def posting_date(value: object) -> date | None:
@@ -74,7 +105,7 @@ def limit_job_urls(urls: Iterable[str]) -> list[str]:
         if url and url not in seen:
             seen.add(url)
             result.append(url)
-            if len(result) >= DEFAULT_MAX_JOBS_PER_CRAWL:
+            if len(result) >= max_jobs_per_crawl():
                 break
     return result
 

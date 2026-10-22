@@ -7,7 +7,6 @@ import httpx
 from app.models.enums import AtsType, EmploymentType, WorkplaceType
 from app.services.adapters import base
 from app.services.adapters.base import (
-    DEFAULT_MAX_JOBS_PER_CRAWL,
     EMPLOYMENT_TYPE_MAP,
     TIMEOUT,
     AtsAdapter,
@@ -15,6 +14,7 @@ from app.services.adapters.base import (
     ScanResult,
     get_with_retry,
     limit_job_urls,
+    max_jobs_per_crawl,
 )
 from app.services.adapters.text import MAX_LOCATION_LENGTH, html_to_formatted_text
 
@@ -63,7 +63,7 @@ def _fetch_jobs(_board_key: str) -> list[str]:  # noqa: ARG001 - single-company 
     # shared job cap instead, same reasoning as google.py.
     urls: list[str] = []
     page = 1
-    while len(urls) < DEFAULT_MAX_JOBS_PER_CRAWL:
+    while len(urls) < max_jobs_per_crawl():
         response = get_with_retry(_LIST_URL, params={"page": page, "take": _PAGE_SIZE}, timeout=TIMEOUT)
         response.raise_for_status()
         body = response.json()

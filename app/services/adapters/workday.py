@@ -1,4 +1,5 @@
 import re
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -6,13 +7,14 @@ import httpx
 from app.models.enums import AtsType, EmploymentType, WorkplaceType
 from app.services.adapters import base
 from app.services.adapters.base import (
-    DEFAULT_MAX_JOBS_PER_CRAWL,
     RECENT_WINDOW_DAYS,
     TIMEOUT,
     AtsAdapter,
     BoardListing,
     ExtractedJobFields,
     ScanResult,
+    crawling_uncapped,
+    max_jobs_per_crawl,
     post_with_retry,
 )
 from app.services.adapters.text import clean_text, html_to_formatted_text
@@ -25,7 +27,6 @@ _WORKDAY_JOB_BASE_URL = "https://{company}.{instance}.myworkdayjobs.com/{site}"
 # already-known URLs are deduped either way, so a cap just bounds how many
 # requests one crawl makes to Workday, not what gets found over time.
 _WORKDAY_PAGE_SIZE = 20
-_WORKDAY_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 # postedOn has no exact date, just a relative label — "Posted Today",
 # "Posted Yesterday", "Posted N Days Ago", capping out at "Posted 30+ Days
 # Ago" (all four verified live against salesforce.wd12.myworkdayjobs.com).
@@ -84,6 +85,8 @@ def _fetch_jobs(board_key: str) -> BoardListing:
     job_base_url = _WORKDAY_JOB_BASE_URL.format(company=company, instance=instance, site=site)
 
     urls: list[str] = []
+    posted: dict[str, date] = {}
+    today = datetime.now(timezone.utc).date()
     offset = 0
     # Some tenants' Workday configuration omits postedOn from the
     # career-site API response entirely (verified live: Memorial
@@ -94,10 +97,10 @@ def _fetch_jobs(board_key: str) -> BoardListing:
     # None means "not yet known."
     filter_by_recency: bool | None = None
     reached_end = False
-    # Bounds requests-per-crawl to _WORKDAY_MAX_JOBS / _WORKDAY_PAGE_SIZE
+    # Bounds requests-per-crawl to max_jobs_per_crawl() / _WORKDAY_PAGE_SIZE
     # regardless of tenant size or behavior — see below for why this counts
     # postings *scanned* (offset), not URLs collected.
-    while offset < _WORKDAY_MAX_JOBS:
+    while offset < max_jobs_per_crawl():
         response = post_with_retry(
             jobs_url,
             json={"appliedFacets": {}, "limit": _WORKDAY_PAGE_SIZE, "offset": offset, "searchText": ""},
@@ -111,9 +114,18 @@ def _fetch_jobs(board_key: str) -> BoardListing:
             break
 
         if filter_by_recency is None:
-            filter_by_recency = any(p.get("postedOn") for p in postings)
+            # Uncapped, every posting is listed; postedOn only dates them.
+            filter_by_recency = not crawling_uncapped() and any(p.get("postedOn") for p in postings)
 
-        if filter_by_recency:
+        if crawling_uncapped():
+            for posting in postings:
+                if not posting.get("externalPath"):
+                    continue
+                url = job_base_url + posting["externalPath"]
+                urls.append(url)
+                if (age := _posted_age_days(posting.get("postedOn"))) is not None:
+                    posted[url] = today - timedelta(days=age)
+        elif filter_by_recency:
             # Workday's default sort is newest-first for *some* tenants
             # (verified live: synopsys.wd1.myworkdayjobs.com — offset=0 was
             # entirely "Posted Today", offset=300 entirely "Posted 7 Days
@@ -128,7 +140,7 @@ def _fetch_jobs(board_key: str) -> BoardListing:
             # erroring — nothing in the response can tell "genuinely done"
             # apart from "this tenant just doesn't sort by date" — so every
             # page gets scanned for recent postings regardless of what came
-            # before; only running past _WORKDAY_MAX_JOBS postings or
+            # before; only running past max_jobs_per_crawl() postings or
             # genuinely reaching the end of the list stops the loop.
             urls.extend(
                 job_base_url + posting["externalPath"]
@@ -150,8 +162,8 @@ def _fetch_jobs(board_key: str) -> BoardListing:
         offset += _WORKDAY_PAGE_SIZE
 
     # The whole board only when every posting was kept (no recency filter)
-    # and paging ran to the end rather than into _WORKDAY_MAX_JOBS.
-    return BoardListing(urls, complete=reached_end and not filter_by_recency)
+    # and paging ran to the end rather than into max_jobs_per_crawl().
+    return BoardListing(urls, complete=reached_end and not filter_by_recency, posted=posted)
 
 
 def _detect_embedded(url: str) -> str | None:

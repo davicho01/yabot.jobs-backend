@@ -2,10 +2,9 @@ import re
 from xml.etree import ElementTree
 
 from app.models.enums import AtsType
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry, max_jobs_per_crawl
 
 _DYNATRACE_SITEMAP_INDEX_URL = "https://www.dynatrace.com/careers/sitemap-index.xml"
-_DYNATRACE_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _SITEMAP_NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 _URL_RE = re.compile(r"dynatrace\.com/careers", re.IGNORECASE)
 _JOB_URL_RE = re.compile(r"dynatrace\.com/careers/jobs/\d+/?$", re.IGNORECASE)
@@ -41,9 +40,9 @@ def _fetch_jobs(_board_key: str) -> list[str]:  # noqa: ARG001 - single-company 
             for u in sitemap_root.findall(".//sm:url/sm:loc", _SITEMAP_NS)
             if u.text and _JOB_URL_RE.search(u.text)
         )
-        if len(urls) >= _DYNATRACE_MAX_JOBS:
+        if len(urls) >= max_jobs_per_crawl():
             break
-    return urls[:_DYNATRACE_MAX_JOBS]
+    return urls[:max_jobs_per_crawl()]
 
 
 ADAPTER = AtsAdapter(

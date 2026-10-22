@@ -1,5 +1,7 @@
 from app.services.adapters import ADAPTERS
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, AtsAdapter, BoardListing, limit_job_urls
+from contextlib import nullcontext
+
+from app.services.adapters.base import AtsAdapter, BoardListing, limit_job_urls, max_jobs_per_crawl, uncapped_crawl
 
 _ADAPTERS_BY_TYPE: dict[str, AtsAdapter] = {adapter.ats_type: adapter for adapter in ADAPTERS}
 _EMBEDDED_MATCH_ADAPTERS = [adapter for adapter in ADAPTERS if adapter.embedded_match is not None]
@@ -34,7 +36,7 @@ def board_key_for(ats_type: str, board_url: str) -> str | None:
     return key_fn(board_url) if key_fn else None
 
 
-def list_board(ats_type: str, board_url: str) -> BoardListing:
+def list_board(ats_type: str, board_url: str, *, uncapped: bool = False) -> BoardListing:
     """Discovery only: every current job-posting URL for a company's board,
     and whether that's the whole board (see BoardListing). Field extraction
     (title, salary, etc.) is left entirely to the existing scan pipeline
@@ -44,7 +46,16 @@ def list_board(ats_type: str, board_url: str) -> BoardListing:
     Takes the board's stored URL rather than a pre-extracted key — every
     platform's adapter (see app.services.adapters) knows how to re-derive
     whatever it needs straight out of that URL.
+
+    uncapped: crawl with UNCAPPED_MAX_JOBS_PER_CRAWL, and adapters list the
+    whole board rather than recent postings or a sample (see
+    CrawlSource.uncapped).
     """
+    with uncapped_crawl() if uncapped else nullcontext():
+        return _list_board(ats_type, board_url)
+
+
+def _list_board(ats_type: str, board_url: str) -> BoardListing:
     adapter = _ADAPTERS_BY_TYPE.get(ats_type)
     if adapter is None:
         raise ValueError(f"Unsupported ats_type: {ats_type!r}")
@@ -57,7 +68,10 @@ def list_board(ats_type: str, board_url: str) -> BoardListing:
     # A listing that reached the cap most likely had more past it — most
     # adapters slice to the cap themselves, so this can't tell "exactly 500"
     # from "cut off at 500", and errs on the side of closing nothing.
-    return BoardListing(urls, complete=listing.complete and len(urls) < DEFAULT_MAX_JOBS_PER_CRAWL)
+    complete = listing.complete and len(urls) < max_jobs_per_crawl()
+    kept = set(urls)
+    posted = {url: day for url, day in listing.posted.items() if url in kept}
+    return BoardListing(urls, complete=complete, posted=posted)
 
 
 def list_job_urls(ats_type: str, board_url: str) -> list[str]:

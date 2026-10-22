@@ -4,9 +4,8 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry, max_jobs_per_crawl
 
-_ZENATS_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _ZENATS_SIGNATURE = "zenats"
 # The board root server-renders every open posting as a plain
 # /position/{slug}/ anchor (verified live: jobs.halan.com, 16 postings, no
@@ -29,7 +28,7 @@ def _fetch_jobs(host: str) -> list[str]:
     response = get_with_retry(f"https://{host}", timeout=TIMEOUT, follow_redirects=True)
     response.raise_for_status()
     urls = dict.fromkeys(_JOB_HREF_RE.findall(response.text))
-    return list(urls)[:_ZENATS_MAX_JOBS]
+    return list(urls)[:max_jobs_per_crawl()]
 
 
 def _board_key(url: str) -> str | None:

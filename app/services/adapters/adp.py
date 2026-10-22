@@ -8,12 +8,12 @@ import httpx
 from app.models.enums import AtsType
 from app.services.adapters import base
 from app.services.adapters.base import (
-    DEFAULT_MAX_JOBS_PER_CRAWL,
     TIMEOUT,
     AtsAdapter,
     ExtractedJobFields,
     ScanResult,
     get_with_retry,
+    max_jobs_per_crawl,
     posting_date,
 )
 from app.services.adapters.text import html_to_formatted_text
@@ -27,7 +27,6 @@ _ADP_JOB_URL = (
 _ADP_PAGE_SIZE = 50
 # ADP client career sites (one company's own postings) run nowhere near
 # Amazon/Google scale — no "today only" early-exit needed, just a safety cap.
-_ADP_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _ADP_URL_RE = re.compile(r"workforcenow\.adp\.com", re.IGNORECASE)
 
 
@@ -73,7 +72,7 @@ def _search_requisitions(cid: str, cc_id: str | None) -> list[dict[str, Any]]:
     cc_id_param = {"ccId": cc_id} if cc_id else {}
     requisitions: list[dict[str, Any]] = []
     skip = 0
-    while len(requisitions) < _ADP_MAX_JOBS:
+    while len(requisitions) < max_jobs_per_crawl():
         response = get_with_retry(
             _ADP_JOBS_URL,
             params={
@@ -94,7 +93,7 @@ def _search_requisitions(cid: str, cc_id: str | None) -> list[dict[str, Any]]:
         if len(batch) < _ADP_PAGE_SIZE:
             break
         skip += _ADP_PAGE_SIZE
-    return requisitions[:_ADP_MAX_JOBS]
+    return requisitions[:max_jobs_per_crawl()]
 
 
 def _fetch_jobs(board_key: str) -> list[str]:
@@ -108,7 +107,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
         job_id = _external_job_id(req)
         if job_id:
             urls.append(_ADP_JOB_URL.format(cid=cid, cc_id_param=cc_id_url_param, job_id=job_id))
-    return urls[:_ADP_MAX_JOBS]
+    return urls[:max_jobs_per_crawl()]
 
 
 def _location_of(req: dict[str, Any]) -> str | None:

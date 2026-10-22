@@ -8,11 +8,11 @@ import httpx
 from app.models.enums import AtsType, EmploymentType
 from app.services.adapters import base
 from app.services.adapters.base import (
-    DEFAULT_MAX_JOBS_PER_CRAWL,
     TIMEOUT,
     AtsAdapter,
     ScanResult,
     get_with_retry,
+    max_jobs_per_crawl,
 )
 from app.services.adapters.text import html_to_formatted_text
 from app.services.browser_fetch import fetch_rendered_html
@@ -23,7 +23,6 @@ from app.services.browser_fetch import fetch_rendered_html
 # and the page's own ng-app attribute.
 _BBY_URL_RE = re.compile(r"(?:careers|jobs)\.bestbuy\.com", re.IGNORECASE)
 _BBY_SITEMAP_URL = "https://bestbuy.service-now.com/api/93622/seo/sitemap"
-_BBY_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _BBY_WIDGET_CLASS = "bby-career-job-details"
 # What the render waits for. The widget's outer element appears before its
 # job data arrives over ServiceNow's AMB bus, so waiting on it alone returned
@@ -55,7 +54,7 @@ def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company b
     # robots.txt (careers.bestbuy.com/robots.txt) is fully permissive and
     # itself points at this sitemap. Unlike Walmart's sitemap, every job
     # <url> here carries a real <lastmod> — sorting by that and taking the
-    # most-recently-updated _BBY_MAX_JOBS keeps every crawl focused on
+    # most-recently-updated max_jobs_per_crawl() keeps every crawl focused on
     # what's actually new/changed, no date-seeded sampling needed.
     response = get_with_retry(_BBY_SITEMAP_URL, timeout=TIMEOUT)
     response.raise_for_status()
@@ -69,7 +68,7 @@ def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company b
             continue
         entries.append((loc.text, lastmod.text if lastmod is not None and lastmod.text else ""))
     entries.sort(key=lambda e: e[1], reverse=True)
-    return [url for url, _ in entries[:_BBY_MAX_JOBS]]
+    return [url for url, _ in entries[:max_jobs_per_crawl()]]
 
 
 _BBY_EMPLOYMENT_TYPE_KEYWORDS: list[tuple[str, str]] = [

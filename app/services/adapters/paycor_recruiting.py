@@ -4,10 +4,9 @@ import httpx
 
 from app.models.enums import AtsType, WorkplaceType
 from app.services.adapters import base
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, ScanResult, get_with_retry
+from app.services.adapters.base import TIMEOUT, AtsAdapter, ScanResult, get_with_retry, max_jobs_per_crawl
 from app.services.adapters.text import clean_text, html_to_formatted_text
 
-_PAYCOR_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _CAREER_HOME_URL = "https://recruitingbypaycor.com/career/CareerHome.action"
 _JOB_URL = "https://recruitingbypaycor.com/career/JobIntroduction.action"
 # Paycor Recruiting (formerly Newton Software, still branded "gnewton" in its
@@ -61,7 +60,7 @@ def _fetch_jobs(client_id: str) -> list[str]:
     response.raise_for_status()
     ids = dict.fromkeys(job_id for _, job_id in _JOB_LINK_RE.findall(response.text))
     urls = [f"{_JOB_URL}?clientId={client_id}&id={job_id}" for job_id in ids]
-    return urls[:_PAYCOR_MAX_JOBS]
+    return urls[:max_jobs_per_crawl()]
 
 
 def _workplace_type_of(location: str | None) -> str:

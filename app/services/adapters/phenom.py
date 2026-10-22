@@ -5,9 +5,8 @@ from xml.etree import ElementTree
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry, max_jobs_per_crawl
 
-_PHENOM_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 # Phenom People (cdn.phenompeople.com/assets.phenompeople.com) is white-label
 # CMS, like Clinch/Oracle Fusion/SuccessFactors — no shared host, each tenant
 # on its own domain (careers.gene.com, careers.snowflake.com, verified live).
@@ -48,7 +47,7 @@ def _fetch_jobs(host: str) -> list[str]:
         for loc in root.findall(".//sm:loc", ns)
         if loc.text and "/job/" in urlsplit(loc.text).path
     ]
-    return urls[:_PHENOM_MAX_JOBS]
+    return urls[:max_jobs_per_crawl()]
 
 
 def _detect_embedded(url: str) -> str | None:

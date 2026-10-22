@@ -13,6 +13,7 @@ from app.services.adapters.base import (
     BoardListing,
     ExtractedJobFields,
     ScanResult,
+    crawling_uncapped,
     get_with_retry,
     limit_job_urls,
     posting_date,
@@ -93,7 +94,7 @@ def _search(
         "from": from_,
         "size": _PAGE_SIZE,
         "sort": [{"createdDate": {"order": "desc"}}],
-        "_source": ["jobId", "url"],
+        "_source": ["jobId", "url", "createdDate"],
         "query": {"bool": {"filter": filters}},
     }
     response = httpx.post(_SEARCH_URL, json=body, timeout=TIMEOUT)
@@ -115,9 +116,12 @@ def _fetch_jobs(host: str) -> list[str] | BoardListing:
     # High-volume boards (Jack in the Box alone runs ~7k open reqs across
     # its franchisee network) — filter server-side to just-posted-recently
     # rather than paginating the entire board every crawl, same reasoning
-    # as Workday/Amazon/Oracle Fusion (see base.RECENT_WINDOW_DAYS).
-    date_filter = [{"range": {"createdDate": {"gte": f"now-{RECENT_WINDOW_DAYS - 1}d/d"}}}]
+    # as Workday/Amazon/Oracle Fusion (see base.RECENT_WINDOW_DAYS). Uncapped,
+    # the whole board, dated by createdDate.
+    uncapped = crawling_uncapped()
+    date_filter = [] if uncapped else [{"range": {"createdDate": {"gte": f"now-{RECENT_WINDOW_DAYS - 1}d/d"}}}]
     urls: list[str] = []
+    posted: dict[str, date] = {}
     from_ = 0
     total = None
     while total is None or from_ < total:
@@ -128,12 +132,14 @@ def _fetch_jobs(host: str) -> list[str] | BoardListing:
         if not batch:
             break
         for hit in batch:
-            rel_url = hit.get("_source", {}).get("url")
-            if rel_url:
-                urls.append(f"https://{host}{rel_url}")
+            source = hit.get("_source", {})
+            if source.get("url"):
+                urls.append(f"https://{host}{source['url']}")
+                if (day := posting_date(source.get("createdDate"))) is not None:
+                    posted[urls[-1]] = day
         from_ += len(batch)
-    # Recent postings only, so never the whole board (see BoardListing).
-    return BoardListing(limit_job_urls(urls), complete=False)
+    # Capped, recent postings only, so never the whole board (see BoardListing).
+    return BoardListing(limit_job_urls(urls), complete=uncapped, posted=posted)
 
 
 def _detect_embedded(url: str) -> str | None:

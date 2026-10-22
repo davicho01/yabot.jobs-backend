@@ -6,10 +6,9 @@ import httpx
 
 from app.models.enums import AtsType, EmploymentType, WorkplaceType
 from app.services.adapters import base
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, ScanResult, get_with_retry
+from app.services.adapters.base import TIMEOUT, AtsAdapter, ScanResult, get_with_retry, max_jobs_per_crawl
 from app.services.adapters.text import clean_text, html_to_formatted_text
 
-_GUPY_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _GUPY_URL_RE = re.compile(r"([a-zA-Z0-9-]+\.gupy\.io)", re.IGNORECASE)
 # Gupy is a Next.js app: the board root server-renders the full job list
 # straight into __NEXT_DATA__ (props.pageProps.jobs, every open role at
@@ -38,7 +37,7 @@ def _fetch_jobs(host: str) -> list[str]:
     data = json.loads(match.group(1))
     jobs = data.get("props", {}).get("pageProps", {}).get("jobs") or []
     urls = [_JOB_URL.format(host=host, job_id=job["id"]) for job in jobs if job.get("id")]
-    return urls[:_GUPY_MAX_JOBS]
+    return urls[:max_jobs_per_crawl()]
 
 
 def _board_key(url: str) -> str | None:

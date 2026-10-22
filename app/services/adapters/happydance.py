@@ -5,9 +5,8 @@ from xml.etree import ElementTree
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry, max_jobs_per_crawl
 
-_HAPPYDANCE_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _HAPPYDANCE_SIGNATURE = "happydance"
 # Every posting's own detail URL carries a UUID job id right before its
 # slug (verified live: jobs.dominos.com/us/jobs/{uuid}/{slug}/), locale-
@@ -46,7 +45,7 @@ def _fetch_jobs(host: str) -> list[str]:
     # (verified live) with full schema.org JobPosting JSON-LD, so the
     # generic scanner's browser-render fallback (base.fetch_html) handles
     # per-job scanning without any adapter-specific scan_job_url here.
-    return _sitemap_job_urls(host)[:_HAPPYDANCE_MAX_JOBS]
+    return _sitemap_job_urls(host)[:max_jobs_per_crawl()]
 
 
 def _detect_embedded(url: str) -> str | None:

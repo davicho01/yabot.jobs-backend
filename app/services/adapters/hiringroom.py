@@ -5,12 +5,12 @@ import httpx
 from app.models.enums import AtsType, EmploymentType, WorkplaceType
 from app.services.adapters import base
 from app.services.adapters.base import (
-    DEFAULT_MAX_JOBS_PER_CRAWL,
     TIMEOUT,
     AtsAdapter,
     ExtractedJobFields,
     ScanResult,
     limit_job_urls,
+    max_jobs_per_crawl,
     post_with_retry,
 )
 from app.services.adapters.text import extract_balanced_div, html_to_formatted_text
@@ -24,7 +24,6 @@ _HIRINGROOM_HOST_RE = re.compile(r"([a-z0-9-]+)\.hiringroom\.com", re.IGNORECASE
 _JOB_ID_RE = re.compile(r"/jobs/get_vacancy/([a-f0-9]{24})", re.IGNORECASE)
 _VACANCIES_URL = "https://{tenant}.hiringroom.com/jobs/getVacanciesForPortal/{page}"
 _JOB_URL = "https://{tenant}.hiringroom.com/jobs/get_vacancy/{job_id}"
-_HIRINGROOM_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 
 
 def _match(url: str) -> str | None:
@@ -40,7 +39,7 @@ def _fetch_jobs(tenant: str) -> list[str]:
     ids: list[str] = []
     page = 1
     total = None
-    while len(ids) < _HIRINGROOM_MAX_JOBS and (total is None or len(ids) < total):
+    while len(ids) < max_jobs_per_crawl() and (total is None or len(ids) < total):
         response = post_with_retry(
             _VACANCIES_URL.format(tenant=tenant, page=page),
             data={"typePortal": "external"},

@@ -5,13 +5,13 @@ import httpx
 from app.models.enums import AtsType, EmploymentType, WorkplaceType
 from app.services.adapters import base
 from app.services.adapters.base import (
-    DEFAULT_MAX_JOBS_PER_CRAWL,
     TIMEOUT,
     AtsAdapter,
     ExtractedJobFields,
     ScanResult,
     get_with_retry,
     limit_job_urls,
+    max_jobs_per_crawl,
 )
 from app.services.adapters.text import html_to_formatted_text
 
@@ -35,7 +35,7 @@ def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company b
     # (verified against the unsorted default) but there's no per-job date
     # anywhere to confirm it's a true chronological cutoff.
     urls: list[str] = []
-    for page in range(1, (DEFAULT_MAX_JOBS_PER_CRAWL + _GOOGLE_PAGE_SIZE - 1) // _GOOGLE_PAGE_SIZE + 1):
+    for page in range(1, (max_jobs_per_crawl() + _GOOGLE_PAGE_SIZE - 1) // _GOOGLE_PAGE_SIZE + 1):
         response = get_with_retry(_GOOGLE_JOBS_URL, params={"page": page, "sort_by": "date"}, timeout=TIMEOUT)
         response.raise_for_status()
         job_paths = dict.fromkeys(_GOOGLE_JOB_RE.findall(response.text))  # dedupe, keep order

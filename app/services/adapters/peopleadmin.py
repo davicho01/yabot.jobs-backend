@@ -4,10 +4,9 @@ import httpx
 
 from app.models.enums import AtsType, EmploymentType
 from app.services.adapters import base
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, ScanResult, get_with_retry
+from app.services.adapters.base import TIMEOUT, AtsAdapter, ScanResult, get_with_retry, max_jobs_per_crawl
 from app.services.adapters.text import clean_text, html_to_formatted_text
 
-_PEOPLEADMIN_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _PEOPLEADMIN_URL_RE = re.compile(r"([a-zA-Z0-9-]+\.peopleadmin\.com)", re.IGNORECASE)
 _JOB_HREF_RE = re.compile(r'href="/postings/(\d+)"')
 
@@ -25,7 +24,7 @@ def _fetch_jobs(host: str) -> list[str]:
     seen: dict[str, None] = {}
     page_size = None
     page = 1
-    while len(seen) < _PEOPLEADMIN_MAX_JOBS:
+    while len(seen) < max_jobs_per_crawl():
         response = get_with_retry(f"https://{host}/postings/search", params={"page": page}, timeout=TIMEOUT)
         response.raise_for_status()
         ids = dict.fromkeys(_JOB_HREF_RE.findall(response.text))
@@ -37,7 +36,7 @@ def _fetch_jobs(host: str) -> list[str]:
         if len(ids) < page_size:
             break
         page += 1
-    return [f"https://{host}/postings/{job_id}" for job_id in seen][:_PEOPLEADMIN_MAX_JOBS]
+    return [f"https://{host}/postings/{job_id}" for job_id in seen][:max_jobs_per_crawl()]
 
 
 def _board_key(url: str) -> str | None:

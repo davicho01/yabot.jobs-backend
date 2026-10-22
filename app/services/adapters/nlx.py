@@ -8,12 +8,12 @@ import httpx
 from app.models.enums import AtsType, EmploymentType, WorkplaceType
 from app.services.adapters import base
 from app.services.adapters.base import (
-    DEFAULT_MAX_JOBS_PER_CRAWL,
     TIMEOUT,
     AtsAdapter,
     ExtractedJobFields,
     ScanResult,
     get_with_retry,
+    max_jobs_per_crawl,
 )
 from app.services.adapters.text import html_to_formatted_text
 
@@ -56,7 +56,7 @@ def _fetch_jobs(host: str) -> list[str]:
     # no more.
     urls: list[str] = []
     page = 1
-    while len(urls) < DEFAULT_MAX_JOBS_PER_CRAWL:
+    while len(urls) < max_jobs_per_crawl():
         response = get_with_retry(
             _NLX_API,
             params={"page": page},
@@ -69,7 +69,7 @@ def _fetch_jobs(host: str) -> list[str]:
         if not data.get("pagination", {}).get("has_more_pages"):
             break
         page += 1
-    return urls[:DEFAULT_MAX_JOBS_PER_CRAWL]
+    return urls[:max_jobs_per_crawl()]
 
 
 def _detect_embedded(url: str) -> str | None:

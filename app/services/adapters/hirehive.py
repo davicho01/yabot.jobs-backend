@@ -1,9 +1,8 @@
 import re
 
 from app.models.enums import AtsType
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry, max_jobs_per_crawl
 
-_HIREHIVE_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _HIREHIVE_URL_RE = re.compile(r"([a-zA-Z0-9-]+\.hirehive\.com)", re.IGNORECASE)
 # The board root server-renders every open posting as a plain anchor tagged
 # with the hh-job-row class (verified live: patagonia.hirehive.com, 24
@@ -21,7 +20,7 @@ def _fetch_jobs(host: str) -> list[str]:
     response = get_with_retry(f"https://{host}", timeout=TIMEOUT, follow_redirects=True)
     response.raise_for_status()
     paths = dict.fromkeys(_JOB_HREF_RE.findall(response.text))
-    return [f"https://{host}{path}" for path in paths][:_HIREHIVE_MAX_JOBS]
+    return [f"https://{host}{path}" for path in paths][:max_jobs_per_crawl()]
 
 
 def _board_key(url: str) -> str | None:

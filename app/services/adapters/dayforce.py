@@ -63,7 +63,7 @@ def _fetch_jobs(board_key: str) -> list[str]:
                 if p.get("jobPostingId")
             )
             start += len(postings)
-            if len(urls) >= base.DEFAULT_MAX_JOBS_PER_CRAWL:
+            if len(urls) >= base.max_jobs_per_crawl():
                 break
     return limit_job_urls(urls)
 

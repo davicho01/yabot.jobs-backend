@@ -60,8 +60,9 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
         logger.warning("Crawl job for unknown source_id=%s; skipping.", source_id)
         return
 
+    uncapped, baseline = source.uncapped, source.uncapped_baseline_at is not None
     try:
-        listing = list_board(source.ats_type, source.board_url)
+        listing = list_board(source.ats_type, source.board_url, uncapped=uncapped)
     except Exception as exc:
         # A bad board_key or an ATS outage isn't retryable by nacking —
         # record it and move on, same as any other scan failure in this app.
@@ -85,7 +86,9 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
     registered = True
     created = 0
     try:
-        failed, created = bulk_register_discovered_urls(db, urls, source_id)
+        failed, created = bulk_register_discovered_urls(
+            db, urls, source_id, uncapped=uncapped, posted=listing.posted, baseline=baseline
+        )
     except Exception as exc:
         # Same reasoning as the old per-URL loop's except: don't let this
         # crawl's stats update below be skipped just because registration
@@ -101,6 +104,11 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
     source.last_crawled_at = datetime.now(timezone.utc)
     source.last_error = f"{failed} of {len(urls)} discovered URL(s) failed to process." if failed else None
     source.crawl_claimed_at = None  # done; dispatchable again once due
+    if uncapped and registered and not baseline:
+        # Everything already on the board is now recorded, scanned or not:
+        # from here on a URL the listing doesn't date is new (see
+        # bulk_register_discovered_urls).
+        source.uncapped_baseline_at = source.last_crawled_at
     previous_interval = source.crawl_interval_minutes
     # A crawl whose URLs couldn't be registered says nothing about how busy
     # the board is, so it keeps its interval like a failed listing does.
@@ -116,8 +124,8 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
     healthy = bool(urls) and listing.complete and registered and not failed and source.coverage_low_streak == 0
     db.commit()  # stats persisted before waking lanes (has_unclaimed_pending ends its transaction)
     logger.info(
-        "Crawled %s: %d job URL(s) discovered, %d new (%d failed); crawl interval %d -> %d min.",
-        source_name, len(urls), created, failed, previous_interval, new_interval,
+        "Crawled %s%s: %d job URL(s) discovered, %d new (%d failed); crawl interval %d -> %d min.",
+        source_name, " (uncapped)" if uncapped else "", len(urls), created, failed, previous_interval, new_interval,
     )
 
     # Its own transaction, after the stats are safely committed: closure

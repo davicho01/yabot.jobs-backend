@@ -1,19 +1,21 @@
 import re
+from datetime import date
 
 import httpx
 
 from app.models.enums import AtsType, EmploymentType, WorkplaceType
 from app.services.adapters import base
 from app.services.adapters.base import (
-    DEFAULT_MAX_JOBS_PER_CRAWL,
     RECENT_WINDOW_DAYS,
     TIMEOUT,
     AtsAdapter,
     BoardListing,
     ExtractedJobFields,
     ScanResult,
+    crawling_uncapped,
     get_with_retry,
     is_recent_posting,
+    max_jobs_per_crawl,
     parse_month_day_year,
 )
 from app.services.adapters.text import MAX_LOCATION_LENGTH, clean_text, html_to_formatted_text
@@ -21,7 +23,6 @@ from app.services.adapters.text import MAX_LOCATION_LENGTH, clean_text, html_to_
 _AMAZON_JOBS_URL = "https://www.amazon.jobs/en/search.json"
 _AMAZON_JOB_BASE_URL = "https://www.amazon.jobs"
 _AMAZON_PAGE_SIZE = 100
-_AMAZON_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _AMAZON_URL_RE = re.compile(r"amazon\.jobs", re.IGNORECASE)
 
 
@@ -34,9 +35,13 @@ def _fetch_jobs(board_key: str) -> BoardListing:  # noqa: ARG001 - single-compan
     # verified newest-first (offset=0 was entirely today's date, offset=200
     # was already yesterday's) — same RECENT_WINDOW_DAYS early-exit as
     # Workday.
+    # Uncapped, it pages through every posting instead, dating each.
+    uncapped = crawling_uncapped()
     urls: list[str] = []
+    posted_on: dict[str, date] = {}
     offset = 0
-    while len(urls) < _AMAZON_MAX_JOBS:
+    reached_end = False
+    while len(urls) < max_jobs_per_crawl():
         response = get_with_retry(
             _AMAZON_JOBS_URL,
             params={"result_limit": _AMAZON_PAGE_SIZE, "offset": offset, "sort": "recent"},
@@ -45,22 +50,28 @@ def _fetch_jobs(board_key: str) -> BoardListing:  # noqa: ARG001 - single-compan
         response.raise_for_status()
         jobs = response.json().get("jobs", [])
         if not jobs:
+            reached_end = True
             break
 
-        recent_jobs = [
-            job
-            for job in jobs
-            if (posted := parse_month_day_year(job.get("posted_date"), month_style="%B %d, %Y")) is not None
-            and is_recent_posting(posted)
-        ]
-        urls.extend(_AMAZON_JOB_BASE_URL + job["job_path"] for job in recent_jobs if job.get("job_path"))
-        if len(recent_jobs) < len(jobs) or len(jobs) < _AMAZON_PAGE_SIZE:
+        recent = 0
+        for job in jobs:
+            posted = parse_month_day_year(job.get("posted_date"), month_style="%B %d, %Y")
+            is_recent = posted is not None and is_recent_posting(posted)
+            recent += is_recent
+            if job.get("job_path") and (uncapped or is_recent):
+                urls.append(_AMAZON_JOB_BASE_URL + job["job_path"])
+                if posted is not None:
+                    posted_on[urls[-1]] = posted
+        if len(jobs) < _AMAZON_PAGE_SIZE:
+            reached_end = True
+            break
+        if not uncapped and recent < len(jobs):
             break
         offset += _AMAZON_PAGE_SIZE
 
-    # Recent postings only, so never the whole board: an older one still
-    # open just isn't listed (see BoardListing).
-    return BoardListing(urls[:_AMAZON_MAX_JOBS], complete=False)
+    # Capped, recent postings only, so never the whole board: an older one
+    # still open just isn't listed (see BoardListing).
+    return BoardListing(urls[:max_jobs_per_crawl()], complete=uncapped and reached_end, posted=posted_on)
 
 
 # amazon.jobs ships no JobPosting JSON-LD and no embedded JSON blob (unlike

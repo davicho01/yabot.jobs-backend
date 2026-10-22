@@ -4,9 +4,8 @@ from xml.etree import ElementTree
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry, max_jobs_per_crawl
 
-_PINPOINT_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _PINPOINT_SIGNATURE = "pinpointhq"
 # Every Pinpoint board publishes a standard jobs.rss feed (verified live:
 # careers.manutd.com) — each <item><link> is the real, current posting URL
@@ -46,7 +45,7 @@ def _fetch_jobs(host: str) -> list[str]:
         for link in root.findall(".//item/link")
         if link.text and urlsplit(link.text.strip()).netloc == host
     ]
-    return urls[:_PINPOINT_MAX_JOBS]
+    return urls[:max_jobs_per_crawl()]
 
 
 def _board_key(url: str) -> str | None:

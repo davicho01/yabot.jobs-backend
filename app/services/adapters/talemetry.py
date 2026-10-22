@@ -4,10 +4,9 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import DEFAULT_MAX_JOBS_PER_CRAWL, TIMEOUT, AtsAdapter, get_with_retry
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry, max_jobs_per_crawl
 from app.services.browser_fetch import fetch_rendered_page
 
-_TALEMETRY_MAX_JOBS = DEFAULT_MAX_JOBS_PER_CRAWL
 _TALEMETRY_SIGNATURE = "talemetry"
 _JOB_LINK_RE = re.compile(r'href="(https?://[^"?]+/jobs/\d+-[^"?]+/?)"', re.IGNORECASE)
 _PAGE_SIZE = 25  # observed tenant-configured default (verified: Progressive)
@@ -39,7 +38,7 @@ def _detect_embedded(url: str) -> str | None:
 def _fetch_jobs(host: str) -> list[str]:
     urls: list[str] = []
     page = 1
-    while len(urls) < _TALEMETRY_MAX_JOBS:
+    while len(urls) < max_jobs_per_crawl():
         html = _fetch_page_html(f"https://{host}/search/jobs/?page={page}&q=")
         if html is None:
             break
@@ -50,7 +49,7 @@ def _fetch_jobs(host: str) -> list[str]:
         if len(links) < _PAGE_SIZE:
             break
         page += 1
-    return urls[:_TALEMETRY_MAX_JOBS]
+    return urls[:max_jobs_per_crawl()]
 
 
 def _board_key(url: str) -> str | None:
