@@ -9,6 +9,7 @@ from app.services.adapters.base import (
     RECENT_WINDOW_DAYS,
     TIMEOUT,
     AtsAdapter,
+    BoardListing,
     ExtractedJobFields,
     ScanResult,
     get_with_retry,
@@ -28,7 +29,7 @@ def _match(url: str) -> str | None:
     return "amazon" if _AMAZON_URL_RE.search(url) else None
 
 
-def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company board, fixed key, no key needed
+def _fetch_jobs(board_key: str) -> BoardListing:  # noqa: ARG001 - single-company board, fixed key, no key needed
     # Free, public, unauthenticated API — no key required. sort=recent
     # verified newest-first (offset=0 was entirely today's date, offset=200
     # was already yesterday's) — same RECENT_WINDOW_DAYS early-exit as
@@ -57,7 +58,9 @@ def _fetch_jobs(board_key: str) -> list[str]:  # noqa: ARG001 - single-company b
             break
         offset += _AMAZON_PAGE_SIZE
 
-    return urls[:_AMAZON_MAX_JOBS]
+    # Recent postings only, so never the whole board: an older one still
+    # open just isn't listed (see BoardListing).
+    return BoardListing(urls[:_AMAZON_MAX_JOBS], complete=False)
 
 
 # amazon.jobs ships no JobPosting JSON-LD and no embedded JSON blob (unlike

@@ -39,7 +39,7 @@ from app.core.config import settings
 from app.core.log_config import configure_logging
 from app.db.session import SessionLocal
 from app.models.crawl_source import CrawlSource
-from app.services.ats_adapters import list_job_urls
+from app.services.ats_adapters import list_board
 from app.services.coverage_monitor import update_coverage
 from app.services.crawl_schedule import closed_after_hours, schedule_next_crawl
 from app.services.crawl_queue import ensure_topic_and_subscription, subscriber_client, subscription_path
@@ -61,7 +61,7 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
         return
 
     try:
-        urls = list_job_urls(source.ats_type, source.board_url)
+        listing = list_board(source.ats_type, source.board_url)
     except Exception as exc:
         # A bad board_key or an ATS outage isn't retryable by nacking —
         # record it and move on, same as any other scan failure in this app.
@@ -71,6 +71,7 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
         source.crawl_claimed_at = None  # done with this attempt; dispatchable again once due
         schedule_next_crawl(source, source.last_crawled_at, 0, listing_failed=True)
         return
+    urls = listing.urls
 
     # Read up front: the rollback in the failure path below expires every
     # loaded attribute.
@@ -108,9 +109,11 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
     closed_after = closed_after_hours(new_interval)
     update_coverage(source, len(urls))
     # Only a crawl that plausibly saw the whole board may close the jobs it
-    # didn't list: a non-empty listing, fully registered, and not below the
-    # coverage monitor's baseline (a broken adapter or truncated listing).
-    healthy = bool(urls) and registered and not failed and source.coverage_low_streak == 0
+    # didn't list: a non-empty listing the adapter says is the whole board
+    # (not recent-only or cut off at the cap, see BoardListing), fully
+    # registered, and not below the coverage monitor's baseline (a broken
+    # adapter or truncated listing).
+    healthy = bool(urls) and listing.complete and registered and not failed and source.coverage_low_streak == 0
     db.commit()  # stats persisted before waking lanes (has_unclaimed_pending ends its transaction)
     logger.info(
         "Crawled %s: %d job URL(s) discovered, %d new (%d failed); crawl interval %d -> %d min.",

@@ -8,6 +8,7 @@ from app.services.adapters.base import (
     DEFAULT_MAX_JOBS_PER_CRAWL,
     TIMEOUT,
     AtsAdapter,
+    BoardListing,
     get_with_retry,
     is_recent_posting,
 )
@@ -121,16 +122,18 @@ def _fetch_jibe_jobs(host: str) -> list[str] | None:
     return urls[:_ICIMS_MAX_JOBS]
 
 
-def _fetch_jobs(host: str) -> list[str]:
+def _fetch_jobs(host: str) -> list[str] | BoardListing:
+    # Jibe lists recent postings only, so never the whole board (see
+    # BoardListing); classic search pages list everything.
     jibe_urls = _fetch_jibe_jobs(host)
     if jibe_urls is not None:
-        return jibe_urls
+        return BoardListing(jibe_urls, complete=False)
 
     classic_urls, redirect_host = _classic_or_redirect_host(host)
     if redirect_host:
         jibe_urls = _fetch_jibe_jobs(redirect_host)
         if jibe_urls is not None:
-            return jibe_urls
+            return BoardListing(jibe_urls, complete=False)
     if classic_urls:
         return _fetch_classic_jobs(host)
     return []

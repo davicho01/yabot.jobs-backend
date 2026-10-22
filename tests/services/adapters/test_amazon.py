@@ -23,7 +23,7 @@ def test_fetch_jobs_keeps_postings_within_window_and_stops_at_boundary(monkeypat
         return FakeResponse(json_data={"jobs": page})
 
     monkeypatch.setattr(amazon, "get_with_retry", fake_get)
-    urls = amazon._fetch_jobs("amazon")
+    urls = amazon._fetch_jobs("amazon").urls
     assert urls == [amazon._AMAZON_JOB_BASE_URL + "/a", amazon._AMAZON_JOB_BASE_URL + "/b"]
     assert calls == [0]
 
@@ -31,7 +31,7 @@ def test_fetch_jobs_keeps_postings_within_window_and_stops_at_boundary(monkeypat
 def test_fetch_jobs_ignores_postings_with_unparseable_dates(monkeypatch):
     page = [{"job_path": "/a", "posted_date": "not a date"}]
     monkeypatch.setattr(amazon, "get_with_retry", lambda *a, **k: FakeResponse(json_data={"jobs": page}))
-    assert amazon._fetch_jobs("amazon") == []
+    assert amazon._fetch_jobs("amazon").urls == []
 
 
 def test_fetch_jobs_stops_after_500_recent_jobs(monkeypatch):
@@ -45,7 +45,7 @@ def test_fetch_jobs_stops_after_500_recent_jobs(monkeypatch):
         ]})
 
     monkeypatch.setattr(amazon, "get_with_retry", fake_get)
-    urls = amazon._fetch_jobs("amazon")
+    urls = amazon._fetch_jobs("amazon").urls
     assert len(urls) == 500
     assert len(set(urls)) == 500
     assert calls == [0, 100, 200, 300, 400]

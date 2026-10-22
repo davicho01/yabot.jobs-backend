@@ -79,7 +79,7 @@ def test_fetch_jobs_filters_out_of_window_postings_on_a_single_page(monkeypatch)
         return FakeResponse(json_data={"jobPostings": page_1})
 
     monkeypatch.setattr(workday, "post_with_retry", fake_post)
-    urls = workday._fetch_jobs("acme/wd1/Careers")
+    urls = workday._fetch_jobs("acme/wd1/Careers").urls
     assert urls == [
         "https://acme.wd1.myworkdayjobs.com/Careers/job/a",
         "https://acme.wd1.myworkdayjobs.com/Careers/job/b",
@@ -97,7 +97,7 @@ def test_fetch_jobs_paginates_while_fully_within_window(monkeypatch):
         return FakeResponse(json_data={"jobPostings": pages.get(json["offset"], [])})
 
     monkeypatch.setattr(workday, "post_with_retry", fake_post)
-    urls = workday._fetch_jobs("acme/wd1/Careers")
+    urls = workday._fetch_jobs("acme/wd1/Careers").urls
     assert len(urls) == workday._WORKDAY_PAGE_SIZE + 1
 
 
@@ -105,8 +105,29 @@ def test_fetch_jobs_uses_four_day_window(monkeypatch):
     monkeypatch.setattr(workday, "RECENT_WINDOW_DAYS", 4)
     page = [_posting(f"/job/{day}", f"Posted {day} Days Ago") for day in range(1, 8)]
     monkeypatch.setattr(workday, "post_with_retry", lambda *a, **k: FakeResponse(json_data={"jobPostings": page}))
-    urls = workday._fetch_jobs("acme/wd1/Careers")
+    urls = workday._fetch_jobs("acme/wd1/Careers").urls
     assert urls == [f"https://acme.wd1.myworkdayjobs.com/Careers/job/{day}" for day in (1, 2, 3)]
+
+
+def test_fetch_jobs_recent_only_listing_is_partial(monkeypatch):
+    page = [_posting("/job/a", "Posted Today"), _posting("/job/b", "Posted 30+ Days Ago")]
+    monkeypatch.setattr(workday, "post_with_retry", lambda *a, **k: FakeResponse(json_data={"jobPostings": page}))
+    assert workday._fetch_jobs("acme/wd1/Careers").complete is False
+
+
+def test_fetch_jobs_without_posted_on_lists_the_whole_board(monkeypatch):
+    page = [{"externalPath": f"/job/{i}"} for i in range(3)]
+    monkeypatch.setattr(workday, "post_with_retry", lambda *a, **k: FakeResponse(json_data={"jobPostings": page}))
+    listing = workday._fetch_jobs("acme/wd1/Careers")
+    assert len(listing.urls) == 3
+    assert listing.complete is True
+
+
+def test_fetch_jobs_without_posted_on_is_partial_when_paging_hits_the_bound(monkeypatch):
+    monkeypatch.setattr(workday, "_WORKDAY_MAX_JOBS", workday._WORKDAY_PAGE_SIZE)
+    page = [{"externalPath": f"/job/{i}"} for i in range(workday._WORKDAY_PAGE_SIZE)]
+    monkeypatch.setattr(workday, "post_with_retry", lambda *a, **k: FakeResponse(json_data={"jobPostings": page}))
+    assert workday._fetch_jobs("acme/wd1/Careers").complete is False
 
 
 def test_job_url_re_matches_bare_url():
@@ -200,7 +221,7 @@ def test_fetch_jobs_finds_recent_postings_scattered_behind_a_long_run_of_old_one
         return FakeResponse(json_data={"jobPostings": pages.get(json["offset"], [])})
 
     monkeypatch.setattr(workday, "post_with_retry", fake_post)
-    urls = workday._fetch_jobs("acme/wd1/Careers")
+    urls = workday._fetch_jobs("acme/wd1/Careers").urls
     assert urls == [
         "https://acme.wd1.myworkdayjobs.com/Careers/job/a",
         "https://acme.wd1.myworkdayjobs.com/Careers/job/c",
@@ -219,7 +240,7 @@ def test_fetch_jobs_stops_after_500_recent_jobs(monkeypatch):
         ]})
 
     monkeypatch.setattr(workday, "post_with_retry", fake_post)
-    urls = workday._fetch_jobs("acme/wd1/Careers")
+    urls = workday._fetch_jobs("acme/wd1/Careers").urls
     assert len(urls) == 500
     assert len(set(urls)) == 500
     assert calls == list(range(0, 500, 20))

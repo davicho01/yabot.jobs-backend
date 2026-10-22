@@ -23,7 +23,7 @@ def test_fetch_jobs_keeps_postings_within_window_and_stops_at_boundary(monkeypat
         return FakeResponse(json_data={"items": [{"requisitionList": requisitions}]})
 
     monkeypatch.setattr(oracle_fusion, "get_with_retry", fake_get)
-    urls = oracle_fusion._fetch_jobs("example.oraclecloud.com/CX_1")
+    urls = oracle_fusion._fetch_jobs("example.oraclecloud.com/CX_1").urls
     assert urls == [
         oracle_fusion._ORACLE_FUSION_JOB_URL.format(host="example.oraclecloud.com", site_number="CX_1", job_id="1"),
         oracle_fusion._ORACLE_FUSION_JOB_URL.format(host="example.oraclecloud.com", site_number="CX_1", job_id="2"),
