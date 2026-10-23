@@ -24,6 +24,7 @@
         "arn:aws:s3:::yabot.jobs-frontend/about.html",
         "arn:aws:s3:::yabot.jobs-frontend/privacy.html",
         "arn:aws:s3:::yabot.jobs-frontend/questions.html",
+        "arn:aws:s3:::yabot.jobs-frontend/terms.html",
         "arn:aws:s3:::yabot.jobs-frontend/about-david.jpg",
         "arn:aws:s3:::yabot.jobs-frontend/apple-touch-icon.png",
         "arn:aws:s3:::yabot.jobs-frontend/apple-touch-icon-white.png",
