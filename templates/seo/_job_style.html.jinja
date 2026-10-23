@@ -6,23 +6,7 @@
   .job-card__tile { position: absolute; left: 2.25rem; bottom: -32px; width: 64px; height: 64px; border-radius: 18px; display: grid; place-items: center; background: #fff; box-shadow: 0 6px 18px rgba(31, 26, 53, 0.18); }
   .job-card__tile img { width: 40px; height: 40px; object-fit: contain; border-radius: 8px; }
   .job-card__body { position: relative; padding: 3rem 2.25rem 2.25rem; }
-  .company-line { margin: 0 0 0.35rem; padding-right: 8.5rem; font-size: 1rem; font-weight: 600; }
-  /* Apply (the posting on the company's site): the job board's pill, ink on
-     the light card and white on the dark one, top right just under the band
-     on desktop. A slight lift on hover, no color change. */
-  .job-apply {
-    position: absolute; top: 1rem; right: 2.25rem;
-    display: inline-flex; align-items: center; justify-content: center;
-    padding: 0.75rem 1.2rem; border-radius: 999px;
-    font: 600 0.92rem/1.3 var(--font); white-space: nowrap; text-decoration: none;
-    color: #ffffff; background: #0a0a0a; box-shadow: 0 8px 20px -10px rgba(0, 0, 0, 0.35);
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
-  }
-  @media (prefers-color-scheme: dark) { .job-apply { color: #0a0a0a; background: #ffffff; } }
-  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
-    .job-apply:hover { transform: translateY(-2px); box-shadow: 0 12px 24px -10px rgba(0, 0, 0, 0.45); }
-  }
-  .job-lead { margin: 0 0 1.25rem; }
+  .company-line { margin: 0 0 0.35rem; font-size: 1rem; font-weight: 600; }
   .job-cta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.1rem 1.25rem; border-radius: 24px; background: linear-gradient(110deg, color-mix(in srgb, #ec008c 9%, var(--chip)), color-mix(in srgb, #fc8b67 12%, var(--chip))); }
   .job-cta__text { display: flex; flex-direction: column; gap: 0.15rem; flex: 1 1 16rem; }
   .job-cta__text span { font-size: 0.88rem; color: var(--ink-soft); }
@@ -45,12 +29,11 @@
   .job-dates > div + div { border-left: 1px solid var(--line); }
   .job-dates dt { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
   .job-dates dd { margin: 0.2rem 0 0; font-size: 0.95rem; font-weight: 700; }
-  .job-dates .job-dates__time { margin-top: 0.1rem; font-size: 0.8rem; font-weight: 500; color: var(--ink-soft); }
   /* "Not listed": no date from the employer, in the labels' grey. */
   .job-dates__missing dd { font-weight: 500; color: var(--ink-soft); }
-  /* The app's rose, as on its Closed badge. */
-  .job-dates__closed dt, .job-dates__closed dd { color: #d70015; }
-  @media (prefers-color-scheme: dark) { .job-dates__closed dt, .job-dates__closed dd { color: #ff453a; } }
+  /* Closed, in the band's top right: the app's red pill (board__detail-age--closed). */
+  .job-card__status { position: absolute; top: 50%; right: 1.5rem; transform: translateY(-50%); display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.75rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600; line-height: 1.2; white-space: nowrap; color: #fff; background: #d70015; box-shadow: 0 6px 16px -8px rgba(215, 0, 21, 0.7); }
+  .job-card__status i { width: 6px; height: 6px; border-radius: 50%; background: #fff; }
   @media (prefers-color-scheme: dark) { .job-facts__pay dd { background: color-mix(in srgb, var(--lime) 16%, transparent); } }
   .job-desc { overflow-wrap: anywhere; }
   .job-desc h3 { font-size: 1.08rem; margin: 1.5rem 0 0.4rem; }
@@ -60,9 +43,6 @@
     .job-card__band { height: 80px; }
     .job-card__tile { left: 1.1rem; }
     .job-card__body { padding: 2.75rem 1.1rem 1.5rem; }
-    .company-line { padding-right: 0; }
-    /* Phones: full width on its own row, above the box. */
-    .job-apply { position: static; display: flex; margin: 0 0 1rem; }
     .job-fit { flex-wrap: wrap; }
     .job-cta__buttons { width: 100%; }
     .job-cta__buttons .btn { flex: 1 1 auto; }

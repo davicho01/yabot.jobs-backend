@@ -179,9 +179,10 @@ class TestRendering:
         page = sjp.render_job_page(sjp.load_job_pages(db, [str(row.id)])[str(row.id)])
         assert "<h1>Software Engineer</h1>" in page
         assert f'<link rel="canonical" href="https://yabot.jobs/job/{row.id}" />' in page
-        assert f'href="https://yabot.jobs/jobs/{row.id}/apply" data-track="apply">Add for evaluation →</a>' in page
+        assert f'href="https://yabot.jobs/jobs/{row.id}/apply" data-track="apply">Check my fit →</a>' in page
         assert "<strong>things</strong>" in page
-        assert f'<a class="job-apply" href="{row.url}" target="_blank" rel="noopener" data-track="job_site">Apply ↗</a>' in page
+        assert 'class="job-apply"' not in page and "Apply ↗" not in page
+        assert "job-lead" not in page  # the sentence is the meta description now
 
     def test_json_ld_is_a_valid_job_posting(self, db, make_job):
         ld = _ld(self._page(db, make_job, salary_min=120000, salary_max=150000, posted_at=date(2026, 9, 30)))
@@ -327,8 +328,9 @@ class TestGenerate:
         assert result.updated == 1 and result.removed == 0
         assert _path(store, row.id) == path
         assert "noindex" not in page and "Build <strong>things</strong>." in page
-        assert f'<div class="job-dates__closed"><dt>Closed</dt><dd>{NOW:%b %-d, %Y}</dd></div>' in page
-        assert "Add for evaluation" not in page and 'class="job-apply"' not in page
+        assert "<dt>Closed</dt>" not in page  # the band and the closed box say it
+        assert f'<span class="job-card__status"><i aria-hidden="true"></i>Closed {NOW:%b %-d, %Y}</span>' in page
+        assert "Check my fit" not in page
         assert _ld(page)["validThrough"] == NOW.date().isoformat()
         assert str(row.id).encode() in store.get("sitemap-job-pages-1.xml")
         assert f"/{path}" in result.touched_paths
@@ -348,7 +350,7 @@ class TestGenerate:
 
         page = store.get(_path(store, row.id)).decode()
         assert result.updated == 1
-        assert "Add for evaluation" in page and "<dt>Closed</dt>" not in page
+        assert "Check my fit" in page and "<dt>Closed</dt>" not in page
 
     def test_a_closed_job_is_left_out_of_other_pages_related_lists(self, db, make_job, store):
         a = make_job(title="Backend Engineer")
@@ -631,7 +633,15 @@ class TestContent:
         title = html_module.unescape(re.search(r"<title>(.*?)</title>", page).group(1))
         description = html_module.unescape(re.search(r'name="description" content="(.*?)"', page).group(1))
         assert len(title) <= 60 and title.endswith("| Yabot Jobs")
-        assert len(description) <= 160 and description.startswith("Senior Staff")
+        assert len(description) <= 160 and description.startswith("Acme Corp is hiring a Senior Staff")
+
+    def test_meta_description_says_who_is_hiring_and_when_it_was_posted(self, db, make_job):
+        page = self._page(db, make_job, title="Engineer", posted_at=date(2026, 9, 22))
+        description = html_module.unescape(re.search(r'name="description" content="(.*?)"', page).group(1))
+        assert description.startswith("Acme Corp is hiring an Engineer in Austin, TX. Posted September 22, 2026.")
+        closed = self._page(db, make_job, title="Engineer", posted_at=date(2026, 9, 22), closed_at=datetime(2026, 10, 2, 18, 0, tzinfo=timezone.utc))
+        description = html_module.unescape(re.search(r'name="description" content="(.*?)"', closed).group(1))
+        assert description.startswith("Acme Corp was hiring an Engineer in Austin, TX. Posted September 22, 2026. Closed October 2, 2026.")
 
     def test_label_paragraphs_become_h3(self):
         out = sjp.render_job_description_html("**About the Role**\n\nWho We Are:\n\nWe build **great** things.")
@@ -666,13 +676,31 @@ class TestContent:
         dated = self._page(db, make_job, posted_at=date(2026, 10, 18))
         assert "<div><dt>Posted</dt><dd>Oct 18, 2026</dd></div>" in dated
 
+    def test_an_open_job_shows_only_posted_and_first_found(self, db, make_job):
+        row = make_job(first_scanned_at=NOW, extracted_fields={"validThrough": "2026-12-31T23:59:59Z"})
+        page = sjp.render_job_page(sjp.load_job_pages(db, [str(row.id)])[str(row.id)])
+        assert "<dt>Posted</dt>" in page and "<dt>First found</dt>" in page
+        assert "<dt>Closed</dt>" not in page and "Apply by" not in page
+        assert "Last checked" not in page and "/login?next=" not in page
+        assert '<span class="job-card__status">' not in page
+
     def test_dates_are_eastern_days_not_utc_days(self, db, make_job):
         # 00:36 UTC on Oct 20 is still Oct 19 in Eastern time (EDT, UTC-4).
         evening = datetime(2026, 10, 20, 0, 36, tzinfo=timezone.utc)
         page = self._page(db, make_job, posted_at=date(2026, 10, 19), first_scanned_at=evening, closed_at=evening)
-        assert '<div><dt>First found</dt><dd>Oct 19, 2026</dd><dd class="job-dates__time">8:36 PM ET</dd></div>' in page
-        assert '<div class="job-dates__closed"><dt>Closed</dt><dd>Oct 19, 2026</dd></div>' in page
+        assert '<div><dt>First found</dt><dd>Oct 19, 2026, 8:36 PM ET</dd></div>' in page
         assert "This job closed October 19, 2026" in page
+        assert (
+            'href="https://yabot.jobs/jobs?q=Software+Engineer&amp;location=Austin%2C+TX&amp;sector=engineering_tech" '
+            'data-track="similar_jobs">Find similar open jobs →</a>'
+        ) in page
+
+    def test_similar_jobs_drops_title_extras_remote_places_and_unknown_sectors(self, db, make_job):
+        page = self._page(
+            db, make_job, title="Seasonal Educator (3 month contract) | Brookfield Place", location="Remote",
+            workplace_type=WorkplaceType.REMOTE, sector="unknown", closed_at=datetime(2026, 10, 20, tzinfo=timezone.utc),
+        )
+        assert 'href="https://yabot.jobs/jobs?q=Seasonal+Educator&amp;sector=all"' in page
 
 
 class TestHubs:
@@ -901,7 +929,6 @@ class TestSharedChrome:
         assert "noreferrer" not in page
         assert 'src="https://yabot.jobs/jobs/_assets/analytics.js" async data-page-type="job"' in page
         assert "googletagmanager" not in page  # only in the shared script
-        assert 'data-track="job_site"' in page
 
     def test_gone_page_says_what_it_is(self):
         assert 'data-page-type="job_gone"' in sjp.render_job_gone(None)
