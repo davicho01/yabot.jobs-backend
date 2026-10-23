@@ -6,12 +6,21 @@ pages in app.services.static_pages link here. The SPA keeps its own
 /jobs/{url_id} route; these pages send visitors there to sign in, apply,
 save or tailor.
 
-URLs. A job published since 2026-10-03 lives under the day page that lists
-it: /jobs/us/<sector>/<YYYY-MM-DD>/<title>-<place>-<url_id> (see
-new_job_path). Jobs published before that keep /job/<url_id>. Either way a
-page's path is decided once, when it's first published, and stored in the
+URLs. A job's page lives under the day page that lists it:
+/jobs/us/<sector>/<YYYY-MM-DD>/<title>-<place>-<url_id> (see new_job_path).
+Its path is decided once, when it's first published, and stored in the
 manifest — later renders reuse it even if a rescan changes the title, sector
-or posted date, so a URL never moves and nothing ever needs a redirect.
+or posted date, so a URL never moves. The one exception: jobs published
+before 2026-10-03 lived at /job/<url_id>, and each run moves a batch of
+those (MOVES_PER_RUN) to their descriptive path, leaving a "moved" page at
+the old one — a canonical plus an instant meta refresh to the new URL, which
+Google treats as a permanent redirect (S3 behind CloudFront can't send a
+301 without a hand-attached CloudFront Function).
+
+Which jobs are live. One within MAX_AGE_DAYS of being posted (or found), or
+a crawled one its board still lists (last seen within LIVE_SEEN_DAYS) however
+old: a crawl notices when it closes. A user-submitted URL is never re-checked,
+so it gets MAX_AGE_DAYS and no more.
 
 Driven by generate_static_job_pages.py on the same schedule as the day pages.
 A page is rendered once and then left alone: its related-job and hub links
@@ -29,8 +38,12 @@ when — so each run only
     page keeps everything it showed plus its Closed date, and an expired
     validThrough for Google; closed jobs stay out of the hubs and the
     related-job lists, which only list open ones,
+  - re-renders, once, an open crawled job's page from before PAGE_VERSION 8
+    as it nears MAX_AGE_DAYS: those pages carry a posted + MAX_AGE_DAYS
+    validThrough that would tell Google it expired while it's still listed,
+  - moves pre-2026-10-03 /job/<url_id> pages to their descriptive path,
   - replaces jobs that stopped qualifying (flagged, now a duplicate,
-    rescanned into a failure, past MAX_AGE_DAYS, deleted) with a noindex
+    rescanned into a failure, no longer live, deleted) with a noindex
     "no longer available" page. Deleting the object instead would fall through
     to CloudFront's SPA fallback: a soft 404 that redirects.
 
@@ -69,7 +82,7 @@ from app.models.job_url import JobPostingUrl
 from app.services import geo
 from app.services.company_logos import logo_alias_url, write_logo_alias
 from app.services.job_locations import split_locations
-from app.services.page_store import get_page_store
+from app.services.page_store import PageStoreNotConfigured, get_page_store
 from app.services.static_pages import (
     _TEMPLATE_ENV,
     COUNTRY_ISO2_BY_SLUG,
@@ -88,20 +101,28 @@ logger = logging.getLogger("app.static_job_pages")
 
 # Which rendering a page came from. Informational: bumping it re-renders
 # nothing by itself (run the backfill job, --full, for that).
-PAGE_VERSION = 7
+PAGE_VERSION = 8
+# The first PAGE_VERSION whose crawled jobs carry no made-up validThrough
+# (JobPage.expires); older pages of open crawled jobs get one re-render
+# within EXPIRY_REFRESH_DAYS of the date they'd otherwise show.
+NO_FALLBACK_EXPIRY_VERSION = 8
+EXPIRY_REFRESH_DAYS = 7
 MANIFEST_KEY = "_meta/job-pages.json"
 SITEMAP_INDEX_KEY = "sitemap-job-pages.xml"
 SITEMAP_SHARD_SIZE = 45_000  # under the sitemap protocol's 50,000-URL cap
-# Only jobs posted in the last this many days go in the sitemap. Google
-# crawls a few thousand pages a day while ~15k new job pages land each
-# weekday, so a sitemap of every live page meant most expired unseen. Older
-# pages stay live and indexable, reachable through the hubs and related-job
-# links; they just drop out of the sitemap.
-SITEMAP_RECENT_DAYS = 7
 _SITEMAP_SHARD_RE = re.compile(r"/(sitemap-job-pages-\d+\.xml)</loc>")
 # Nothing re-checks a user-submitted URL unless someone rescans it, so this
 # is the backstop that keeps a long-dead job from staying indexed forever.
 MAX_AGE_DAYS = 60
+# A crawled job stays live past MAX_AGE_DAYS while its board keeps listing
+# it — last seen within this many days, comfortably more than the longest
+# crawl interval (3 days) plus a weekend. A board that's no longer crawled
+# lets its jobs fall back to MAX_AGE_DAYS.
+LIVE_SEEN_DAYS = 14
+# Legacy /job/<url_id> pages moved to their descriptive path per run, out
+# of whatever MAX_RENDERS_PER_RUN leaves after new pages; the rest of the
+# budget stays for rescanned and closed jobs. --full moves them all.
+MOVES_PER_RUN = 4_000
 # Backstop for a failed CloudFront invalidation (see
 # generate_static_job_pages.py), and keeps browsers from holding stale copies.
 CACHE_CONTROL = "public, max-age=3600"
@@ -275,15 +296,20 @@ def job_day(posted_at: date | None, found_at: datetime) -> date:
 
 def new_job_path(job: "LinkJob") -> str:
     """/jobs/us/<sector>/<day>/<title>-<place>-<url_id>, without the leading
-    slash. Only for a job being published for the first time — see the
-    module docstring on why a path never changes afterwards."""
+    slash. Only for a job being published for the first time, or moved off
+    its legacy path — see the module docstring on why a path never changes
+    otherwise."""
     last = "-".join(p for p in (slugify(job.title, _TITLE_SLUG_MAX), job.place_slug, job.url_id) if p)
     return f"jobs/{COUNTRY_SLUG}/{sector_slug(job.sector)}/{job.day.isoformat()}/{last}"
 
 
 def legacy_job_path(url_id: str) -> str:
-    """Where every page published before 2026-10-03 lives, and stays."""
+    """Where every page published before 2026-10-03 lived, until moved."""
     return f"job/{url_id}"
+
+
+def is_legacy_path(path: str) -> bool:
+    return path.startswith("job/")
 
 
 # ---------------------------------------------------------------------------
@@ -343,7 +369,8 @@ def read_job_paths() -> dict[str, str]:
 def _eligible_filter(now: datetime):
     """Same base filter as static_pages.jobs_for_sector_day (and so as a
     normal /jobs search) — successfully scanned, titled, canonical, unflagged,
-    US — plus inside MAX_AGE_DAYS. Open or closed: a closed job keeps its
+    US — plus inside MAX_AGE_DAYS, or crawled and still listed on its board
+    (LIVE_SEEN_DAYS) however old. Open or closed: a closed job keeps its
     page, with its Closed date."""
     cutoff = now - timedelta(days=MAX_AGE_DAYS)
     return and_(
@@ -355,6 +382,10 @@ def _eligible_filter(now: datetime):
         or_(
             JobPosting.posted_at >= cutoff.date(),
             and_(JobPosting.posted_at.is_(None), JobPostingUrl.created_at >= cutoff),
+            and_(
+                JobPostingUrl.crawl_source_id.is_not(None),
+                JobPostingUrl.last_seen_at >= now - timedelta(days=LIVE_SEEN_DAYS),
+            ),
         ),
     )
 
@@ -379,6 +410,7 @@ class LinkJob:
     found_at: datetime
     scanned: str  # ISO; the page's version
     closed: str = ""  # closed_at (ISO); "" while open
+    crawled: bool = False  # found by a crawl (crawl_source_id), so closures are noticed
     path: str = ""
     _place: str | None = None
 
@@ -416,7 +448,7 @@ def load_link_index(db: Session, now: datetime) -> dict[str, LinkJob]:
             JobPostingUrl.id, JobPostingUrl.domain, JobPostingUrl.created_at, JobPostingUrl.closed_at,
             JobPosting.title, JobPosting.company_name, JobPosting.company_key, JobPosting.title_key,
             JobPosting.sector, JobPosting.metros, JobPosting.location, JobPosting.workplace_type,
-            JobPosting.posted_at, JobPosting.scanned_at,
+            JobPosting.posted_at, JobPosting.scanned_at, JobPostingUrl.crawl_source_id,
         )
         .join(JobPosting, JobPosting.url_id == JobPostingUrl.id)
         .where(_eligible_filter(now))
@@ -444,6 +476,7 @@ def load_link_index(db: Session, now: datetime) -> dict[str, LinkJob]:
             found_at=row.created_at,
             scanned=scanned,
             closed=_iso(row.closed_at) if row.closed_at else "",
+            crawled=row.crawl_source_id is not None,
         )
     return index
 
@@ -494,6 +527,7 @@ class JobPage:
     closed_at: datetime | None = None
     # The posting on the employer's own site, for the page's Job site button.
     job_url: str | None = None
+    crawled: bool = False  # found by a crawl (crawl_source_id), so closures are noticed
 
     @property
     def company_logo_url(self) -> str | None:
@@ -528,16 +562,20 @@ class JobPage:
         return job_day(self.posted_at, self.found_at)
 
     @property
-    def expires(self) -> date:
+    def expires(self) -> date | None:
         """The day it closed, once it has, so Google for Jobs drops it; else
-        the employer's validThrough when it gives one (and it's sane), else
-        the day this page is retired: MAX_AGE_DAYS after it was posted or
-        found, matching _eligible_filter."""
+        the employer's validThrough when it gives one (and it's sane); else,
+        for a user-submitted job, the day this page is retired: MAX_AGE_DAYS
+        after it was posted or found, matching _eligible_filter. A crawled
+        job has no such day — it stays live while its board lists it, and
+        closing re-renders the page with the closed date — so None."""
         if self.closed_at is not None:
             return self.closed_at.date()
         employer = _parse_date(self.valid_through)
         if employer is not None and employer >= self.date_posted:
             return employer
+        if self.crawled:
+            return None
         return self.date_posted + timedelta(days=MAX_AGE_DAYS)
 
 
@@ -560,7 +598,7 @@ def load_job_pages(db: Session, url_ids: Iterable[str]) -> dict[str, JobPage]:
     stmt = (
         select(
             JobPostingUrl.id, JobPostingUrl.url.label("job_url"), JobPostingUrl.domain, JobPostingUrl.created_at,
-            JobPostingUrl.closed_at,
+            JobPostingUrl.closed_at, JobPostingUrl.crawl_source_id,
             JobPosting.title, JobPosting.company_name, JobPosting.location, JobPosting.locations,
             JobPosting.workplace_type, JobPosting.employment_type, JobPosting.sector, JobPosting.description,
             JobPosting.posted_at, JobPosting.first_scanned_at,
@@ -599,6 +637,7 @@ def load_job_pages(db: Session, url_ids: Iterable[str]) -> dict[str, JobPage]:
             company_logo_key=row.company_logo_key,
             closed_at=row.closed_at,
             job_url=row.job_url,
+            crawled=row.crawl_source_id is not None,
         )
     return pages
 
@@ -761,12 +800,13 @@ def _job_ld(job: JobPage, description_html: str, page_url: str) -> dict:
         "title": job.title,
         "description": description_html or html.escape(job.title),
         "datePosted": job.date_posted.isoformat(),
-        "validThrough": job.expires.isoformat(),
         "hiringOrganization": _hiring_org(job),
         "identifier": {"@type": "PropertyValue", "name": "Yabot Jobs", "value": job.url_id},
         "directApply": False,
         "url": page_url,
     }
+    if job.expires is not None:
+        item["validThrough"] = job.expires.isoformat()
     places = []
     for loc in job.locations[:10]:
         parts = [p.strip() for p in loc.split(",") if p.strip()]
@@ -941,6 +981,15 @@ def render_job_gone(job: JobPage | None) -> str:
     )
 
 
+def render_job_moved(job: JobPage, new_path: str) -> str:
+    """The page left at a legacy /job/<url_id> once its job has moved."""
+    return _TEMPLATE_ENV.get_template("job_moved.html.jinja").render(
+        title=f"{job.title} at {job.company_display}",
+        new_url=_url(new_path),
+        base_url=settings.seo_pages_base_url,
+    )
+
+
 def build_sitemaps(prefix: str, urls: list[tuple[str, str | None]]) -> dict[str, str]:
     """{key: xml}: numbered `<prefix>-<n>.xml` shards of (path, lastmod)
     URLs in the order given, at most SITEMAP_SHARD_SIZE each."""
@@ -1011,6 +1060,8 @@ class JobPagesResult:
     updated: int = 0  # re-rendered: a rescan changed the content, or --full
     rescanned_unchanged: int = 0  # rescanned, same content: only the manifest moved
     removed: int = 0  # replaced with the "no longer available" page
+    moved: int = 0  # legacy /job/<url_id> pages moved to their descriptive path
+    legacy_left: int = 0  # legacy pages still waiting to move after this run
     unchanged: int = 0
     deferred: int = 0  # over this run's render cap; picked up next run
     hubs: int = 0  # hub pages published (static_hub_pages)
@@ -1035,19 +1086,33 @@ def generate_job_pages(
 
     now = now or datetime.now(timezone.utc)
     rendered_at = now.isoformat()
-    previous = {} if dry_run else {i: parse_entry(i, raw) for i, raw in read_job_manifest()["pages"].items()}
+    previous = {i: parse_entry(i, raw) for i, raw in _read_manifest_pages(dry_run).items()}
     index = load_link_index(db, now)
     for i, job in index.items():
         job.path = previous[i].path if i in previous else new_job_path(job)
     if full:
         max_renders = None
 
+    # Open crawled jobs whose page (from before NO_FALLBACK_EXPIRY_VERSION)
+    # carries a posted + MAX_AGE_DAYS validThrough that's about to pass while
+    # the job is still listed: re-rendered once, without it.
+    today = now.astimezone(DAY_BOUNDARY_TZ).date()
+    expiry_due = {
+        i for i in index
+        if i in previous
+        and index[i].crawled
+        and not index[i].closed
+        and _version(previous[i]) < NO_FALLBACK_EXPIRY_VERSION
+        and index[i].day + timedelta(days=MAX_AGE_DAYS - EXPIRY_REFRESH_DAYS) <= today
+    }
+
     # New pages first: a job without a page is invisible, while an outdated
     # page only shows yesterday's version of itself. Already-published pages
-    # are only looked at when rescanned, closed or reopened (or with --full,
-    # or named in `only`, --ids: a backfill of just those pages), and
-    # re-rendered only if their own content changed (content_hash).
-    forced = set(only)
+    # are only looked at when rescanned, closed or reopened, near a stale
+    # validThrough (expiry_due), or with --full or named in `only` (--ids: a
+    # backfill of just those pages), and re-rendered only if their own
+    # content changed (content_hash) — always, for the last three.
+    forced = set(only) | expiry_due
     new_ids = [i for i in index if i not in previous]
     removed_ids = [i for i in previous if i not in index]
     check_ids = [
@@ -1061,6 +1126,22 @@ def generate_job_pages(
         new_ids = new_ids[:max_renders]
     room = None if max_renders is None else max_renders - len(new_ids)
 
+    # Legacy /job/<url_id> pages moving to their descriptive path this run,
+    # newest posting day first, out of what new pages left of the budget.
+    # Each is rendered in full at its new path, so it needs no other check.
+    legacy_ids = sorted(
+        (i for i in index if i in previous and is_legacy_path(previous[i].path)),
+        key=lambda i: index[i].day, reverse=True,
+    )
+    moves = legacy_ids if room is None else legacy_ids[: max(0, min(MOVES_PER_RUN, room))]
+    moved_from: dict[str, str] = {}
+    for i in moves:
+        moved_from[i] = previous[i].path
+        index[i].path = new_job_path(index[i])
+    check_ids = [i for i in check_ids if i not in moved_from]
+    if room is not None:
+        room -= len(moves)
+
     # What will be live once this run is done: everything already published
     # plus this run's new pages. Deferred new jobs aren't linked from
     # anywhere until they're published.
@@ -1073,13 +1154,17 @@ def generate_job_pages(
     result = JobPagesResult(
         published=len(new_ids),
         removed=len(removed_ids),
+        moved=len(moves),
+        legacy_left=len(legacy_ids) - len(moves),
         hubs=len(hub_plan.pages),
         job_paths={i: index[i].path for i in live_ids},
         country_links=hub_plan.country_links(),
     )
     logger.info(
-        "Job pages: %d new, %d rescanned to check, %d to remove, %d new deferred to the next run; %d hub page(s)%s.",
-        len(new_ids), len(check_ids), len(removed_ids), deferred, result.hubs, " (dry run)" if dry_run else "",
+        "Job pages: %d new, %d rescanned to check (%d near a stale validThrough), %d to remove, "
+        "%d new deferred to the next run, %d legacy page(s) to move (%d left after); %d hub page(s)%s.",
+        len(new_ids), len(check_ids), len(expiry_due), len(removed_ids), deferred, len(moves),
+        result.legacy_left, result.hubs, " (dry run)" if dry_run else "",
     )
     if dry_run:
         result.deferred = deferred
@@ -1134,6 +1219,19 @@ def generate_job_pages(
             publish(pool, list(loaded), loaded)
             batches_done += 1
             checkpoint()
+        for start in range(0, len(moves), RENDER_BATCH_SIZE):
+            batch = moves[start : start + RENDER_BATCH_SIZE]
+            loaded = load_job_pages(db, batch)
+            for i in batch:
+                if i not in loaded:  # gone since the index query: stays where it is
+                    index[i].path = result.job_paths[i] = moved_from.pop(i)
+            ids = [i for i in batch if i in loaded]
+            # The full page first, so the old path never forwards to nothing.
+            publish(pool, ids, loaded)
+            uploads = [(moved_from[i], render_job_moved(loaded[i], index[i].path)) for i in ids]
+            list(pool.map(lambda kv: upload_html(kv[0], kv[1], CACHE_CONTROL), uploads))
+            batches_done += 1
+            checkpoint()
         for start in range(0, len(check_ids), RENDER_BATCH_SIZE):
             loaded = load_job_pages(db, check_ids[start : start + RENDER_BATCH_SIZE])
             changed = []
@@ -1165,19 +1263,43 @@ def generate_job_pages(
         hub_paths = static_hub_pages.publish_hubs(hub_plan, pool)
 
     result.updated = len(rerendered)
+    result.moved = len(moved_from)
     result.deferred = deferred
-    result.unchanged = len(index) - result.published - result.updated - deferred
+    result.unchanged = len(index) - result.published - result.updated - result.moved - deferred
 
-    since = now.astimezone(DAY_BOUNDARY_TZ).date() - timedelta(days=SITEMAP_RECENT_DAYS)
-    recent = {i: raw for i, raw in pages.items() if i in index and index[i].day >= since}
+    # Every live page, newest posting day first so Google reaches new jobs
+    # first — except legacy /job/<url_id> ones not moved yet: the sitemap
+    # only lists descriptive URLs.
+    listed = {i: raw for i, raw in pages.items() if i in index and not is_legacy_path(parse_entry(i, raw).path)}
     previous_index = get_page_store().get(SITEMAP_INDEX_KEY) or b""
     previous_shards = _SITEMAP_SHARD_RE.findall(previous_index.decode())
-    sitemaps = build_job_sitemaps(recent, hub_paths, {i: index[i].day for i in recent}, previous_shards)
+    sitemaps = build_job_sitemaps(listed, hub_paths, {i: index[i].day for i in listed}, previous_shards)
     for key, xml in sitemaps.items():
         upload_xml(key, xml)
         result.touched_paths.append(f"/{key}")
     # Hubs are rewritten every run; they all sit under /jobs/, which
-    # collapse_invalidation_paths turns into one wildcard.
+    # collapse_invalidation_paths turns into one wildcard (and /job/ pages,
+    # moved ones included, into another).
     result.touched_paths.extend(f"/{previous[i].path}" for i in rerendered + removed_ids)
+    result.touched_paths.extend(f"/{path}" for path in moved_from.values())
     result.touched_paths.extend(f"/{path}" for path in hub_paths)
     return result
+
+
+def _read_manifest_pages(dry_run: bool) -> dict[str, str]:
+    """The manifest's pages. A dry run reads it too when there's a store to
+    read (so its counts are real, legacy pages to move included) and
+    otherwise treats every job as new."""
+    try:
+        return read_job_manifest()["pages"]
+    except PageStoreNotConfigured:
+        if dry_run:
+            return {}
+        raise
+
+
+def _version(entry: ManifestEntry) -> int:
+    try:
+        return int(entry.version)
+    except ValueError:
+        return 0

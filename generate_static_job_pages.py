@@ -31,7 +31,8 @@ Sectors with zero jobs that day are skipped entirely (no thin/empty page).
 
 Each run first brings the per-job pages up to date (see
 app.services.static_job_pages: new jobs at /jobs/us/<sector>/<day>/<title>-
-<place>-<id>, older ones staying at /job/<id>; rescanned ones re-rendered
+<place>-<id>, a batch of pre-2026-10-03 ones moved there from /job/<id>
+with a forwarding page left behind; rescanned ones re-rendered
 only if their content changed, closed ones re-rendered with their Closed date;
 "no longer available" pages for jobs that stopped qualifying — every other page
 is left as first rendered) along with the company and
@@ -133,9 +134,9 @@ def main() -> None:
     if job_error is None:
         logger.info(
             "%s job pages: %d new, %d re-rendered, %d rescanned with no change, %d marked no longer available, "
-            "%d unchanged, %d deferred; %d hub page(s).",
+            "%d moved off /job/ (%d left), %d unchanged, %d deferred; %d hub page(s).",
             verb, job_result.published, job_result.updated, job_result.rescanned_unchanged, job_result.removed,
-            job_result.unchanged, job_result.deferred, job_result.hubs,
+            job_result.moved, job_result.legacy_left, job_result.unchanged, job_result.deferred, job_result.hubs,
         )
 
     if not args.dry_run:

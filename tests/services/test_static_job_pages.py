@@ -74,6 +74,8 @@ def make_job(db):
         title_key: str | None = None,
         metros: list[str] | None = None,
         extracted_fields: dict | None = None,
+        crawled: bool = False,
+        last_seen_at: datetime | None = None,
     ) -> m.JobPostingUrl:
         n = next(counter)
         url_row = m.JobPostingUrl(
@@ -84,6 +86,8 @@ def make_job(db):
             created_at=created_at,
             flagged_at=flagged_at,
             closed_at=closed_at,
+            crawl_source_id=uuid.uuid4() if crawled else None,
+            last_seen_at=last_seen_at,
         )
         db.add(url_row)
         db.flush()
@@ -164,6 +168,13 @@ class TestEligibility:
         make_job(created_at=NOW - timedelta(days=90), posted_at=(NOW - timedelta(days=5)).date())
         assert len(sjp.eligible_job_ids(db, NOW)) == 1
 
+    def test_a_crawled_job_its_board_still_lists_stays_eligible_however_old(self, db, make_job):
+        old = (NOW - timedelta(days=90)).date()
+        listed = make_job(posted_at=old, crawled=True, last_seen_at=NOW - timedelta(days=2))
+        make_job(posted_at=old, crawled=True, last_seen_at=NOW - timedelta(days=sjp.LIVE_SEEN_DAYS + 1))
+        make_job(posted_at=old, last_seen_at=NOW)  # no crawl source: user-submitted, or its source is gone
+        assert set(sjp.eligible_job_ids(db, NOW)) == {str(listed.id)}
+
     def test_version_is_the_scan_time(self, db, make_job):
         row = make_job(scanned_at=datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc))
         assert sjp.eligible_job_ids(db, NOW)[str(row.id)].startswith("2026-10-01T12:00:00")
@@ -195,6 +206,21 @@ class TestRendering:
         assert ld["employmentType"] == "FULL_TIME"
         assert ld["baseSalary"]["value"]["unitText"] == "YEAR"
         assert "<strong>things</strong>" in ld["description"]
+
+    def test_valid_through_falls_back_to_retirement_only_for_user_submitted_jobs(self, db, make_job):
+        submitted = _ld(self._page(db, make_job, posted_at=date(2026, 9, 30)))
+        crawled = _ld(self._page(db, make_job, posted_at=date(2026, 9, 30), crawled=True, last_seen_at=NOW))
+        employer = _ld(self._page(db, make_job, crawled=True, extracted_fields={"validThrough": "2026-12-31T23:59:59Z"}))
+        assert submitted["validThrough"] == (date(2026, 9, 30) + timedelta(days=sjp.MAX_AGE_DAYS)).isoformat()
+        assert "validThrough" not in crawled
+        assert employer["validThrough"] == "2026-12-31"
+
+    def test_moved_page_forwards_to_the_new_url(self, db, make_job):
+        row = make_job()
+        page = sjp.render_job_moved(sjp.load_job_pages(db, [str(row.id)])[str(row.id)], "jobs/us/x/y")
+        assert '<link rel="canonical" href="https://yabot.jobs/jobs/us/x/y" />' in page
+        assert '<meta http-equiv="refresh" content="0; url=https://yabot.jobs/jobs/us/x/y" />' in page
+        assert "noindex" not in page and "application/ld+json" not in page
 
     def test_remote_job_is_telecommute(self, db, make_job):
         ld = _ld(self._page(db, make_job, workplace_type=WorkplaceType.REMOTE, location=None))
@@ -285,15 +311,26 @@ class TestGenerate:
         # A brand-new key was never cached, so only the sitemaps need invalidating.
         assert sorted(result.touched_paths) == ["/sitemap-job-pages-1.xml", "/sitemap-job-pages.xml"]
 
-    def test_sitemap_lists_only_recent_jobs_but_older_pages_stay_live(self, db, make_job, store):
-        recent = make_job(posted_at=(NOW - timedelta(days=sjp.SITEMAP_RECENT_DAYS)).date())
-        older = make_job(posted_at=(NOW - timedelta(days=sjp.SITEMAP_RECENT_DAYS + 1)).date())
+    def test_sitemap_lists_every_live_page(self, db, make_job, store):
+        rows = [
+            make_job(posted_at=(NOW - timedelta(days=1)).date()),
+            make_job(posted_at=(NOW - timedelta(days=sjp.MAX_AGE_DAYS - 1)).date()),
+            make_job(posted_at=(NOW - timedelta(days=120)).date(), crawled=True, last_seen_at=NOW),
+        ]
         sjp.generate_job_pages(db, now=NOW)
 
         sitemap = store.get("sitemap-job-pages-1.xml")
-        assert f"/{_path(store, recent.id)}</loc>".encode() in sitemap
-        assert str(older.id).encode() not in sitemap
-        assert b"Software Engineer" in store.get(_path(store, older.id))
+        assert all(f"/{_path(store, r.id)}</loc>".encode() in sitemap for r in rows)
+
+    def test_sitemap_never_lists_a_legacy_job_slash_id_page(self, db, make_job, store, monkeypatch):
+        row = make_job()
+        store.put(sjp.MANIFEST_KEY, json.dumps({"pages": {str(row.id): "1|old"}}), "application/json")
+        monkeypatch.setattr(sjp, "MOVES_PER_RUN", 0)  # not moved this run
+
+        sjp.generate_job_pages(db, now=NOW)
+
+        assert _path(store, row.id) == f"job/{row.id}"
+        assert str(row.id).encode() not in store.get("sitemap-job-pages-1.xml")
 
     def test_unchanged_jobs_are_skipped(self, db, make_job, store):
         make_job()
@@ -564,17 +601,85 @@ class TestManifestEntries:
 
 
 class TestUrlLifecycle:
-    def test_existing_pages_keep_their_job_slash_id_url_and_are_re_rendered_in_place(self, db, make_job, store):
+    def test_a_legacy_job_slash_id_page_moves_to_its_descriptive_path(self, db, make_job, store):
         row = make_job()
         store.put(sjp.MANIFEST_KEY, json.dumps({"pages": {str(row.id): "1|old"}}), "application/json")
 
         result = sjp.generate_job_pages(db, now=NOW)
 
-        assert result.updated == 1  # the PAGE_VERSION bump re-renders it...
-        assert _path(store, row.id) == f"job/{row.id}"  # ...at the URL it already had
-        page = store.get(f"job/{row.id}").decode()
-        assert f'rel="canonical" href="https://yabot.jobs/job/{row.id}"' in page
-        assert "Job at a glance" in page
+        new_path = _path(store, row.id)
+        assert (result.moved, result.legacy_left, result.updated, result.unchanged) == (1, 0, 0, 0)
+        assert new_path.startswith("jobs/us/engineering-tech/") and new_path.endswith(str(row.id))
+        page = store.get(new_path).decode()
+        assert f'rel="canonical" href="https://yabot.jobs/{new_path}"' in page and "Job at a glance" in page
+        old = store.get(f"job/{row.id}").decode()
+        assert f'<meta http-equiv="refresh" content="0; url=https://yabot.jobs/{new_path}" />' in old
+        assert f"/job/{row.id}" in result.touched_paths
+        assert f"/{new_path}</loc>".encode() in store.get("sitemap-job-pages-1.xml")
+        # Settled: nothing moves or re-renders again.
+        again = sjp.generate_job_pages(db, now=NOW)
+        assert (again.moved, again.updated, again.unchanged) == (0, 0, 1)
+
+    def test_moves_come_after_new_pages_and_are_capped_per_run(self, db, make_job, store, monkeypatch):
+        legacy = [make_job(title=f"Old {i}") for i in range(3)]
+        store.put(sjp.MANIFEST_KEY, json.dumps({"pages": {str(r.id): "1|old" for r in legacy}}), "application/json")
+        new = make_job(title="New")
+        monkeypatch.setattr(sjp, "MOVES_PER_RUN", 2)
+
+        first = sjp.generate_job_pages(db, now=NOW, max_renders=2)
+        assert (first.published, first.moved, first.legacy_left) == (1, 1, 2)  # the new page took one of the two
+        assert store.get(_path(store, new.id))
+
+        second = sjp.generate_job_pages(db, now=NOW, max_renders=10)
+        assert (second.moved, second.legacy_left) == (2, 0)  # MOVES_PER_RUN, not the whole budget
+        assert not any(sjp.is_legacy_path(_path(store, r.id)) for r in legacy)
+
+    def test_full_moves_every_legacy_page(self, db, make_job, store, monkeypatch):
+        legacy = [make_job() for _ in range(3)]
+        store.put(sjp.MANIFEST_KEY, json.dumps({"pages": {str(r.id): "1|old" for r in legacy}}), "application/json")
+        monkeypatch.setattr(sjp, "MOVES_PER_RUN", 1)
+        assert sjp.generate_job_pages(db, now=NOW, full=True).moved == 3
+
+    def test_a_moved_job_that_retires_gets_the_gone_page_at_its_new_path(self, db, make_job, store):
+        row = make_job()
+        store.put(sjp.MANIFEST_KEY, json.dumps({"pages": {str(row.id): "1|old"}}), "application/json")
+        sjp.generate_job_pages(db, now=NOW)
+        new_path = _path(store, row.id)
+        row.flagged_at = NOW
+        db.commit()
+
+        assert sjp.generate_job_pages(db, now=NOW).removed == 1
+        assert b"noindex" in store.get(new_path)
+        assert new_path.encode() in store.get(f"job/{row.id}")  # still forwards there
+
+    def test_an_old_crawled_page_is_re_rendered_once_before_its_baked_valid_through(self, db, make_job, store):
+        posted = (NOW - timedelta(days=sjp.MAX_AGE_DAYS - sjp.EXPIRY_REFRESH_DAYS)).date()
+        row = make_job(posted_at=posted, crawled=True, last_seen_at=NOW)
+        sjp.generate_job_pages(db, now=NOW)
+        path = _path(store, row.id)
+        pages = json.loads(store.get(sjp.MANIFEST_KEY))["pages"]
+        pages[str(row.id)] = "7" + pages[str(row.id)][len(str(sjp.PAGE_VERSION)):]  # as if rendered before v8
+        store.put(sjp.MANIFEST_KEY, json.dumps({"pages": pages}), "application/json")
+
+        result = sjp.generate_job_pages(db, now=NOW)
+
+        assert result.updated == 1
+        assert "validThrough" not in _ld(store.get(path).decode())
+        assert sjp.generate_job_pages(db, now=NOW).updated == 0  # once
+
+    def test_an_old_crawled_page_far_from_day_60_is_left_alone(self, db, make_job, store):
+        row = make_job(posted_at=(NOW - timedelta(days=10)).date(), crawled=True, last_seen_at=NOW)
+        sjp.generate_job_pages(db, now=NOW)
+        pages = json.loads(store.get(sjp.MANIFEST_KEY))["pages"]
+        pages[str(row.id)] = "7" + pages[str(row.id)][len(str(sjp.PAGE_VERSION)):]
+        store.put(sjp.MANIFEST_KEY, json.dumps({"pages": pages}), "application/json")
+        assert sjp.generate_job_pages(db, now=NOW).updated == 0
+
+    def test_a_crawled_job_retires_once_its_board_stops_listing_it(self, db, make_job, store):
+        make_job(posted_at=(NOW - timedelta(days=90)).date(), crawled=True, last_seen_at=NOW)
+        sjp.generate_job_pages(db, now=NOW)
+        later = NOW + timedelta(days=sjp.LIVE_SEEN_DAYS + 1)
+        assert sjp.generate_job_pages(db, now=later).removed == 1
 
     def test_a_published_url_never_moves_when_title_sector_or_date_change(self, db, make_job, store):
         row = make_job()
