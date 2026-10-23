@@ -41,7 +41,7 @@ from app.db.session import SessionLocal
 from app.models.crawl_source import CrawlSource
 from app.services.ats_adapters import can_crawl_uncapped, list_board
 from app.services.coverage_monitor import update_coverage
-from app.services.crawl_schedule import closed_after_hours, schedule_next_crawl
+from app.services.crawl_schedule import schedule_next_crawl
 from app.services.crawl_queue import ensure_topic_and_subscription, subscriber_client, subscription_path
 from app.services.job_queue import enqueue_source_scan
 from app.services.jobs import bulk_register_discovered_urls, record_board_presence
@@ -117,7 +117,6 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
     # the board is, so it keeps its interval like a failed listing does.
     schedule_next_crawl(source, source.last_crawled_at, created, listing_failed=not registered)
     new_interval = source.crawl_interval_minutes
-    closed_after = closed_after_hours(new_interval)
     update_coverage(source, len(urls))
     # Only a crawl that plausibly saw the whole board may close the jobs it
     # didn't list: a non-empty listing the adapter says is the whole board
@@ -135,7 +134,7 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
     # tracking is bookkeeping, and a failure here must never roll back the
     # crawl or nack its message into a full re-crawl of the board.
     try:
-        closed = record_board_presence(db, source_id, urls, healthy=healthy, closed_after_hours=closed_after)
+        closed = record_board_presence(db, source_id, urls, healthy=healthy)
         db.commit()
         if closed or not healthy:
             logger.info(

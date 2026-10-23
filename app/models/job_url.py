@@ -117,12 +117,14 @@ class JobPostingUrl(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     # Last time a crawl of crawl_source_id's board listed this URL (null for
-    # user-submitted URLs, which no crawl ever re-lists). closed_at is set
-    # once a healthy crawl hasn't listed it for job_closed_after_unseen_hours,
-    # or a scan finds the posting expired — and cleared again if a later crawl
-    # lists it. See app.services.jobs.record_board_presence. Closed listings
-    # drop out of GET /jobs search and the static SEO pages.
+    # user-submitted URLs, which no crawl ever re-lists). missing_since is
+    # the first healthy crawl since then that didn't list it; closed_at is
+    # set by the next one (two misses in a row), or when a scan finds the
+    # posting expired — and both clear again if a later crawl lists it. See
+    # app.services.jobs.record_board_presence. Closed listings drop out of
+    # GET /jobs search and the static SEO pages.
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    missing_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Whether the latest scan asked yabot-jobs-browser for a render, whatever
