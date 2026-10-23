@@ -146,6 +146,13 @@ class Settings(BaseSettings):
     # CloudFront distribution ID fronting seo_pages_bucket, for invalidating
     # just-written paths after each run. None skips invalidation (local dev).
     seo_pages_cloudfront_distribution_id: str | None = None
+    # Per-run caps for the per-job pages (app.services.static_job_pages
+    # MAX_RENDERS_PER_RUN / MOVES_PER_RUN). Raised only for one-off manual
+    # executions (`gcloud run jobs execute --update-env-vars=...`), e.g. to
+    # move the legacy /job/<id> pages in a few big runs; the schedule keeps
+    # these defaults.
+    job_pages_max_renders_per_run: int = 8_000
+    job_pages_moves_per_run: int = 4_000
 
     # Standalone Chromium-rendering service for the rare sites that need JS
     # execution to reveal their content (see app/services/browser_fetch.py).

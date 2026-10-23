@@ -122,7 +122,8 @@ LIVE_SEEN_DAYS = 14
 # Legacy /job/<url_id> pages moved to their descriptive path per run, out
 # of whatever MAX_RENDERS_PER_RUN leaves after new pages; the rest of the
 # budget stays for rescanned and closed jobs. --full moves them all.
-MOVES_PER_RUN = 4_000
+# JOB_PAGES_MOVES_PER_RUN overrides it for a one-off execution.
+MOVES_PER_RUN = settings.job_pages_moves_per_run
 # Backstop for a failed CloudFront invalidation (see
 # generate_static_job_pages.py), and keeps browsers from holding stale copies.
 CACHE_CONTROL = "public, max-age=3600"
@@ -133,8 +134,9 @@ CHECKPOINT_EVERY_BATCHES = 10
 # Renders per scheduled run, a safety valve for a burst (the first run, a
 # source rescan that really changed thousands of postings). New pages go
 # first; whatever's left over is picked up next run. --full (the backfill
-# job, with hours to work) is uncapped.
-MAX_RENDERS_PER_RUN = 8_000
+# job, with hours to work) is uncapped. JOB_PAGES_MAX_RENDERS_PER_RUN
+# overrides it for a one-off execution.
+MAX_RENDERS_PER_RUN = settings.job_pages_max_renders_per_run
 UPLOAD_WORKERS = 16
 COUNTRY_SLUG = "us"
 # A job page's "More jobs at …" and "Similar jobs" lists.
