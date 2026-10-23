@@ -55,6 +55,7 @@ from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterable
+from urllib.parse import urlencode
 
 from markdown_it import MarkdownIt
 from sqlalchemy import and_, or_, select
@@ -87,7 +88,7 @@ logger = logging.getLogger("app.static_job_pages")
 
 # Which rendering a page came from. Informational: bumping it re-renders
 # nothing by itself (run the backfill job, --full, for that).
-PAGE_VERSION = 6
+PAGE_VERSION = 7
 MANIFEST_KEY = "_meta/job-pages.json"
 SITEMAP_INDEX_KEY = "sitemap-job-pages.xml"
 SITEMAP_SHARD_SIZE = 45_000  # under the sitemap protocol's 50,000-URL cap
@@ -811,14 +812,20 @@ def page_title(job: JobPage) -> str:
 
 
 def meta_description(job: JobPage) -> str:
+    """"DispatchHealth is hiring a Nurse Practitioner in Citrus Heights, CA.
+    Posted September 22, 2026." (once the page's lead, now only the search
+    snippet), then the facts while they fit."""
     where = f" in {job.location}" if job.location else ""
+    article = "an" if job.title[:1].lower() in "aeiou" else "a"
+    hiring = "was hiring" if job.closed_at is not None else "is hiring"
     facts = [label for label in (_EMPLOYMENT_LABELS.get(job.employment_type), _WORKPLACE_LABELS.get(job.workplace_type)) if label]
     if job.salary_display:
         facts.append(job.salary_display)
     sentences = [
-        f"{job.title} at {job.company_display}{where}.",
+        f"{job.company_display} {hiring} {article} {job.title}{where}.",
+        f"Posted {job.date_posted.strftime('%B %-d, %Y')}.",
+        f"Closed {_closed_date(job)}." if job.closed_at is not None else "",
         (", ".join(facts) + ".") if facts else "",
-        f"Posted {job.date_posted.strftime('%b %-d, %Y')}.",
         "See details and similar jobs on Yabot Jobs.",
     ]
     text = ""
@@ -832,17 +839,30 @@ def meta_description(job: JobPage) -> str:
     return text
 
 
-def _lead(job: JobPage) -> str:
-    where = f" in {job.location}" if job.location else ""
-    article = "an" if job.title[:1].lower() in "aeiou" else "a"
-    posted = f"Posted {job.date_posted.strftime('%B %-d, %Y')}."
-    if job.closed_at is not None:
-        return f"{job.company_display} was hiring {article} {job.title}{where}. {posted} Closed {_closed_date(job)}."
-    return f"{job.company_display} is hiring {article} {job.title}{where}. {posted}"
-
-
 def _closed_date(job: JobPage) -> str | None:
     return eastern(job.closed_at).strftime("%B %-d, %Y") if job.closed_at else None
+
+
+_TITLE_EXTRAS_RE = re.compile(r"\s[(|–—-]\s?|,|\s\(")
+_COUNTRY_SUFFIX_RE = re.compile(r",\s*(USA|US|United States( of America)?)$", re.IGNORECASE)
+
+
+def _similar_jobs_url(job: JobPage) -> str:
+    """The job board searching for what a closed job was, as the app's job
+    page does (JobCaseFile's similarJobsPath): its title without the extras
+    employers tack on ("Seasonal Educator (3 month contract) | Brookfield
+    Place" -> "Seasonal Educator"), in its place unless remote, in its sector
+    — or every sector, not the board's Tech default, when it has none the
+    board knows."""
+    params: dict[str, str] = {}
+    title = _TITLE_EXTRAS_RE.split(job.title or "")[0].strip()
+    if title:
+        params["q"] = title
+    place = _COUNTRY_SUFFIX_RE.sub("", job.locations[0]).strip() if job.locations else ""
+    if place and job.workplace_type != WorkplaceType.REMOTE and "remote" not in place.lower():
+        params["location"] = place
+    params["sector"] = job.sector if _sector_link(job.sector) else "all"
+    return f"{settings.seo_pages_base_url}/jobs?{urlencode(params)}"
 
 
 NOT_LISTED = "Not listed"
@@ -851,11 +871,11 @@ NOT_LISTED = "Not listed"
 _SHORT_DATE = "%b %-d, %Y"
 
 
-def _first_found_time(job: JobPage) -> str | None:
-    """First found's time, under its date in grey as on the job board. A
-    static page can't know its visitor's zone (the SPA shows their local
-    time), so the time says it's Eastern."""
-    return eastern(job.first_scanned_at).strftime("%-I:%M %p ET") if job.first_scanned_at else None
+def _date_time(moment: datetime | None) -> str | None:
+    """"Oct 15, 2026, 4:10 PM ET": date and time on one line, as on the job
+    board. A static page can't know its visitor's zone (the SPA shows their
+    local time), so the time says it's Eastern."""
+    return eastern(moment).strftime(f"{_SHORT_DATE}, %-I:%M %p ET") if moment else None
 
 
 def _glance(job: JobPage) -> list[tuple[str, str]]:
@@ -870,10 +890,7 @@ def _glance(job: JobPage) -> list[tuple[str, str]]:
         # still falls back to the day it was found; Google needs one).
         # Short months, as on the job board's dates strip.
         ("Posted", job.posted_at.strftime(_SHORT_DATE) if job.posted_at else NOT_LISTED),
-        # The time goes on its own line under this (_first_found_time).
-        ("First found", eastern(job.first_scanned_at).strftime(_SHORT_DATE) if job.first_scanned_at else None),
-        ("Apply by", job.expires.strftime(_SHORT_DATE) if _parse_date(job.valid_through) and not job.closed_at else None),
-        ("Closed", eastern(job.closed_at).strftime(_SHORT_DATE) if job.closed_at else None),
+        ("First found", _date_time(job.first_scanned_at)),
     ]
     return [(label, value) for label, value in rows if value]
 
@@ -899,10 +916,10 @@ def render_job_page(job: JobPage, path: str | None = None, links: PageLinks | No
         page_url=page_url,
         page_title=page_title(job),
         meta_description=meta_description(job),
-        lead=_lead(job),
         glance=_glance(job),
-        first_found_time=_first_found_time(job),
         closed_date=_closed_date(job),
+        similar_jobs_url=_similar_jobs_url(job) if job.closed_at else None,
+        closed_short=eastern(job.closed_at).strftime(_SHORT_DATE) if job.closed_at else None,
         description_html=description_html,
         job_ld_json=ld_json([_job_ld(job, description_html, page_url), breadcrumb_ld(trail, page_url)]),
         trail=trail,

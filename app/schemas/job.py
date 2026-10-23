@@ -72,6 +72,10 @@ class JobPostingUrlRead(BaseModel):
     scan_error: str | None
     crawl_source_id: uuid.UUID | None
     last_scanned_at: datetime | None
+    # When its board last listed it (record_board_presence, refreshed at most
+    # every LAST_SEEN_REFRESH_HOURS) — what the app's job page shows as
+    # "Verified". None for a URL no crawl lists (submitted by a user).
+    last_seen_at: datetime | None = None
     created_at: datetime
     # Set once the listing is gone from its board or found expired (see
     # app.services.jobs.record_board_presence) — such a job is out of search

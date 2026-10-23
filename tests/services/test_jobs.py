@@ -487,6 +487,15 @@ def test_to_job_detail_includes_the_url_by_default(scan_db):
     assert detail.posting.apply_url == posting.url.url
 
 
+def test_to_job_detail_includes_when_the_board_last_listed_it(scan_db, now):
+    posting = _make_posting(scan_db)
+    posting.url.last_seen_at = now
+
+    detail = to_job_detail(posting.url)
+
+    assert detail.url.last_seen_at == now
+
+
 def test_to_job_detail_hides_flag_fields_by_default(scan_db):
     posting = _make_posting(scan_db)
     flag_job_url(scan_db, posting.url, uuid.uuid4(), FlagReason.WRONG_DETAILS, "location is missing")
