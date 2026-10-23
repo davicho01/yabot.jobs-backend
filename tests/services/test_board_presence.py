@@ -34,13 +34,21 @@ def test_new_urls_are_stamped_seen_and_open(scan_db, make_source, now):
     assert all(r.closed_at is None for r in rows.values())
 
 
-def test_healthy_crawl_closes_urls_unseen_past_the_grace_period(scan_db, make_source, now):
+def _miss_twice(scan_db, source, urls, now):
+    """Two healthy crawls 2h apart that list only `urls`; returns how many
+    the second one closed."""
+    record_board_presence(scan_db, source.id, urls, healthy=True, now=now + timedelta(hours=2))
+    scan_db.commit()
+    closed = record_board_presence(scan_db, source.id, urls, healthy=True, now=now + timedelta(hours=4))
+    scan_db.commit()
+    return closed
+
+
+def test_a_url_missing_from_two_healthy_crawls_in_a_row_closes(scan_db, make_source, now):
     source = make_source()
     _register(scan_db, source, URLS, now)
 
-    later = now + timedelta(hours=40)
-    closed = record_board_presence(scan_db, source.id, URLS[:2], healthy=True, now=later)
-    scan_db.commit()
+    closed = _miss_twice(scan_db, source, URLS[:2], now)
 
     rows = _rows(scan_db, source)
     assert closed == 1
@@ -48,26 +56,61 @@ def test_healthy_crawl_closes_urls_unseen_past_the_grace_period(scan_db, make_so
     assert rows[URLS[0]].closed_at is None and rows[URLS[1]].closed_at is None
 
 
-def test_url_missing_for_less_than_the_grace_period_stays_open(scan_db, make_source, now):
+def test_one_miss_only_marks_the_url_missing(scan_db, make_source, now):
     source = make_source()
     _register(scan_db, source, URLS, now)
 
-    closed = record_board_presence(scan_db, source.id, URLS[:2], healthy=True, now=now + timedelta(hours=10))
+    closed = record_board_presence(scan_db, source.id, URLS[:2], healthy=True, now=now + timedelta(hours=2))
+    scan_db.commit()
 
+    rows = _rows(scan_db, source)
     assert closed == 0
+    assert rows[URLS[2]].closed_at is None
+    assert rows[URLS[2]].missing_since.replace(tzinfo=None) == (now + timedelta(hours=2)).replace(tzinfo=None)
+    assert rows[URLS[0]].missing_since is None
 
 
-def test_slow_source_waits_its_own_closure_window(scan_db, make_source, now):
-    # A source crawled every 3 days must not have jobs closed after the
-    # default 36h, i.e. after a single missed crawl.
+def test_a_url_listed_again_between_misses_starts_over(scan_db, make_source, now):
+    # A one-off flicker: missed, listed, missed. That's one miss, not two.
     source = make_source()
     _register(scan_db, source, URLS, now)
 
-    closed = record_board_presence(
-        scan_db, source.id, URLS[:2], healthy=True, now=now + timedelta(hours=40), closed_after_hours=216
-    )
+    record_board_presence(scan_db, source.id, URLS[:2], healthy=True, now=now + timedelta(hours=2))
+    record_board_presence(scan_db, source.id, URLS, healthy=True, now=now + timedelta(hours=4))
+    closed = record_board_presence(scan_db, source.id, URLS[:2], healthy=True, now=now + timedelta(hours=6))
+    scan_db.commit()
+
+    row = _rows(scan_db, source)[URLS[2]]
+    assert closed == 0
+    assert row.closed_at is None
+    assert row.missing_since.replace(tzinfo=None) == (now + timedelta(hours=6)).replace(tzinfo=None)
+
+
+def test_a_crawl_rerun_straight_away_is_not_a_second_miss(scan_db, make_source, now):
+    source = make_source()
+    _register(scan_db, source, URLS, now)
+
+    record_board_presence(scan_db, source.id, URLS[:2], healthy=True, now=now + timedelta(hours=2))
+    closed = record_board_presence(scan_db, source.id, URLS[:2], healthy=True, now=now + timedelta(hours=2, minutes=5))
+    scan_db.commit()
 
     assert closed == 0
+    assert _rows(scan_db, source)[URLS[2]].closed_at is None
+
+
+def test_an_unhealthy_crawl_between_misses_neither_counts_nor_resets(scan_db, make_source, now):
+    source = make_source()
+    _register(scan_db, source, URLS, now)
+
+    record_board_presence(scan_db, source.id, URLS[:2], healthy=True, now=now + timedelta(hours=2))
+    record_board_presence(scan_db, source.id, URLS[:1], healthy=False, now=now + timedelta(hours=3))
+    closed = record_board_presence(scan_db, source.id, URLS[:2], healthy=True, now=now + timedelta(hours=4))
+    scan_db.commit()
+
+    rows = _rows(scan_db, source)
+    assert closed == 1
+    assert rows[URLS[2]].closed_at is not None
+    assert rows[URLS[1]].missing_since is None  # the unhealthy crawl's miss didn't count
 
 
 def test_unhealthy_crawl_never_closes_anything(scan_db, make_source, now):
@@ -84,13 +127,13 @@ def test_unhealthy_crawl_never_closes_anything(scan_db, make_source, now):
 def test_closed_url_reopens_when_its_board_lists_it_again(scan_db, make_source, now):
     source = make_source()
     _register(scan_db, source, URLS, now)
-    record_board_presence(scan_db, source.id, URLS[:2], healthy=True, now=now + timedelta(hours=40))
-    scan_db.commit()
+    _miss_twice(scan_db, source, URLS[:2], now)
 
     record_board_presence(scan_db, source.id, URLS, healthy=True, now=now + timedelta(hours=50))
     scan_db.commit()
 
-    assert _rows(scan_db, source)[URLS[2]].closed_at is None
+    row = _rows(scan_db, source)[URLS[2]]
+    assert row.closed_at is None and row.missing_since is None
 
 
 def test_presence_is_scoped_to_its_own_source(scan_db, make_source, now):
@@ -98,10 +141,10 @@ def test_presence_is_scoped_to_its_own_source(scan_db, make_source, now):
     _register(scan_db, a, URLS[:1], now)
     _register(scan_db, b, URLS[1:2], now)
 
-    record_board_presence(scan_db, a.id, URLS[:1], healthy=True, now=now + timedelta(hours=40))
-    scan_db.commit()
+    _miss_twice(scan_db, a, URLS[:1], now)
 
-    assert _rows(scan_db, b)[URLS[1]].closed_at is None
+    row = _rows(scan_db, b)[URLS[1]]
+    assert row.closed_at is None and row.missing_since is None
 
 
 def _crawl(monkeypatch, scan_db, source, urls, when, complete=True):
@@ -111,9 +154,7 @@ def _crawl(monkeypatch, scan_db, source, urls, when, complete=True):
     monkeypatch.setattr(
         crawl_worker,
         "record_board_presence",
-        lambda db, source_id, raw_urls, *, healthy, closed_after_hours=None: real(
-            db, source_id, raw_urls, healthy=healthy, now=when, closed_after_hours=closed_after_hours
-        ),
+        lambda db, source_id, raw_urls, *, healthy: real(db, source_id, raw_urls, healthy=healthy, now=when),
     )
     crawl_worker._crawl_source(scan_db, source.id)
 
@@ -168,7 +209,8 @@ def test_a_browser_rendered_board_stays_capped_even_when_set_uncapped(monkeypatc
 def test_crawl_worker_closes_on_a_healthy_crawl(monkeypatch, scan_db, make_source, now):
     source = make_source()
     _crawl(monkeypatch, scan_db, source, URLS, now)
-    _crawl(monkeypatch, scan_db, source, URLS[:2], now + timedelta(hours=40))
+    _crawl(monkeypatch, scan_db, source, URLS[:2], now + timedelta(hours=2))
+    _crawl(monkeypatch, scan_db, source, URLS[:2], now + timedelta(hours=4))
 
     assert _rows(scan_db, source)[URLS[2]].closed_at is not None
 
@@ -180,9 +222,10 @@ def test_crawl_worker_skips_closing_when_coverage_is_low(monkeypatch, scan_db, m
     monkeypatch.setattr(crawl_worker, "update_coverage", lambda source, count: None)
     scan_db.commit()
 
-    _crawl(monkeypatch, scan_db, source, URLS[:1], now + timedelta(hours=40))
+    _crawl(monkeypatch, scan_db, source, URLS[:1], now + timedelta(hours=2))
+    _crawl(monkeypatch, scan_db, source, URLS[:1], now + timedelta(hours=4))
 
-    assert all(r.closed_at is None for r in _rows(scan_db, source).values())
+    assert all(r.closed_at is None and r.missing_since is None for r in _rows(scan_db, source).values())
 
 
 def test_crawl_worker_skips_closing_on_a_partial_listing(monkeypatch, scan_db, make_source, now):
@@ -190,20 +233,22 @@ def test_crawl_worker_skips_closing_on_a_partial_listing(monkeypatch, scan_db, m
     # the job is still open on the board: seen ones are stamped, none closed.
     source = make_source()
     _crawl(monkeypatch, scan_db, source, URLS, now, complete=False)
-    later = now + timedelta(hours=40)
+    _crawl(monkeypatch, scan_db, source, URLS[:1], now + timedelta(hours=2), complete=False)
+    later = now + timedelta(hours=8)
     _crawl(monkeypatch, scan_db, source, URLS[:1], later, complete=False)
 
     rows = _rows(scan_db, source)
-    assert all(r.closed_at is None for r in rows.values())
+    assert all(r.closed_at is None and r.missing_since is None for r in rows.values())
     assert rows[URLS[0]].last_seen_at.replace(tzinfo=None) == later.replace(tzinfo=None)
 
 
 def test_crawl_worker_skips_closing_on_an_empty_listing(monkeypatch, scan_db, make_source, now):
     source = make_source()
     _crawl(monkeypatch, scan_db, source, URLS, now)
-    _crawl(monkeypatch, scan_db, source, [], now + timedelta(hours=40))
+    _crawl(monkeypatch, scan_db, source, [], now + timedelta(hours=2))
+    _crawl(monkeypatch, scan_db, source, [], now + timedelta(hours=4))
 
-    assert all(r.closed_at is None for r in _rows(scan_db, source).values())
+    assert all(r.closed_at is None and r.missing_since is None for r in _rows(scan_db, source).values())
 
 
 def test_scan_finding_the_posting_gone_closes_it(scan_db, make_url):
@@ -255,19 +300,18 @@ def test_mass_closure_is_held_back(scan_db, make_source, now):
     source = make_source()
     urls = _register_many(scan_db, source, 50, now)
 
-    # A "healthy" crawl that only lists 10 of 50: 40 closures is 80% of the board.
-    closed = record_board_presence(scan_db, source.id, urls[:10], healthy=True, now=now + timedelta(hours=40))
-    scan_db.commit()
+    # "Healthy" crawls that only list 10 of 50: 40 misses is 80% of the board.
+    closed = _miss_twice(scan_db, source, urls[:10], now)
 
     assert closed == 0
-    assert all(r.closed_at is None for r in _rows(scan_db, source).values())
+    assert all(r.closed_at is None and r.missing_since is None for r in _rows(scan_db, source).values())
 
 
 def test_normal_churn_under_the_guard_still_closes(scan_db, make_source, now):
     source = make_source()
     urls = _register_many(scan_db, source, 100, now)
 
-    closed = record_board_presence(scan_db, source.id, urls[:85], healthy=True, now=now + timedelta(hours=40))
+    closed = _miss_twice(scan_db, source, urls[:85], now)
 
     assert closed == 15
 
@@ -276,7 +320,7 @@ def test_a_small_board_can_close_a_few_even_above_the_fraction(scan_db, make_sou
     source = make_source()
     _register(scan_db, source, URLS, now)  # 3 open; closing 1 is 33% but under MASS_CLOSE_MIN
 
-    assert record_board_presence(scan_db, source.id, URLS[:2], healthy=True, now=now + timedelta(hours=40)) == 1
+    assert _miss_twice(scan_db, source, URLS[:2], now) == 1
 
 
 def test_recently_seen_rows_are_not_rewritten(scan_db, make_source, now):

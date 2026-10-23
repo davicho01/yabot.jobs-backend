@@ -48,9 +48,3 @@ def schedule_next_crawl(source: CrawlSource, now: datetime, new_count: int, *, l
     jittered = source.crawl_interval_minutes * random.uniform(1 - _JITTER, 1 + _JITTER)
     source.next_crawl_at = now + timedelta(minutes=jittered)
 
-
-def closed_after_hours(interval_minutes: int) -> float:
-    """How long a URL this source's board stopped listing waits before it
-    counts as closed: about three of the source's own crawls, never less than
-    settings.job_closed_after_unseen_hours."""
-    return max(settings.job_closed_after_unseen_hours, 3 * interval_minutes / 60)

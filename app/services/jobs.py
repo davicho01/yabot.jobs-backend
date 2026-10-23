@@ -399,11 +399,14 @@ def get_or_create_job_posting(
 
 
 # record_board_presence: how stale last_seen_at must be before a crawl
-# re-stamps it (well under the 36h minimum closure window, so a source
-# crawled as often as every 2h doesn't rewrite every row each crawl), and the
-# mass-closure guard — closing more than this share of a source's open URLs
-# in one crawl (beyond a small absolute floor) is held back as suspicious.
+# re-stamps it (so a source crawled as often as every 2h doesn't rewrite
+# every row each crawl); how long after a URL's first miss a second one may
+# close it (so a crawl re-run straight away, a re-delivered message say,
+# can't count twice); and the mass-miss guard — a crawl that doesn't list
+# more than this share of a source's open URLs (beyond a small absolute
+# floor) is held back as suspicious, and counts as no miss at all.
 LAST_SEEN_REFRESH_HOURS = 6
+SECOND_MISS_MIN_GAP = timedelta(hours=1)
 MASS_CLOSE_FRACTION = 0.2
 MASS_CLOSE_MIN = 10
 
@@ -432,21 +435,19 @@ def record_board_presence(
     *,
     healthy: bool,
     now: datetime | None = None,
-    closed_after_hours: float | None = None,
 ) -> int:
     """After a crawl of `crawl_source_id`, stamp last_seen_at on every URL its
-    board listed (reopening any that had been closed), and — only when
-    `healthy` — close the source's open URLs the board hasn't listed for
-    `closed_after_hours` (default job_closed_after_unseen_hours; the crawl
-    worker passes one scaled to the source's own crawl interval, see
-    app.services.crawl_schedule.closed_after_hours). Returns how many were
+    board listed (clearing missing_since, and reopening any that had been
+    closed), and — only when `healthy` — record a miss on the source's open
+    URLs the board didn't list: the first sets missing_since, the second (at
+    least SECOND_MISS_MIN_GAP later) closes the URL. Returns how many were
     closed.
 
     `healthy` is the caller's judgement that this crawl saw the whole board
     (see crawl_worker._crawl_source): a broken adapter or a truncated
     listing must never close a board's jobs in bulk, so an unhealthy crawl
-    only ever marks URLs as seen. Even a healthy crawl closes nothing when
-    it would close more than MASS_CLOSE_FRACTION of the board at once (see
+    only ever marks URLs as seen. Even a healthy crawl records no misses
+    when it didn't list more than MASS_CLOSE_FRACTION of the board (see
     below). Call after bulk_register_discovered_urls, so newly-registered
     rows get stamped too.
     """
@@ -454,9 +455,10 @@ def record_board_presence(
     parsed, _ = _parse_discovered_urls(raw_urls)
     for chunk in _chunks(list(parsed)):
         listed = (JobPostingUrl.crawl_source_id == crawl_source_id, JobPostingUrl.url_hash.in_(chunk))
-        # Only rows not stamped recently: a re-delivered or back-to-back
-        # crawl then rewrites almost nothing, instead of every row on the
-        # board each time (dead tuples and vacuum work on a small instance).
+        # Only rows not stamped recently, or back after a miss: a
+        # re-delivered or back-to-back crawl then rewrites almost nothing,
+        # instead of every row on the board each time (dead tuples and
+        # vacuum work on a small instance).
         db.execute(
             update(JobPostingUrl)
             .where(
@@ -464,48 +466,53 @@ def record_board_presence(
                 or_(
                     JobPostingUrl.last_seen_at.is_(None),
                     JobPostingUrl.last_seen_at < now - timedelta(hours=LAST_SEEN_REFRESH_HOURS),
+                    JobPostingUrl.missing_since.is_not(None),
                 ),
             )
-            .values(last_seen_at=now)
+            .values(last_seen_at=now, missing_since=None)
             .execution_options(synchronize_session=False)
         )
         db.execute(
             update(JobPostingUrl)
             .where(*listed, JobPostingUrl.closed_at.is_not(None))
-            .values(closed_at=None, last_seen_at=now)
+            .values(closed_at=None, last_seen_at=now, missing_since=None)
             .execution_options(synchronize_session=False)
         )
     if not healthy:
         return 0
-    cutoff = now - timedelta(hours=closed_after_hours or settings.job_closed_after_unseen_hours)
-    unseen = (
-        JobPostingUrl.crawl_source_id == crawl_source_id,
-        JobPostingUrl.closed_at.is_(None),
-        JobPostingUrl.last_seen_at < cutoff,
-    )
-    to_close = db.scalar(select(func.count()).select_from(JobPostingUrl).where(*unseen)) or 0
-    if not to_close:
+    open_rows = db.execute(
+        select(
+            JobPostingUrl.id,
+            JobPostingUrl.url_hash,
+            JobPostingUrl.missing_since,
+            (JobPostingUrl.missing_since <= now - SECOND_MISS_MIN_GAP).label("second_miss"),
+        ).where(JobPostingUrl.crawl_source_id == crawl_source_id, JobPostingUrl.closed_at.is_(None))
+    ).all()
+    unlisted = [row for row in open_rows if row.url_hash not in parsed]
+    if not unlisted:
         return 0
-    open_count = db.scalar(
-        select(func.count())
-        .select_from(JobPostingUrl)
-        .where(JobPostingUrl.crawl_source_id == crawl_source_id, JobPostingUrl.closed_at.is_(None))
-    ) or 0
-    if to_close > MASS_CLOSE_MIN and to_close > open_count * MASS_CLOSE_FRACTION:
+    if len(unlisted) > MASS_CLOSE_MIN and len(unlisted) > len(open_rows) * MASS_CLOSE_FRACTION:
         # More than a normal day's churn at once: far more likely an adapter
         # that only lists part of the board (a capped "newest N" feed, say)
-        # than that many real closures. Leave them open and say so; the
+        # than that many real closures. Count it as no miss and say so; the
         # coverage monitor can't see this case because the count is steady.
         logger.warning(
-            "Not closing %d of %d open URL(s) for crawl source %s: over %.0f%% of the board at once. "
+            "Not counting %d of %d open URL(s) for crawl source %s as missed: over %.0f%% of the board at once. "
             "Check the adapter lists the whole board.",
-            to_close, open_count, crawl_source_id, MASS_CLOSE_FRACTION * 100,
+            len(unlisted), len(open_rows), crawl_source_id, MASS_CLOSE_FRACTION * 100,
         )
         return 0
-    result = db.execute(
-        update(JobPostingUrl).where(*unseen).values(closed_at=now).execution_options(synchronize_session=False)
-    )
-    return result.rowcount or 0
+    first_miss = [row.id for row in unlisted if row.missing_since is None]
+    second_miss = [row.id for row in unlisted if row.second_miss]
+    for ids, values in ((first_miss, {"missing_since": now}), (second_miss, {"closed_at": now})):
+        for chunk in _chunks(ids):
+            db.execute(
+                update(JobPostingUrl)
+                .where(JobPostingUrl.id.in_(chunk))
+                .values(**values)
+                .execution_options(synchronize_session=False)
+            )
+    return len(second_miss)
 
 
 # An uncapped crawl (CrawlSource.uncapped) scans only postings this recent;

@@ -120,14 +120,6 @@ class Settings(BaseSettings):
     # app.services.scan_completeness for the prod audit behind 300.
     scan_min_description_chars: int = 300
 
-    # How long a crawl-sourced URL can go unlisted on its board before it
-    # counts as closed (see app.services.jobs.record_board_presence). Only a
-    # healthy crawl ever closes anything. This is the floor: a source crawled
-    # less often waits 3x its own crawl interval instead (see
-    # app.services.crawl_schedule.closed_after_hours), so a job always has to
-    # be missing from about three crawls in a row.
-    job_closed_after_unseen_hours: float = 36.0
-
     # S3-compatible object storage for uploaded resumes / generated tailored
     # resume files. Point resume_storage_endpoint_url at a local MinIO (see
     # docker-compose.yml) for dev, or leave it unset to use real AWS S3.
