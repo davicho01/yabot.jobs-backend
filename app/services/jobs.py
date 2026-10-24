@@ -48,9 +48,16 @@ from app.schemas.job import JobDetailRead, SearchAreaRead
 logger = logging.getLogger("app.jobs")
 
 
-def to_job_detail(url_row: JobPostingUrl, *, include_flag: bool = False) -> JobDetailRead:
+def to_job_detail(url_row: JobPostingUrl, *, include_flag: bool = False, hide_url: bool = False) -> JobDetailRead:
     latest_posting = url_row.postings[0] if url_row.postings else None
     detail = JobDetailRead(url=url_row, posting=latest_posting)
+    detail.url.has_url = bool(detail.url.url)
+    if hide_url:
+        # Signed-out callers of the public job routes: the employer's link is
+        # what signing in gets you (the app's "Apply" asks for it).
+        detail.url.url = None
+        if detail.posting is not None:
+            detail.posting.apply_url = None
     if not include_flag:
         # Another user's flag report is admin-only — see app.api.routes.admin.
         detail.url.flagged_at = None

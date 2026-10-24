@@ -66,7 +66,12 @@ class JobPostingUrlRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    # The employer's link (and the posting's apply_url) only go to a
+    # signed-in caller; has_url says there is one either way, so a signed-out
+    # viewer still gets an "Apply" that asks them to sign in — see
+    # to_job_detail's hide_url.
     url: str | None
+    has_url: bool = False
     domain: str
     scan_status: str
     scan_error: str | None
