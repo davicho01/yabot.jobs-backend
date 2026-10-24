@@ -138,7 +138,14 @@ def send_magic_link_email(to_email: str, link: str) -> None:
 # run and the Outfit wordmark on it, the login card's black "Sign-in" tab,
 # and the code itself as the one big moment. bgcolor under the gradient is
 # for clients (Outlook) that drop CSS gradients.
+#
+# Phones offer an emailed code above the keyboard (iOS Mail's security-code
+# autofill) when the code sits next to the word "code" as one unbroken run of
+# digits, so it's never split into spans or spaced with characters (only CSS
+# letter-spacing). The hidden first line is the inbox preview and
+# notification text, saying it plainly too.
 _LOGIN_CODE_HTML = """\
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">Your Yabot Jobs sign-in code is {code}.</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f6f6f7;padding:40px 16px;">
   <tr>
     <td align="center">
