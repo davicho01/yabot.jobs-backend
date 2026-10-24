@@ -19,6 +19,7 @@
       "NotResource": [
         "arn:aws:s3:::yabot.jobs-frontend/assets/*",
         "arn:aws:s3:::yabot.jobs-frontend/landing/*",
+        "arn:aws:s3:::yabot.jobs-frontend/blog/*",
         "arn:aws:s3:::yabot.jobs-frontend/index.html",
         "arn:aws:s3:::yabot.jobs-frontend/app.html",
         "arn:aws:s3:::yabot.jobs-frontend/about.html",
