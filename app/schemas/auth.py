@@ -14,6 +14,11 @@ class MagicLinkVerifyRequest(BaseModel):
     token: str
 
 
+class LoginCodeVerifyRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(max_length=20)
+
+
 class GoogleSignInRequest(BaseModel):
     # The ID token (JWT) Google Identity Services hands the frontend.
     credential: str

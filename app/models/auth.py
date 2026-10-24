@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -16,10 +16,13 @@ if TYPE_CHECKING:
 
 
 class MagicLinkToken(Base, UUIDPrimaryKeyMixin):
-    """A one-time, short-lived login link emailed to a user.
+    """A one-time, short-lived login link or code emailed to a user.
 
     Only the SHA-256 hash of the token is stored; the raw token exists
-    only in the emailed URL and briefly in memory while verifying it.
+    only in the email and briefly in memory while verifying it. A six-digit
+    code is typed in where it was asked for (see
+    app.services.auth.create_login_code), so the sign-in carries on there;
+    failed_attempts caps how many guesses one gets.
     """
 
     __tablename__ = "magic_link_tokens"
@@ -32,6 +35,7 @@ class MagicLinkToken(Base, UUIDPrimaryKeyMixin):
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     requested_ip: Mapped[str | None] = mapped_column(String(45))
     user_agent: Mapped[str | None] = mapped_column(String(255))
+    failed_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
