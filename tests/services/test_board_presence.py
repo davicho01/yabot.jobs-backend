@@ -2,13 +2,15 @@
 healthy-crawl gate around it, a scan that finds the posting gone, and closed
 listings dropping out of search."""
 
-from datetime import timedelta
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import crawl_worker
 from app.models import CrawlSource, JobPosting, JobPostingUrl
 from app.models.enums import ScanStatus
 from app.services import jobs as jobs_service
 from app.services.adapters.base import BoardListing, ScanResult
+from app.services.crawl_schedule import full_read_due, full_read_slot
 from app.services.jobs import _apply_scan_result, build_job_search_statement, bulk_register_discovered_urls, record_board_presence
 
 URLS = [f"https://example.com/jobs/{i}" for i in range(3)]
@@ -159,7 +161,11 @@ def _crawl(monkeypatch, scan_db, source, urls, when, complete=True):
     crawl_worker._crawl_source(scan_db, source.id)
 
 
-def test_an_uncapped_source_crawls_uncapped_and_sets_its_baseline_once(monkeypatch, scan_db, make_source, now):
+# 20:30 EDT, after every board's full-read slot (8:00-20:00 ET).
+EVENING = datetime(2026, 9, 22, 0, 30, tzinfo=timezone.utc)
+
+
+def test_an_uncapped_source_reads_in_full_once_a_day_and_sets_its_baseline_once(monkeypatch, scan_db, make_source):
     source = make_source()
     source.uncapped = True
     scan_db.commit()
@@ -172,17 +178,59 @@ def test_an_uncapped_source_crawls_uncapped_and_sets_its_baseline_once(monkeypat
     monkeypatch.setattr(crawl_worker, "enqueue_source_scan", lambda source_id, lanes=1: None)
     monkeypatch.setattr(crawl_worker, "list_board", fake_list_board)
 
-    crawl_worker._crawl_source(scan_db, source.id)
+    crawl_worker._crawl_source(scan_db, source.id, now=EVENING)
     scan_db.expire_all()
-    baseline = scan_db.get(CrawlSource, source.id).uncapped_baseline_at
-    crawl_worker._crawl_source(scan_db, source.id)
+    stored = scan_db.get(CrawlSource, source.id)
+    baseline, read_at = stored.uncapped_baseline_at, stored.uncapped_crawled_at
+    crawl_worker._crawl_source(scan_db, source.id, now=EVENING + timedelta(hours=2))  # same day: capped
+    crawl_worker._crawl_source(scan_db, source.id, now=EVENING + timedelta(days=1))  # next day: full again
     scan_db.expire_all()
 
-    assert calls == [True, True]
-    assert baseline is not None
-    assert scan_db.get(CrawlSource, source.id).uncapped_baseline_at == baseline  # set by the first crawl only
-    # The first uncapped crawl only records the board: nothing undated is scanned.
+    assert calls == [True, False, True]
+    assert baseline is not None and read_at is not None
+    assert scan_db.get(CrawlSource, source.id).uncapped_baseline_at == baseline  # set by the first full read only
+    # The first full read only records the board: nothing undated is scanned.
     assert {r.scan_status for r in _rows(scan_db, source).values()} == {ScanStatus.SKIPPED}
+
+
+def test_a_full_read_cut_off_by_the_time_budget_still_waits_a_day(monkeypatch, scan_db, make_source):
+    source = make_source()
+    source.uncapped = True
+    scan_db.commit()
+    calls = []
+
+    def fake_list_board(ats_type, board_url, *, uncapped=False):
+        calls.append(uncapped)
+        return BoardListing(URLS, complete=False)  # a board too big to finish
+
+    monkeypatch.setattr(crawl_worker, "enqueue_source_scan", lambda source_id, lanes=1: None)
+    monkeypatch.setattr(crawl_worker, "list_board", fake_list_board)
+
+    crawl_worker._crawl_source(scan_db, source.id, now=EVENING)
+    crawl_worker._crawl_source(scan_db, source.id, now=EVENING + timedelta(hours=2))
+
+    assert calls == [True, False]
+
+
+def test_full_read_due_waits_for_the_boards_slot_and_a_day_between_reads(make_source):
+    source = make_source()
+    slot = full_read_slot(source)
+    assert time(8, 0) <= slot < time(20, 0)
+    zone = ZoneInfo("America/New_York")
+    day = datetime(2026, 9, 21, tzinfo=zone)
+    at = lambda t: datetime.combine(day.date(), t, tzinfo=zone)  # noqa: E731
+
+    assert not full_read_due(source, at(time(7, 59)))
+    assert full_read_due(source, at(slot))
+    source.uncapped_crawled_at = at(slot).astimezone(timezone.utc)
+    assert not full_read_due(source, at(slot) + timedelta(hours=19))
+    assert full_read_due(source, at(slot) + timedelta(days=1))
+
+
+def test_full_read_slots_are_scattered_through_the_day(make_source):
+    hours = {full_read_slot(make_source()).hour for _ in range(60)}
+
+    assert len(hours) >= 8  # not all in the first morning run
 
 
 def test_a_browser_rendered_board_stays_capped_even_when_set_uncapped(monkeypatch, scan_db, make_source, now):
@@ -296,18 +344,42 @@ def _register_many(scan_db, source, n, now):
     return urls
 
 
-def test_mass_closure_is_held_back(scan_db, make_source, now):
+def test_a_mass_closure_is_spread_over_days_at_the_daily_limit(scan_db, make_source, now):
     source = make_source()
-    urls = _register_many(scan_db, source, 50, now)
+    urls = _register_many(scan_db, source, 100, now)
 
-    # "Healthy" crawls that only list 10 of 50: 40 misses is 80% of the board.
-    closed = _miss_twice(scan_db, source, urls[:10], now)
+    # Crawls that list only 50 of 100: half the board gone at once (a board
+    # read in full for the first time, or a broken adapter).
+    first = _miss_twice(scan_db, source, urls[:50], now)
+    same_day = record_board_presence(scan_db, source.id, urls[:50], healthy=True, now=now + timedelta(hours=6))
+    next_day = record_board_presence(scan_db, source.id, urls[:50], healthy=True, now=now + timedelta(hours=29))
+    scan_db.commit()
 
-    assert closed == 0
-    assert all(r.closed_at is None and r.missing_since is None for r in _rows(scan_db, source).values())
+    assert first == 20  # 20% of the 100 open
+    assert same_day == 0  # today's share is spent
+    assert next_day == 16  # 20% of the 80 still open
+    rows = _rows(scan_db, source)
+    # Every missing URL carries its miss, closed or waiting its turn.
+    assert all(rows[u].missing_since is not None for u in urls[50:])
+    assert all(rows[u].closed_at is None for u in urls[:50])
 
 
-def test_normal_churn_under_the_guard_still_closes(scan_db, make_source, now):
+def test_the_daily_limit_closes_the_longest_missing_first(scan_db, make_source, now):
+    source = make_source()
+    urls = _register_many(scan_db, source, 100, now)
+    # 30 go missing first, 30 more half an hour later (too soon to close any).
+    record_board_presence(scan_db, source.id, urls[:70], healthy=True, now=now + timedelta(hours=2))
+    record_board_presence(scan_db, source.id, urls[:40], healthy=True, now=now + timedelta(hours=2, minutes=30))
+    closed = record_board_presence(scan_db, source.id, urls[:40], healthy=True, now=now + timedelta(hours=6))
+    scan_db.commit()
+
+    rows = _rows(scan_db, source)
+    assert closed == 20
+    assert sum(rows[u].closed_at is not None for u in urls[70:]) == 20  # all from the earlier 30
+    assert all(rows[u].closed_at is None for u in urls[40:70])
+
+
+def test_normal_churn_under_the_limit_still_closes(scan_db, make_source, now):
     source = make_source()
     urls = _register_many(scan_db, source, 100, now)
 
@@ -318,7 +390,7 @@ def test_normal_churn_under_the_guard_still_closes(scan_db, make_source, now):
 
 def test_a_small_board_can_close_a_few_even_above_the_fraction(scan_db, make_source, now):
     source = make_source()
-    _register(scan_db, source, URLS, now)  # 3 open; closing 1 is 33% but under MASS_CLOSE_MIN
+    _register(scan_db, source, URLS, now)  # 3 open; closing 1 is 33% but under MAX_DAILY_CLOSE_MIN
 
     assert _miss_twice(scan_db, source, URLS[:2], now) == 1
 

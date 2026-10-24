@@ -22,6 +22,18 @@ def can_crawl_uncapped(ats_type: str) -> bool:
     return ats_type not in BROWSER_RENDERED_ATS_TYPES
 
 
+# Platforms whose capped crawl lists only recent postings, so it can never
+# tell that an older job came down: their boards are uncapped from the start
+# (a daily full read, see crawl_schedule.full_read_due), which is what lets
+# their closed jobs close at all. Migration b8e3d1f6a2c4 switched on the ones
+# that already existed.
+UNCAPPED_BY_DEFAULT_ATS_TYPES = frozenset({"workday", "oracle_fusion", "amazon", "apple", "talentreef"})
+
+
+def uncapped_by_default(ats_type: str | None) -> bool:
+    return ats_type in UNCAPPED_BY_DEFAULT_ATS_TYPES
+
+
 def detect_ats_source(url: str) -> tuple[str, str]:
     """Given any careers/job URL, return (ats_type, board_key) by matching
     it against each platform's known URL shape (see app.services.adapters).

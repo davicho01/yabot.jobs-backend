@@ -61,6 +61,14 @@ class JobPostingUrl(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "crawl_source_id",
             postgresql_where=text("closed_at IS NULL"),
         ),
+        # Serves the same function's daily closing limit: how many of this
+        # source's rows closed in the last day.
+        Index(
+            "ix_job_posting_urls_source_closed_at",
+            "crawl_source_id",
+            "closed_at",
+            postgresql_where=text("closed_at IS NOT NULL"),
+        ),
     )
 
     # Original URL as submitted, kept for display/debugging.

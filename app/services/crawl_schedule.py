@@ -21,7 +21,8 @@ next_crawl_at has passed.
 from __future__ import annotations
 
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from app.core.config import settings
 from app.models.crawl_source import CrawlSource
@@ -41,6 +42,35 @@ def next_interval(current: int, new_count: int, *, listing_failed: bool) -> int:
     if listing_failed:
         return clamp_interval(current)
     return clamp_interval(current * (_SHRINK if new_count > 0 else _GROW))
+
+
+# A board set uncapped (CrawlSource.uncapped) is read in full once a day —
+# enough to close jobs that came down — and crawled the usual capped way the
+# rest of the time. Crawling stops overnight, so "20h since the last full
+# read" alone would put every board's full read in the first morning run;
+# instead each board has its own slot in the 8:00-20:00 ET crawl day, from a
+# stable hash of its id, which scatters full reads evenly through the day.
+FULL_READ_EVERY = timedelta(hours=20)
+_FULL_READ_ZONE = ZoneInfo("America/New_York")
+_FULL_READ_DAY_START = time(8, 0)
+_FULL_READ_DAY_MINUTES = 12 * 60
+
+
+def full_read_slot(source: CrawlSource) -> time:
+    """The ET time of day after which this board's daily full read is due."""
+    minutes = _FULL_READ_DAY_START.hour * 60 + int(source.id.hex, 16) % _FULL_READ_DAY_MINUTES
+    return time(minutes // 60, minutes % 60)
+
+
+def full_read_due(source: CrawlSource, now: datetime) -> bool:
+    """Whether this crawl of an uncapped board should read the whole board:
+    at least FULL_READ_EVERY since the last one, and past its slot today."""
+    last = source.uncapped_crawled_at
+    if last is not None and last.tzinfo is None:  # SQLite (tests) hands back naive UTC
+        last = last.replace(tzinfo=timezone.utc)
+    if last is not None and now - last < FULL_READ_EVERY:
+        return False
+    return now.astimezone(_FULL_READ_ZONE).time() >= full_read_slot(source)
 
 
 def schedule_next_crawl(source: CrawlSource, now: datetime, new_count: int, *, listing_failed: bool = False) -> None:

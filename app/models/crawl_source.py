@@ -140,8 +140,14 @@ class CrawlSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # per board while rolling it out. uncapped_baseline_at: when its first
     # uncapped crawl recorded the board as it stood — until then a listed URL
     # without a posted date is presumed old, not new.
+    # Since 2026-10-24 an uncapped board is read in full once a day and
+    # crawled capped in between (crawl_schedule.full_read_due), and new
+    # boards on recent-only platforms start uncapped
+    # (ats_adapters.uncapped_by_default). uncapped_crawled_at: when its last
+    # full read ran.
     uncapped: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     uncapped_baseline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    uncapped_crawled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     def __repr__(self) -> str:
         return f"<CrawlSource name={self.name!r} ats_type={self.ats_type!r} board_url={self.board_url!r} status={self.status!r}>"

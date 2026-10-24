@@ -18,6 +18,7 @@ from app.services.adapters.base import (
     is_recent_posting,
     max_jobs_per_crawl,
     posting_date,
+    uncapped_time_up,
 )
 from app.services.adapters.text import MAX_LOCATION_LENGTH, html_to_formatted_text
 
@@ -91,6 +92,8 @@ def _fetch_jobs(board_key: str) -> BoardListing:
     offset = 0
     reached_end = False
     while len(urls) < max_jobs_per_crawl():
+        if uncapped_time_up():
+            break  # too big to read in one crawl: a partial listing (see base)
         response = get_with_retry(
             _ORACLE_FUSION_JOBS_URL.format(host=host),
             params={

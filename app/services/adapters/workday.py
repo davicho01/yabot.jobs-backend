@@ -16,6 +16,7 @@ from app.services.adapters.base import (
     crawling_uncapped,
     max_jobs_per_crawl,
     post_with_retry,
+    uncapped_time_up,
 )
 from app.services.adapters.text import clean_text, html_to_formatted_text
 from app.services.company_logos import hiring_org_url
@@ -101,6 +102,8 @@ def _fetch_jobs(board_key: str) -> BoardListing:
     # regardless of tenant size or behavior — see below for why this counts
     # postings *scanned* (offset), not URLs collected.
     while offset < max_jobs_per_crawl():
+        if uncapped_time_up():
+            break  # too big to read in one crawl: a partial listing (see base)
         response = post_with_retry(
             jobs_url,
             json={"appliedFacets": {}, "limit": _WORKDAY_PAGE_SIZE, "offset": offset, "searchText": ""},

@@ -136,6 +136,34 @@ def test_uncapped_fetch_jobs_lists_old_postings_too_with_their_dates(monkeypatch
     assert listing.posted[old] == datetime.now(timezone.utc).date() - timedelta(days=30)
 
 
+def test_uncapped_fetch_jobs_stops_at_the_time_budget_with_a_partial_listing(monkeypatch):
+    # A board too big to read in one crawl: every page is full, and the
+    # budget runs out after two of them.
+    page = [_posting(f"/job/{i}", "Posted 30+ Days Ago") for i in range(workday._WORKDAY_PAGE_SIZE)]
+    requests = []
+
+    def fake_post(*a, **k):
+        requests.append(k["json"]["offset"])
+        return FakeResponse(json_data={"jobPostings": page})
+
+    monkeypatch.setattr(workday, "post_with_retry", fake_post)
+    monkeypatch.setattr(workday, "uncapped_time_up", lambda: len(requests) >= 2)
+    with base.uncapped_crawl():
+        listing = workday._fetch_jobs("acme/wd1/Careers")
+
+    assert requests == [0, workday._WORKDAY_PAGE_SIZE]
+    assert listing.complete is False  # no closing on a board it couldn't finish
+    assert len(listing.urls) == 2 * workday._WORKDAY_PAGE_SIZE  # but what it read is kept
+
+
+def test_uncapped_time_up_only_inside_an_uncapped_crawl(monkeypatch):
+    assert base.uncapped_time_up() is False
+    monkeypatch.setattr(base, "UNCAPPED_TIME_BUDGET_SECONDS", -1)
+    with base.uncapped_crawl():
+        assert base.uncapped_time_up() is True
+    assert base.uncapped_time_up() is False
+
+
 def test_fetch_jobs_without_posted_on_is_partial_when_paging_hits_the_bound(monkeypatch):
     monkeypatch.setattr(base, "DEFAULT_MAX_JOBS_PER_CRAWL", workday._WORKDAY_PAGE_SIZE)
     page = [{"externalPath": f"/job/{i}"} for i in range(workday._WORKDAY_PAGE_SIZE)]

@@ -402,13 +402,18 @@ def get_or_create_job_posting(
 # re-stamps it (so a source crawled as often as every 2h doesn't rewrite
 # every row each crawl); how long after a URL's first miss a second one may
 # close it (so a crawl re-run straight away, a re-delivered message say,
-# can't count twice); and the mass-miss guard — a crawl that doesn't list
-# more than this share of a source's open URLs (beyond a small absolute
-# floor) is held back as suspicious, and counts as no miss at all.
+# can't count twice); and the daily closing limit — a source closes at most
+# this share of its open URLs per CLOSE_WINDOW (never fewer than
+# MAX_DAILY_CLOSE_MIN), longest-missing first, and carries the rest over to
+# later crawls. A board whose backlog of gone jobs is larger (one switched
+# to a full listing for the first time) then clears it over a few days,
+# while a broken adapter that suddenly lists only part of a board can close
+# no more than that share of it in a day.
 LAST_SEEN_REFRESH_HOURS = 6
 SECOND_MISS_MIN_GAP = timedelta(hours=1)
-MASS_CLOSE_FRACTION = 0.2
-MASS_CLOSE_MIN = 10
+MAX_DAILY_CLOSE_FRACTION = 0.2
+MAX_DAILY_CLOSE_MIN = 10
+CLOSE_WINDOW = timedelta(hours=24)
 
 
 def _parse_discovered_urls(raw_urls: list[str]) -> tuple[dict[str, tuple[str, str]], int]:
@@ -446,9 +451,10 @@ def record_board_presence(
     `healthy` is the caller's judgement that this crawl saw the whole board
     (see crawl_worker._crawl_source): a broken adapter or a truncated
     listing must never close a board's jobs in bulk, so an unhealthy crawl
-    only ever marks URLs as seen. Even a healthy crawl records no misses
-    when it didn't list more than MASS_CLOSE_FRACTION of the board (see
-    below). Call after bulk_register_discovered_urls, so newly-registered
+    only ever marks URLs as seen. A healthy crawl closes at most the
+    source's daily limit (MAX_DAILY_CLOSE_FRACTION, see above), the URLs
+    missing longest first; the rest keep their miss and close on later
+    crawls. Call after bulk_register_discovered_urls, so newly-registered
     rows get stamped too.
     """
     now = now or datetime.now(timezone.utc)
@@ -491,19 +497,30 @@ def record_board_presence(
     unlisted = [row for row in open_rows if row.url_hash not in parsed]
     if not unlisted:
         return 0
-    if len(unlisted) > MASS_CLOSE_MIN and len(unlisted) > len(open_rows) * MASS_CLOSE_FRACTION:
-        # More than a normal day's churn at once: far more likely an adapter
-        # that only lists part of the board (a capped "newest N" feed, say)
-        # than that many real closures. Count it as no miss and say so; the
-        # coverage monitor can't see this case because the count is steady.
-        logger.warning(
-            "Not counting %d of %d open URL(s) for crawl source %s as missed: over %.0f%% of the board at once. "
-            "Check the adapter lists the whole board.",
-            len(unlisted), len(open_rows), crawl_source_id, MASS_CLOSE_FRACTION * 100,
-        )
-        return 0
     first_miss = [row.id for row in unlisted if row.missing_since is None]
-    second_miss = [row.id for row in unlisted if row.second_miss]
+    due = sorted((row for row in unlisted if row.second_miss), key=lambda row: row.missing_since)
+    second_miss = [row.id for row in due]
+    if due:
+        # The daily limit counts what this source already closed in the
+        # window, so crawls every 2h can't each close another share.
+        closed_recently = db.scalar(
+            select(func.count())
+            .select_from(JobPostingUrl)
+            .where(JobPostingUrl.crawl_source_id == crawl_source_id, JobPostingUrl.closed_at >= now - CLOSE_WINDOW)
+        ) or 0
+        limit = max(MAX_DAILY_CLOSE_MIN, int((len(open_rows) + closed_recently) * MAX_DAILY_CLOSE_FRACTION))
+        allowed = max(0, limit - closed_recently)
+        if len(second_miss) > allowed:
+            # More gone at once than a normal day's churn: a backlog (a board
+            # read in full for the first time) or an adapter suddenly listing
+            # only part of the board. Either way close only today's share; the
+            # coverage monitor and this log line are how the second shows up.
+            logger.warning(
+                "Crawl source %s: closing %d of %d missing URL(s), the daily limit (%d/day, %d already closed); "
+                "the rest close on later crawls.",
+                crawl_source_id, allowed, len(second_miss), limit, closed_recently,
+            )
+            second_miss = second_miss[:allowed]
     for ids, values in ((first_miss, {"missing_since": now}), (second_miss, {"closed_at": now})):
         for chunk in _chunks(ids):
             db.execute(

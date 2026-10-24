@@ -6,7 +6,13 @@ from sqlalchemy.orm import Session
 
 from app.models.crawl_source import CrawlSource
 from app.models.enums import AtsType, CrawlSourceStatus
-from app.services.ats_adapters import board_key_for, board_url_for_key, detect_ats_source, detect_embedded_ats_source
+from app.services.ats_adapters import (
+    board_key_for,
+    board_url_for_key,
+    detect_ats_source,
+    detect_embedded_ats_source,
+    uncapped_by_default,
+)
 from app.services.company_logos import JOB_BOARD_DOMAINS, registrable_domain
 from app.services.job_scanner import domain_of, normalize_url
 
@@ -105,6 +111,7 @@ def _upsert(
         status=status,
         name_source="placeholder",
         is_official=registrable_domain(board_url) not in JOB_BOARD_DOMAINS,
+        uncapped=uncapped_by_default(ats_type),
     )
     try:
         with db.begin_nested():
