@@ -41,7 +41,7 @@ from app.db.session import SessionLocal
 from app.models.crawl_source import CrawlSource
 from app.services.ats_adapters import can_crawl_uncapped, list_board
 from app.services.coverage_monitor import update_coverage
-from app.services.crawl_schedule import schedule_next_crawl
+from app.services.crawl_schedule import full_read_due, schedule_next_crawl
 from app.services.crawl_queue import ensure_topic_and_subscription, subscriber_client, subscription_path
 from app.services.job_queue import enqueue_source_scan
 from app.services.jobs import bulk_register_discovered_urls, record_board_presence
@@ -54,7 +54,7 @@ logger = logging.getLogger("app.crawl_worker")
 _MAX_CONCURRENT_MESSAGES = 5
 
 
-def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
+def _crawl_source(db: Session, source_id: uuid.UUID, now: datetime | None = None) -> None:
     source = db.get(CrawlSource, source_id)
     if source is None:
         logger.warning("Crawl job for unknown source_id=%s; skipping.", source_id)
@@ -63,6 +63,11 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
     uncapped, baseline = source.uncapped, source.uncapped_baseline_at is not None
     if uncapped and not can_crawl_uncapped(source.ats_type):
         logger.warning("%s is set uncapped, but %s boards render in a browser; crawling it capped.", source.name, source.ats_type)
+        uncapped = False
+    # An uncapped board is read in full once a day, in its own slot, and
+    # crawled capped (recent postings only) in between: see full_read_due.
+    started = now or datetime.now(timezone.utc)
+    if uncapped and not full_read_due(source, started):
         uncapped = False
     try:
         listing = list_board(source.ats_type, source.board_url, uncapped=uncapped)
@@ -112,12 +117,21 @@ def _crawl_source(db: Session, source_id: uuid.UUID) -> None:
         # from here on a URL the listing doesn't date is new (see
         # bulk_register_discovered_urls).
         source.uncapped_baseline_at = source.last_crawled_at
+    if uncapped:
+        # This day's full read is done, whole or cut off by the time budget:
+        # either way the next one waits a day, so a board too big to finish
+        # isn't re-read on every crawl.
+        source.uncapped_crawled_at = started
     previous_interval = source.crawl_interval_minutes
     # A crawl whose URLs couldn't be registered says nothing about how busy
     # the board is, so it keeps its interval like a failed listing does.
     schedule_next_crawl(source, source.last_crawled_at, created, listing_failed=not registered)
     new_interval = source.crawl_interval_minutes
-    update_coverage(source, len(urls))
+    # The coverage baseline is a capped crawl's count. A full read lists the
+    # whole board, many times more, and would drag the baseline up until the
+    # capped crawls in between all looked like a coverage drop.
+    if not uncapped:
+        update_coverage(source, len(urls))
     # Only a crawl that plausibly saw the whole board may close the jobs it
     # didn't list: a non-empty listing the adapter says is the whole board
     # (not recent-only or cut off at the cap, see BoardListing), fully

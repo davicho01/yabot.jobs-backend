@@ -34,7 +34,15 @@ DEFAULT_MAX_JOBS_PER_CRAWL = 500
 # links, not a sample, so a crawl reaching it still counts as cut off.
 UNCAPPED_MAX_JOBS_PER_CRAWL = 50_000
 
+# How long an uncapped crawl may page through a board before it stops and
+# returns what it has as a partial listing (no closing, new jobs still
+# imported): well inside crawl-worker's 540s request timeout, so a board too
+# big to read in one go (a 30k-job Workday tenant) still gets its new jobs
+# instead of timing out every time.
+UNCAPPED_TIME_BUDGET_SECONDS = 300
+
 _max_jobs: ContextVar[int | None] = ContextVar("max_jobs_per_crawl", default=None)
+_uncapped_deadline: ContextVar[float | None] = ContextVar("uncapped_deadline", default=None)
 
 
 def max_jobs_per_crawl() -> int:
@@ -49,12 +57,21 @@ def crawling_uncapped() -> bool:
     return _max_jobs.get() is not None
 
 
+def uncapped_time_up() -> bool:
+    """Inside uncapped_crawl(), true once UNCAPPED_TIME_BUDGET_SECONDS have
+    passed: a paging loop stops there and reports its listing incomplete."""
+    deadline = _uncapped_deadline.get()
+    return deadline is not None and time.monotonic() >= deadline
+
+
 @contextmanager
 def uncapped_crawl() -> Iterator[None]:
     token = _max_jobs.set(UNCAPPED_MAX_JOBS_PER_CRAWL)
+    deadline_token = _uncapped_deadline.set(time.monotonic() + UNCAPPED_TIME_BUDGET_SECONDS)
     try:
         yield
     finally:
+        _uncapped_deadline.reset(deadline_token)
         _max_jobs.reset(token)
 
 

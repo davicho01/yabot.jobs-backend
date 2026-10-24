@@ -19,6 +19,7 @@ from app.services.adapters.base import (
     is_recent_posting,
     max_jobs_per_crawl,
     parse_month_day_year,
+    uncapped_time_up,
 )
 from app.services.adapters.text import MAX_LOCATION_LENGTH, clean_text, html_to_formatted_text
 
@@ -51,6 +52,8 @@ def _fetch_jobs(board_key: str) -> BoardListing:  # noqa: ARG001 - single-compan
     page = 1
     reached_end = False
     while len(urls) < max_jobs_per_crawl():
+        if uncapped_time_up():
+            break  # too big to read in one crawl: a partial listing (see base)
         response = get_with_retry(_APPLE_JOBS_URL, params={"sort": "newest", "page": page}, timeout=TIMEOUT)
         response.raise_for_status()
         match = _APPLE_HYDRATION_RE.search(response.text)

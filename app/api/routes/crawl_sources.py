@@ -15,7 +15,7 @@ from app.models.job_url import JobPostingUrl
 from app.schemas.admin import AdminCompanyRead, CrawlSourceStatsRead, ScanDayCount, ScanHourCount, ScanMonthCount, ScanWeekCount
 from app.schemas.crawl_source import CrawlSourceCreate, CrawlSourceRead, CrawlSourceUpdate
 from app.services import admin as admin_service
-from app.services.ats_adapters import detect_ats_source, detect_embedded_ats_source
+from app.services.ats_adapters import detect_ats_source, detect_embedded_ats_source, uncapped_by_default
 from app.services.company_logos import logo_url_for, source_search_name
 from app.services.company_names import MANUAL
 from app.services.crawl_queue import enqueue_crawl, ensure_topic
@@ -62,7 +62,13 @@ def create_crawl_source(payload: CrawlSourceCreate, db: Session = Depends(get_db
         ats_type, _ = embedded
 
     # An admin typed this name, so it's the company's confirmed official name.
-    source = CrawlSource(name=payload.name, ats_type=ats_type, board_url=payload.board_url, name_source=MANUAL)
+    source = CrawlSource(
+        name=payload.name,
+        ats_type=ats_type,
+        board_url=payload.board_url,
+        name_source=MANUAL,
+        uncapped=uncapped_by_default(ats_type),
+    )
     db.add(source)
     try:
         db.flush()

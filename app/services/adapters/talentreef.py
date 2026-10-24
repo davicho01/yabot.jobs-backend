@@ -17,6 +17,7 @@ from app.services.adapters.base import (
     get_with_retry,
     limit_job_urls,
     posting_date,
+    uncapped_time_up,
 )
 
 _SIGNATURE = "talentreef"
@@ -124,7 +125,11 @@ def _fetch_jobs(host: str) -> list[str] | BoardListing:
     posted: dict[str, date] = {}
     from_ = 0
     total = None
+    timed_out = False
     while total is None or from_ < total:
+        if uncapped_time_up():
+            timed_out = True  # too big to read in one crawl: a partial listing (see base)
+            break
         data = _search(brand_ids, client_ids, from_=from_, extra_filters=date_filter)
         hits = data.get("hits", {})
         total = hits.get("total", 0)
@@ -139,7 +144,7 @@ def _fetch_jobs(host: str) -> list[str] | BoardListing:
                     posted[urls[-1]] = day
         from_ += len(batch)
     # Capped, recent postings only, so never the whole board (see BoardListing).
-    return BoardListing(limit_job_urls(urls), complete=uncapped, posted=posted)
+    return BoardListing(limit_job_urls(urls), complete=uncapped and not timed_out, posted=posted)
 
 
 def _detect_embedded(url: str) -> str | None:
