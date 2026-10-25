@@ -9,6 +9,7 @@
   <meta name="robots" content="noindex, follow" />
   <meta name="description" content="There aren't enough open jobs on this page right now. Browse current jobs in the United States on Yabot Jobs." />
   {% include "_fonts.html.jinja" %}
+  {% include "_icons.html.jinja" %}
   {% include "_base_style.html.jinja" %}
   {% with page_type = "hub_gone" %}{% include "_analytics.html.jinja" %}{% endwith %}
 </head>
@@ -19,8 +20,8 @@
     <h1>No current jobs here</h1>
     <p class="lede">There aren't enough open jobs on this page right now.</p>
     <div class="head-actions">
-      <a class="btn btn--chip" href="{{ base_url }}/jobs/{{ country_slug }}">Browse jobs in the United States</a>
-      <a class="btn btn--run" href="{{ base_url }}/jobs">Search all jobs</a>
+      <a class="btn btn--chip" href="{{ base_url }}/jobs/{{ country_slug }}" data-track="browse_country">Browse jobs in the United States</a>
+      <a class="btn btn--run" href="{{ base_url }}/jobs" data-track="search_all">Search all jobs</a>
     </div>
   </div>
   </main>

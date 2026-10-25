@@ -13,6 +13,7 @@
   <meta property="og:description" content="{{ job_count }} {{ sector_name }} job{{ '' if job_count == 1 else 's' }} posted in {{ country_name }} on {{ date_display }}." />
   <meta property="og:url" content="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}/{{ date_iso }}" />
   {% include "_fonts.html.jinja" %}
+  {% include "_icons.html.jinja" %}
   {% include "_base_style.html.jinja" %}
   {% with page_type = "day" %}{% include "_analytics.html.jinja" %}{% endwith %}
   <script type="application/ld+json">{{ job_ld_json|safe }}</script>
@@ -49,8 +50,8 @@
     </ul>
 
     <nav class="pager" aria-label="Other days">
-      <span>{% if prev_day %}<a class="btn btn--chip" href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}/{{ prev_day }}">&lsaquo; Previous day</a>{% endif %}</span>
-      <span>{% if next_day %}<a class="btn btn--run" href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}/{{ next_day }}">Next day &rsaquo;</a>{% endif %}</span>
+      <span>{% if prev_day %}<a class="btn btn--chip" href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}/{{ prev_day }}" data-track="prev_day">&lsaquo; Previous day</a>{% endif %}</span>
+      <span>{% if next_day %}<a class="btn btn--run" href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}/{{ next_day }}" data-track="next_day">Next day &rsaquo;</a>{% endif %}</span>
     </nav>
     <p class="more-link"><a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}">Browse all {{ sector_name }} days &rarr;</a></p>
 

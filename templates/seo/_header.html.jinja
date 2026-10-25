@@ -6,7 +6,7 @@
 <a class="skip" href="#main">Skip to content</a>
 <header class="top">
   <div class="top__row">
-    <a class="brand" href="{{ base_url }}/" aria-label="Yabot Jobs home">
+    <a class="brand" href="{{ base_url }}/" aria-label="Yabot Jobs home" data-track="header_brand">
       {% include "_brand_mark.html.jinja" %}
       Yabot Jobs
     </a>
@@ -16,13 +16,13 @@
       <span class="search__rule" aria-hidden="true"></span>
       <label class="sr" for="search-location">City or state</label>
       <input id="search-location" name="location" type="search" placeholder="City or state…" autocomplete="off" enterkeyhint="search" />
-      <button class="btn btn--run" type="submit">Search</button>
+      <button class="btn btn--run" type="submit" data-track="header_search">Search</button>
     </form>
     <nav class="top__actions" aria-label="Account">
-      <a class="top__search-icon" href="{{ base_url }}/jobs" aria-label="Search jobs">
+      <a class="top__search-icon" href="{{ base_url }}/jobs" aria-label="Search jobs" data-track="header_search_icon">
         <svg viewBox="0 0 20 20" width="16" height="16" fill="none" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.25" stroke="currentColor" stroke-width="1.6" /><path d="M12.5 12.5L17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
       </a>
-      <a class="top__login" href="{{ base_url }}/login">Log in</a>
+      <a class="top__login" href="{{ base_url }}/login" data-track="login">Log in</a>
     </nav>
   </div>
 </header>
