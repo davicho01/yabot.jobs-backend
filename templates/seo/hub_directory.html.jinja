@@ -15,6 +15,7 @@
   <meta property="og:url" content="{{ page_url }}" />
   <meta property="og:image" content="{{ base_url }}/og-image.png" />
   {% include "_fonts.html.jinja" %}
+  {% include "_icons.html.jinja" %}
   {% include "_base_style.html.jinja" %}
   {% with page_type = "hub_directory" %}{% include "_analytics.html.jinja" %}{% endwith %}
   <script type="application/ld+json">{{ ld_json|safe }}</script>

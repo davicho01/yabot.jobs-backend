@@ -13,6 +13,7 @@
   <meta property="og:description" content="{{ job_count }} {{ sector_name }} job{{ '' if job_count == 1 else 's' }} posted in {{ country_name }} on {{ date_display }}." />
   <meta property="og:url" content="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}/{{ date_iso }}" />
   {% include "_fonts.html.jinja" %}
+  {% include "_icons.html.jinja" %}
   {% include "_base_style.html.jinja" %}
   {% with page_type = "day" %}{% include "_analytics.html.jinja" %}{% endwith %}
   <script type="application/ld+json">{{ job_ld_json|safe }}</script>
