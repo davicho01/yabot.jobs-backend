@@ -31,18 +31,64 @@ def _get_client():
     return _client
 
 
-# Shared by every template below — a 32x32 rounded-square "Y" mark, inlined
-# as a data URI since email clients won't reliably fetch an external image.
+# Shared by every template below: the brand mark (the frontend's
+# public/favicon.svg, a white pulse on the sunset-gradient tile) at 96px
+# for 32px on high-density screens, with its rounded corners in the image
+# itself for clients that ignore border-radius. Inlined as a data URI since
+# email clients won't reliably fetch an external image.
 _YABOT_LOGO_DATA_URI = (
-    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAADsOAAA7DgHMtqGDAAACQElEQVRYhW"
-    "NgQAMyMjK6MjLyE2Vk5K/Iysp/kZWV/08h/gIyS0ZGfoKMjIwOAy6goqLCLiMjN01WVv4vFSzFhf/IyspP0dLSYsOwXFZWbh8NLUbBMjLye1E"
-    "cISMjN51eliPhyfA4p3Gw44kOWW0GUIIbAMuhUSHXB3LA1YFygKys/GUGWVn5z6RoklIz/S8jp0QlB8h9YiBFA59H63+Gwsf/WZMO/JeRV6a"
-    "KIxiIVSitpPWfMfcW2AEgLGoaTl8HCDoUwi0HYR6/SfR1AGviPhQHMKef/S8rq0AfB4gbeKFYDsMSus70cQB34Awkix/B2fxudbRwgMJ/YZ"
-    "u0//wu1XCMnPh4ffvgbLb4nYhQ0vdA0YOOQWZiizIGdAEh63SswQ3LftLKOv8Z8u9DxAoe/pdSMfgvpWr0nzHvDk59MAwymyIHCNnngtWwx"
-    "6xCiNlm/ed3qyVoOdEOkIVGAZ9XOwpGDkIB5zK4oZzhy/+zpJ+G87mC52HoRddPVjaURcKSWjZYEyVT1uX/MvIqtCkHZNEwS8oxjCDm9e6iT"
-    "TaUxYJ5vbsxywUtO/o5QMzIH8VyUMIkxxwGch0gK6/8nyn7GtwBwtYpdHaALKh6bkGqnlXIdYDcJ0ocQUkDRUZG7uPAN8lkZOQnDJQDZGTke"
-    "kHNch1oj4XeDvgjJyenBe4bgLpL9Pe9/ER4zwjUTZKRkd9DR8t3Gxsbs6L0D0GOAHWXaBwdf0A+x7AcGYC6S6AeCyiFktpnwIFBZlwGJTh4"
-    "nCMBADZXj81ElYv0AAAAAElFTkSuQmCC"
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAQOUlEQVR42u1daZBVRxX+zrnvZRaIrBGGoCQhbDMB"
+    "DJAYkmAS1x9agEvKcist0bIUSaGoJHEtK2qoUgs1ahWWpRXLH9Es4G6VlglhS9CQDAMMIIYkGgYSNpNhJjNz+/jjbt13ee++++6befOc+fN4dL"
+    "/ue0/3Od/5+pzuJuT4d+7tt08qkFoNokWwqQ1AmyjMYFCbKIwDCKIEJAQROJ8KAAhQAqccIK8eGKIEEAIEgHj/b9YzykX8dr16kfb9em77IMCt"
+    "p7XfS6ATovA8gBOi6ASDOslWWyeev+NsXjKjahvoe9eGWSL8LoBWicKNELI8YUAAEfgvBwVNWHDL9e/uv7X6Ei4LfRcVLo9pX7kPq6J9xbZfsn"
+    "+yIXhUFG1jth6adO5zz4zIALx064Z2C9YmUfIOc0ZqM0nCMzpUrs9IfUYj/nee5iRpgt9+giZE2i+hMdF+XU0zyhlK4XcsfMfklz/fNSwDcOFD"
+    "G1+LQfsuCH0AAtZnjhgzHZpZAChSrv1OdOFGNcERAnzhhzXBER584YdntGnuoprgP1+cJhjPFWrfbw8KoF/SoPrKpP47jtdsAPo+8LmPi8j3SL"
+    "jFmxFxNjtWE3whlCsvpQkpMUG36Xa4PDMmxGOOqXl9UFg35cLGn+Y6AHLrp8a/0tzyCxGsRtxMDc+4BE2IL4+Z0cOCCfHPlwETdE3w2r9fteKj"
+    "l7y48aWqB6D3wxuWMuE+UTI7PJN02xhrsyvVhNGCCSGMiy/HUYK8e3Lv7ftLyZdLFfav+cxnLEt2g2Q2sTNWxAAgIAKExBlCEuf/SUBMADn1BO"
+    "L24NQHaZ+Rcrd9vZzccq99OO2LWy++f6dd5xNBOWnPFelf65cIotWL9E9u++RMfujvjeC9iTBHQI+dbt20JpMGXPjE+uWs+BGxpVh+JjCqwYSI"
+    "zR0dPKEsJrifg2TLGyf3374j9QBc+Ni6mcyFfRBMRcQ7MG1etZjQgDwhggkkeEFUYemUvg3PlTVBsm7dq6yi9XuQTAU77Tnq65oPzWxAU2dQoM"
+    "Zw1dT7DMyHO+RMgfkAXPUNzAjC6k+amfD6Rcg8+ObNqej175gdMupBN1/+8yHav242ETwHmLT+A/kg8nzktXeJ8OC25/DdlrIDMKCsOwVYFGe7"
+    "daGgJCYgPSbE2mQTEySCCciICVIbTND6NTFB65/o6pZxg18taYL61m6YRRg6TKCmsuifbPNKeEf/9zyhn4fUAp2sGRrAPLSJGE3x3keS91OJJk"
+    "g274iSvCNTE6DN8DhNMMwEab8j0/wAmoYbGqNbgHj5RPsP5EMkzarAd8dqwMBn110nNu+uzEso6QeP8YQk+Yi10Fs7CjRA6O4426gDbilMGOMJ"
+    "FfAEtr9tmKBXNnx6vpDcpKO/eA+leQm+9+J5Rx7QxHgnYngnlOAdUaJ3pLePGO9ENO8IREb/gRA170TzjjzhG2Yp1K4Y7232TyH5gEz5kC+fUP"
+    "sBSXvbixd/c36gAYzVcSNdeqYFn6U1garChKgGmphg2uSMmEDx3lG0//wwgZlX+wNA7hcKNWbONNMPDnjAGE/IyBMcmcud69sGh4b+AxBJiOHG"
+    "ravHMeFIec6MuUHjCWJbNJMH1dAqMEiMkaYEm5sCE0LmQyrShHhMoBAmUKJNjteE9JgQNSuCfDBB1zRXc6gwpN7KYHmdaZuT0T8VJozxhNSYIE"
+    "zXsRCmIzQj42xetZggOWFCKU3QZ2TtMUGyY4JvKWR6gRjTPZLlC11cf1q5P1Liu3qk1RNxZ4JWzzdT0Bak3Pag3PbdeuJ44sFME4H1urngmdMA"
+    "W8E+fgJy4LhbH1r/7kxXQf/k2ImgHrskUHsfKO+94JsVaO3p7+20j0Doofc25QPj+SQsHxHzvcU3a9MLgEwPhOEVktEJsbsGQhqjg7v2IsFLwa"
+    "tP3ku6ay1E/sOI0tolbQ1nwng0rf8QeP7lPjcsAlBdxzDwg19DnTwX6h+aEMifJObzuQBIjhCi/WtrO+7CgP4+/iC7gwSjXf29kdC/GydxJ0dY"
+    "PgBNZCJMj9jskG2uChNS8oSLPvleQ/g+U7xqNoprVjYkTyCS6SyEpjibV2tM0HmCtXAOrMXzEsN21rXtoFnTGpEnTODwGkYg/LAmmN5H0hpK2r"
+    "UjPZ5QePPyspkZxTdc3ZDxBBYk+/EU653kzBPGt4KWdJQdAGvZgobkCZzkxwczp5QmVM8TirdcB2Iun8D0mmmgSyY0HE9gbyYhpAkyTJhg3Xxd"
+    "6sw869qOhuMJHI1lDh8m0FVzQVMnpx8Azww1UDyB9ZH2+UCSzU5krNkwoXDz9ZVlEnfMhlxUaKh4Akdtfumof2484eJxoMUdlQ0AMwrLFjRUPI"
+    "F1F023eYjThBwxwVqRDnwjZmjpgoaKJzCx6S8PFyZYK5Yjyx8v7WiovCOOj+Gmw4SsPIE75oGmTM40ANTaDGveZQ0TT2DT5gGxmJAzT7BuzDb7"
+    "Ay1Y0DDxBJcHRGO4BibkyRPGt4IWLqxqAKwl7Q0TT2BfnRI0IW9MKNxwQybwNczQpdPAr57UEHlHARMmM3Kj27w8eQIvr878+GZoSXtD5B1xxG"
+    "sJ2bw8eQLNnQeanAJ8BwbKm6Gr2xsi74gDm6VrQhlMyMgTCtffkGp2Dz3wm/IacNVcoLk46vOOCoiE9TRXSWmx3FAM1Yu18uz5oEtmAM2t0EK8"
+    "cN/e+E4LF5cVrHryKdh7/47C+95TfhAWL4Da2xkTYw5i23z5DFjzLwddPM4JT/rPk/ScWv6O+29x5Sbab+SlPqijJ2E/8XQFMeZobL3gA4sWKw"
+    "V5gfakGC5BWsbBWv1R0BUL8jxuAvaOXaCBV6C6j4Dnzy1rhuy9T4WezxXBxPFoWvdBcPsVqOWf/dhR9H3tfsj5CylizCH5EoEddfRcS9PljGJC"
+    "gP7Wqo/kLnw5cwZy5DCEBOrAwRRAfFVi3lHTxjU1Fz4AWK+fg+YvrMzME1h32SgUOE/EhEsvA83uyP1l1K5dPtaozs7y7mhLM/jKWZG8I2vRHP"
+    "Bll2K4/gq3dICunJYJE1in0aIDlDGiJk+gtlm5v4QoBXvPLt9LwNkzkJ6T5bXg6o5ItkXhTcsx3H+F9pmZeAIHwQFE/Paod+SOpJ+lmuMA7O8E"
+    "+noNP1x1lT+AxFrcbnonE8aDly0c9gEw1n4q4AkcLFSZmhBoRJQnyMlnawBmOyNrR+pAVwpWPB2YOtFX/+JNr8dI/NmHnsvEE1gXtq4JgnBWr6"
+    "YJp45Dju3Pz/Y/exxy9HBk7UiefhrS35+ClC0MYswjMABDD++H+tfJTDyB9eWEOE1IwgT1p59Dnj5Qvek5fgz2vVsS145kf/mB5kULnKWojspi"
+    "zLnM/L1H0L95W+Z4QkHI9etJ8/PdxFQiOLmdcTzhlV6oB+8BZs4DvXomcFGzn4tJPnlxc0ITyI6cOwt77+5QrqfpL9sHusDXXFN6ANrnQZqbUL"
+    "w5HfgOPfgXJ1fU23zh+eve88PdbAE3pzTm+eV8H9QzpzD0xD+d9yQEvyck5MJGeUJBzxqGn7WLIDuY3Ua1BFw9Gxr/7oY82+3vRIG4HEPISbqO"
+    "nAVh7mhx+k3Kygbk8KF0XsjypeAli8qbu8c7MfjAn3M778hfRUVcVraWDW6sNASMmc21EROASVOninhCnvGEgX7IkcPlB+DWVakGavBve+pqfw"
+    "Kb5MAkCZVgQi3jCepQCqwpFsvjzYtnIQeP1NU+5iAi5n76moB47ygVT8g5nqAO5ONx2Q/vrrt9zOzvlY/Q5NLeUSmekHs84expyKmeqpn20PY9"
+    "dbePmSNxgDKYkIon1CCekIaUlRyAfV2g3t6628fM0FMpIpoAZOUJeWOCdFc3APb23XV53hGbqRNhTUBZTagME7LnHanjx1Kx4tjZf/oM7EOH63"
+    "IfM+szWBI1IRkTssYTsuQdyaFsYGw/urtu9zGzebxWkibUB0/IMgCiFOyde+p2HzN7fmk6TRhZnqCOHoKoypbCpbML6H25bs87Ygk3nhYTRoIn"
+    "DPQD/zpaYYx5Z12fd8Skm5XUmjByPEEd7soUY67X846iEbEYTagnnqC6O1MPgNq5s+7PO2JfaJrahDWhrnjCudPACz3pwPex3bnsY64lT2BvBs"
+    "R5HxVhwjDyBNVd3huSrv2RGHM9nnfEgdAptIsvH0yoBU9QnY+XB989O0bFeUcMkvMUsemlMWGkeQJeOAH15GPJs//g/tgYc72ddwTGeQZRT6x/"
+    "XwIT6oEnqIfuhRzcFxX+sSMY2npf7mdb1IInANJTAEkPiOYZuaBGjFiZuZexMWI37OgmoJrn6aSMMavkGKofMwZBabmW9q9+CsxdCG57DWTIhu"
+    "p6CnKqJ3Ke0LCcdxR73hJr9RE57whMPQVh9JDyV4gQjRGbAXOw+TBe7NZwuUrEmCkSY4YRKw3HUP3NDAiSmvQTsHC4E3Z3px+zLRdjjj15K+5k"
+    "K/89wuWlTv4y+/XaM0/20k7WEulhEHrCaxWoEBNGQzyhLs9FZfQwg/b4QgA0G5keE0ZDPKGW5x1l5QnCsochg38Eu6fscbST0cgThvW8o8w8QW"
+    "RgsOUPTG/Zch7A48aRit6UM4Q+enjCcJ53lJUnENHjU/74tf86Z0dbtDXslxvr16OMJwzneUdZeYIitTU4PV1hazR6nx0T6jWeUEtMqJQnFLkQ"
+    "DADdck83iB4JZh5Qc0yoo7yjqjAhWzzhkaYHvtVt3KBBrL6kH69bChNQQ0wYkbyjYTgX1cAEoTsjl/jQih/tIAvbDKEnYMIYT6iKJ2xrvX/Trv"
+    "h7xJi+DIYtiMvoGuMJ1fMEZVuCLyVe5EbX37NfQHcZwhkuTPi/4Al0V9N93+4qeZMe3zj160LyWwoduT7GE6rjCWD8vvnK8V9PdZmn/G39RCkO"
+    "PklCs/zVO1uC+8REW/X078vSPt3rQEivZ0frB9ebIPR7rx6Cne+xvw+eB4l3wXvXqUjifWPOQl74vrOYm/cqvo3VK8ezfRcVF03esul86uts5d"
+    "HblgrZ2yHU6r+kcTcKQjtIEAyOAKRg3v0i8F/SEFpcu972IRX8PrijxetHa6fETpzYW1ZVwp03MXfLVHunDgldsEWtGPezzU9UdKEzrfj+P4h4"
+    "rem6jfGESjFBgLVJwk91pbnsuu16UfZvIDSlMk1w1TqTJiT/niTcnsRrUsKetOo0IWFPWcztSQQ6bSta2fqT7+7KfKW54xl9fxdZxWUg6Y5qwh"
+    "hPiOMJxLRPkSwrJ/xUGuBrwp51r5IhdS+EVo0IJiRoQh1iwramwQvvpy1bLqQ64aDibOMdn14JwRdFybWBdxTyZnzvhGK8G2V+r6l3FPpdyDsi"
+    "IagS9yXHl8ffsgrBXij6ZtM9m7dWdMRE5i0/29fdJKK+CMFbymmC91K1wASvjvE9NIhlMaFkeWlMIMFfbOFvtGze/HCmMz6qPmrgr2tnoYh3io"
+    "1VEKyAgtXgPMEm0A5lyzaBPNjynR8+U9UhK7keOfPoJydhwFqtlCwCqI2UtEEwA4I2CMaNLp5AvSJygoSeF6ETUHICoM6i2Fvp7h+fzUtm/wNm"
+    "ko/oYDIuMAAAAABJRU5ErkJggg=="
 )
 
 # Mirrors the site's "Apple Bold" palette (src/index.css light theme) and
@@ -133,11 +179,12 @@ def send_magic_link_email(to_email: str, link: str) -> None:
         raise
 
 
-# The app's current look (the frontend's index.css tokens): the page's
-# light grey, a white card with a thick band in the board's violet-to-blue
-# run and the Outfit wordmark on it, the login card's black "Sign-in" tab,
-# and the code itself as the one big moment. bgcolor under the gradient is
-# for clients (Outlook) that drop CSS gradients.
+# The app's current look (the frontend's index.css tokens and LoginPage.css):
+# the page's light grey, the header's brand row (the mark and "Yabot Jobs" in
+# Inter 600, ink on the page, no colored band), then the login card: white,
+# 24px corners, the card shadow with the sign-in page's faint magenta glow,
+# its black "Sign-in" tab, and the code itself as the one big moment on a
+# --chip fill. The border is for clients that drop box-shadow.
 #
 # Phones offer an emailed code above the keyboard (iOS Mail's security-code
 # autofill) when the code sits next to the word "code" as one unbroken run of
@@ -146,49 +193,55 @@ def send_magic_link_email(to_email: str, link: str) -> None:
 # notification text, saying it plainly too.
 _LOGIN_CODE_HTML = """\
 <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">Your Yabot Jobs sign-in code is {code}.</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f6f6f7;padding:40px 16px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f6f6f7;padding:32px 16px 40px;">
   <tr>
     <td align="center">
-      <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border:1px solid #e7e7ea;border-radius:24px;max-width:480px;width:100%;overflow:hidden;border-collapse:separate;">
+      <table role="presentation" width="440" cellpadding="0" cellspacing="0" style="max-width:440px;width:100%;">
         <tr>
-          <td bgcolor="#7c3aed" style="background-color:#7c3aed;background-image:linear-gradient(110deg,#7c3aed,#2563eb);padding:28px 32px;border-radius:24px 24px 0 0;">
+          <td style="padding:0 4px 24px;">
             <table role="presentation" cellpadding="0" cellspacing="0">
               <tr>
-                <td style="width:36px;">
-                  <img src="{logo}" width="36" height="36" alt="Yabot Jobs" style="display:block;border-radius:10px;border:2px solid #ffffff;">
+                <td style="width:32px;">
+                  <img src="{logo}" width="32" height="32" alt="Yabot Jobs" style="display:block;border-radius:8px;">
                 </td>
-                <td style="padding-left:12px;font-family:'Outfit','Inter',-apple-system,'Segoe UI',sans-serif;font-weight:800;font-size:22px;letter-spacing:-0.02em;color:#ffffff;">Yabot Jobs</td>
+                <td style="padding-left:10px;font-family:'Inter',-apple-system,'Segoe UI',sans-serif;font-weight:600;font-size:19px;letter-spacing:-0.02em;color:#0a0a0a;">Yabot Jobs</td>
               </tr>
             </table>
           </td>
         </tr>
         <tr>
-          <td style="padding:28px 32px 0;">
-            <span style="display:inline-block;background-color:#0a0a0a;color:#ffffff;font-family:'Inter',-apple-system,'Segoe UI',sans-serif;font-weight:600;font-size:12px;padding:5px 12px;border-radius:980px;">Sign-in</span>
+          <td style="background-color:#ffffff;border:1px solid #ececef;border-radius:24px;box-shadow:0 12px 28px rgba(31,26,53,0.08),0 1px 3px rgba(31,26,53,0.06),0 24px 70px -32px rgba(236,0,140,0.4);">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="padding:28px 32px 0;">
+                  <span style="display:inline-block;background-color:#0a0a0a;color:#ffffff;font-family:'Inter',-apple-system,'Segoe UI',sans-serif;font-weight:600;font-size:12px;padding:5px 13px;border-radius:980px;">Sign-in</span>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:16px 32px 8px;font-family:'Inter',-apple-system,'Segoe UI',sans-serif;font-size:30px;line-height:1.2;font-weight:600;letter-spacing:-0.02em;color:#0a0a0a;">
+                  Your sign-in code
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:0 32px 24px;font-family:'Inter',-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.55;color:#5d5d66;">
+                  Enter it where you asked for it, and you'll pick up right where you left off.
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:0 32px 20px;">
+                  <div style="background-color:#f0f0f3;border-radius:14px;padding:18px 0;text-align:center;font-family:ui-monospace,'SFMono-Regular','SF Mono',Menlo,Consolas,monospace;font-size:36px;font-weight:600;letter-spacing:10px;color:#0a0a0a;">{code}</div>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:0 32px 32px;font-family:'Inter',-apple-system,'Segoe UI',sans-serif;font-size:14px;line-height:1.55;color:#5d5d66;">
+                  It expires in {ttl} minutes and works once.
+                </td>
+              </tr>
+            </table>
           </td>
         </tr>
         <tr>
-          <td style="padding:14px 32px 8px;font-family:'Inter',-apple-system,'Segoe UI',sans-serif;font-size:26px;font-weight:700;letter-spacing:-0.02em;color:#0a0a0a;">
-            Your sign-in code
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:0 32px 22px;font-family:'Inter',-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.6;color:#5d5d66;">
-            Enter it where you asked for it, and you'll pick up right where you left off.
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:0 32px 24px;">
-            <div style="background-color:#f0f0f3;border-radius:14px;padding:18px 0;text-align:center;font-family:'Inter','SF Mono',Menlo,Consolas,monospace;font-size:38px;font-weight:700;letter-spacing:10px;color:#0a0a0a;">{code}</div>
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:0 32px 28px;font-family:'Inter',-apple-system,'Segoe UI',sans-serif;font-size:14px;line-height:1.6;color:#5d5d66;">
-            It expires in {ttl} minutes and works once.
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:16px 32px 32px;border-top:1px solid #e7e7ea;font-family:'Inter',-apple-system,'Segoe UI',sans-serif;font-size:12px;line-height:1.6;color:#5d5d66;">
+          <td style="padding:20px 8px 0;font-family:'Inter',-apple-system,'Segoe UI',sans-serif;font-size:12px;line-height:1.6;color:#5d5d66;text-align:center;">
             Didn't ask for this? You can ignore this email; no one can sign in without the code.
           </td>
         </tr>
