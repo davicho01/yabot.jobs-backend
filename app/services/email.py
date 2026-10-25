@@ -133,6 +133,101 @@ def send_magic_link_email(to_email: str, link: str) -> None:
         raise
 
 
+# The app's current look (the frontend's index.css tokens): the page's
+# light grey, a white card with a thick band in the board's violet-to-blue
+# run and the Outfit wordmark on it, the login card's black "Sign-in" tab,
+# and the code itself as the one big moment. bgcolor under the gradient is
+# for clients (Outlook) that drop CSS gradients.
+#
+# Phones offer an emailed code above the keyboard (iOS Mail's security-code
+# autofill) when the code sits next to the word "code" as one unbroken run of
+# digits, so it's never split into spans or spaced with characters (only CSS
+# letter-spacing). The hidden first line is the inbox preview and
+# notification text, saying it plainly too.
+_LOGIN_CODE_HTML = """\
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">Your Yabot Jobs sign-in code is {code}.</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f6f6f7;padding:40px 16px;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border:1px solid #e7e7ea;border-radius:24px;max-width:480px;width:100%;overflow:hidden;border-collapse:separate;">
+        <tr>
+          <td bgcolor="#7c3aed" style="background-color:#7c3aed;background-image:linear-gradient(110deg,#7c3aed,#2563eb);padding:28px 32px;border-radius:24px 24px 0 0;">
+            <table role="presentation" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="width:36px;">
+                  <img src="{logo}" width="36" height="36" alt="Yabot Jobs" style="display:block;border-radius:10px;border:2px solid #ffffff;">
+                </td>
+                <td style="padding-left:12px;font-family:'Outfit','Inter',-apple-system,'Segoe UI',sans-serif;font-weight:800;font-size:22px;letter-spacing:-0.02em;color:#ffffff;">Yabot Jobs</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:28px 32px 0;">
+            <span style="display:inline-block;background-color:#0a0a0a;color:#ffffff;font-family:'Inter',-apple-system,'Segoe UI',sans-serif;font-weight:600;font-size:12px;padding:5px 12px;border-radius:980px;">Sign-in</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:14px 32px 8px;font-family:'Inter',-apple-system,'Segoe UI',sans-serif;font-size:26px;font-weight:700;letter-spacing:-0.02em;color:#0a0a0a;">
+            Your sign-in code
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 32px 22px;font-family:'Inter',-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.6;color:#5d5d66;">
+            Enter it where you asked for it, and you'll pick up right where you left off.
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 32px 24px;">
+            <div style="background-color:#f0f0f3;border-radius:14px;padding:18px 0;text-align:center;font-family:'Inter','SF Mono',Menlo,Consolas,monospace;font-size:38px;font-weight:700;letter-spacing:10px;color:#0a0a0a;">{code}</div>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 32px 28px;font-family:'Inter',-apple-system,'Segoe UI',sans-serif;font-size:14px;line-height:1.6;color:#5d5d66;">
+            It expires in {ttl} minutes and works once.
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:16px 32px 32px;border-top:1px solid #e7e7ea;font-family:'Inter',-apple-system,'Segoe UI',sans-serif;font-size:12px;line-height:1.6;color:#5d5d66;">
+            Didn't ask for this? You can ignore this email; no one can sign in without the code.
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+"""
+
+
+def send_login_code_email(to_email: str, code: str) -> None:
+    """Send a six-digit sign-in code (see app.services.auth.create_login_code).
+    Logs it instead when no SES credentials are configured, like
+    send_magic_link_email."""
+    if settings.email_sender_access_key_id is None:
+        logger.info("Sign-in code for %s: %s", to_email, code)
+        return
+
+    ttl = settings.login_code_ttl_minutes
+    try:
+        _get_client().send_email(
+            FromEmailAddress=settings.email_from_address,
+            Destination={"ToAddresses": [to_email]},
+            Content={
+                "Simple": {
+                    # The code up front, so it reads in a phone's notification.
+                    "Subject": {"Data": f"{code} is your Yabot Jobs sign-in code"},
+                    "Body": {
+                        "Text": {"Data": f"Your Yabot Jobs sign-in code is {code}.\n\nIt expires in {ttl} minutes."},
+                        "Html": {"Data": _LOGIN_CODE_HTML.format(logo=_YABOT_LOGO_DATA_URI, code=code, ttl=ttl)},
+                    },
+                }
+            },
+        )
+    except ClientError:
+        logger.exception("Failed to send sign-in code email to %s", to_email)
+        raise
+
+
 # One matching posting's row in the digest — title links straight to its
 # /apply page (mirroring JobCaseFile's "View application"/"Evaluate Job"
 # link), meta line is company + salary, whichever of those is known.

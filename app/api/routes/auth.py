@@ -8,13 +8,14 @@ from app.models.user import User
 from app.schemas.auth import (
     AuthResponse,
     GoogleSignInRequest,
+    LoginCodeVerifyRequest,
     MagicLinkRequest,
     MagicLinkVerifyRequest,
     UserUpdate,
 )
 from app.schemas.user import UserRead
 from app.services import auth as auth_service
-from app.services.email import send_magic_link_email
+from app.services.email import send_login_code_email, send_magic_link_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -43,6 +44,43 @@ def request_magic_link(payload: MagicLinkRequest, request: Request, db: Session 
     link = f"{settings.frontend_base_url}/auth/callback?token={raw_token}"
     send_magic_link_email(user.email, link)
     return {"detail": "If that email is valid, a login link has been sent."}
+
+
+@router.post("/request-code", status_code=status.HTTP_202_ACCEPTED)
+def request_login_code(payload: MagicLinkRequest, request: Request, db: Session = Depends(get_db)) -> dict[str, str]:
+    """Emails a six-digit sign-in code to type into POST /auth/verify-code —
+    in place of a link, so signing in doesn't leave the page it started on
+    (e.g. the Apply someone tapped). Same throttle as /request-link."""
+    user = auth_service.get_or_create_user(db, payload.email)
+    ip_address = request.client.host if request.client else None
+    try:
+        auth_service.enforce_magic_link_rate_limit(db, user, ip_address)
+    except RateLimitExceeded as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc
+    code = auth_service.create_login_code(db, user, requested_ip=ip_address)
+    send_login_code_email(user.email, code)
+    return {"detail": "If that email is valid, a sign-in code has been sent."}
+
+
+@router.post("/verify-code", response_model=AuthResponse)
+def verify_login_code(
+    payload: LoginCodeVerifyRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> AuthResponse:
+    try:
+        user = auth_service.verify_login_code(db, payload.email, payload.code)
+    except auth_service.AuthError as exc:
+        # Keeps the wrong-try count, which get_db would roll back with this error.
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    session_token = auth_service.create_session(
+        db, user, user_agent=request.headers.get("user-agent"), ip_address=request.client.host if request.client else None
+    )
+    _set_session_cookie(response, session_token)
+    return AuthResponse(user=UserRead.model_validate(user))
 
 
 @router.post("/verify", response_model=AuthResponse)

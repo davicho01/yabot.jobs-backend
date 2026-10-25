@@ -44,7 +44,7 @@ def _list(db, **kwargs):
     params = dict(
         q=None, location=None, metro=None, radius=25, company=None, posted_within_days=None,
         workplace_type=None, sector=None, salary_min=None, salary_max=None, page=1, page_size=2,
-        db=db,
+        current_user=None, db=db,
     )
     return list_job_urls(**{**params, **kwargs})
 
@@ -123,3 +123,23 @@ def test_newest_first_by_the_moment_the_age_badge_counts_from(db):
         "Posted Oct 14, found Oct 15",
         "Old post, scanned today",
     ]
+
+
+def test_signed_out_gets_no_employer_link_but_is_told_there_is_one(db):
+    _make_postings(db, 1)
+
+    [item] = _list(db).items
+
+    assert item.url.url is None
+    assert item.posting.apply_url is None
+    assert item.url.has_url is True
+
+
+def test_signed_in_gets_the_employer_link(db):
+    _make_postings(db, 1)
+
+    [item] = _list(db, current_user=m.User(email="someone@example.com")).items
+
+    assert item.url.url.startswith("https://example.com/jobs/list-")
+    assert item.posting.apply_url == item.url.url
+    assert item.url.has_url is True

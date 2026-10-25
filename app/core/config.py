@@ -197,6 +197,10 @@ class Settings(BaseSettings):
     # 60 rather than 15: links expiring unread in slow inboxes / spam
     # folders were a real share of sign-in drop-off (Oct 2026).
     magic_link_ttl_minutes: int = 60
+    # Emailed sign-in codes (POST /auth/request-code): shorter-lived than a
+    # link, being six digits, and dead after this many wrong tries.
+    login_code_ttl_minutes: int = 15
+    login_code_max_attempts: int = 5
     session_ttl_days: int = 30
 
     # OAuth client ID (web application type) for "Continue with Google"

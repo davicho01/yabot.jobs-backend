@@ -1,9 +1,11 @@
+import hmac
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2 import id_token as google_id_token
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -98,6 +100,66 @@ def redeem_magic_link(db: Session, raw_token: str) -> User:
     user = db.get(User, link.user_id)
     if user is None:
         raise AuthError("Invalid or expired link.")
+    _mark_logged_in(user)
+    return user
+
+
+def _login_code_hash(user: User, code: str) -> str:
+    # Salted with the user's id: six digits alone would collide across
+    # users in token_hash's unique index.
+    return hash_token(f"login-code:{user.id}:{code}")
+
+
+def create_login_code(db: Session, user: User, requested_ip: str | None = None) -> str:
+    """A six-digit sign-in code for the user, to type in where they asked
+    for it — unlike a link, which opens a new tab and loses whatever they
+    were doing. Returns the code (the DB stores just its hash). It replaces
+    any unused code or link they had: only the newest works."""
+    now = datetime.now(timezone.utc)
+    db.execute(
+        update(MagicLinkToken)
+        .where(MagicLinkToken.user_id == user.id, MagicLinkToken.consumed_at.is_(None))
+        .values(consumed_at=now)
+    )
+    while True:
+        code = f"{secrets.randbelow(10**6):06d}"
+        code_hash = _login_code_hash(user, code)
+        # The same user drawing a code they've had before would break
+        # token_hash's unique index.
+        if db.scalar(select(MagicLinkToken.id).where(MagicLinkToken.token_hash == code_hash)) is None:
+            break
+    db.add(
+        MagicLinkToken(
+            user_id=user.id,
+            token_hash=code_hash,
+            expires_at=now + timedelta(minutes=settings.login_code_ttl_minutes),
+            requested_ip=requested_ip,
+        )
+    )
+    return code
+
+
+def verify_login_code(db: Session, email: str, code: str) -> User:
+    """Signs in with a code from create_login_code. A wrong code counts
+    against it (settings.login_code_max_attempts) — the caller must commit
+    even when this raises, or the count is rolled back."""
+    user = db.scalar(select(User).where(User.email == email.strip().lower()))
+    if user is None:
+        raise AuthError("That code isn't right. Check it, or send a new one.")
+    # At most one: create_login_code retires the ones before it.
+    token = db.scalar(
+        select(MagicLinkToken).where(MagicLinkToken.user_id == user.id, MagicLinkToken.consumed_at.is_(None)).limit(1)
+    )
+    now = datetime.now(timezone.utc)
+    if token is None or token.expires_at < now:
+        raise AuthError("That code has expired. Send a new one.")
+    if token.failed_attempts >= settings.login_code_max_attempts:
+        raise AuthError("Too many wrong tries. Send a new code.")
+    if not hmac.compare_digest(token.token_hash, _login_code_hash(user, "".join(code.split()))):
+        token.failed_attempts += 1
+        raise AuthError("That code isn't right. Check it, or send a new one.")
+
+    token.consumed_at = now
     _mark_logged_in(user)
     return user
 
