@@ -37,9 +37,9 @@
   tag.src = "https://www.googletagmanager.com/gtag/js?id=" + MEASUREMENT_ID;
   document.head.appendChild(tag);
 
-  // Which links people follow: only the kind of link (data-track), never its URL.
+  // Which links and buttons people use: only the kind (data-track), never a URL.
   document.addEventListener("click", function (event) {
-    var link = event.target.closest ? event.target.closest("a[data-track]") : null;
+    var link = event.target.closest ? event.target.closest("a[data-track], button[data-track]") : null;
     if (link) gtag("event", "seo_click", { link_type: link.getAttribute("data-track"), page_type: pageType });
   });
 })();
