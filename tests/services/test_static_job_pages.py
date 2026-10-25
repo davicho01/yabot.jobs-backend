@@ -192,7 +192,10 @@ class TestRendering:
         assert f'<link rel="canonical" href="https://yabot.jobs/job/{row.id}" />' in page
         assert f'href="https://yabot.jobs/jobs/{row.id}/apply" data-track="apply">Check my fit →</a>' in page
         assert "<strong>things</strong>" in page
-        assert 'class="job-apply"' not in page and "Apply ↗" not in page
+        # Apply opens the app's page for the job, where signing in leads on
+        # to the employer's site; Share hands out the same link.
+        assert f'<a class="job-apply" href="https://yabot.jobs/jobs/{row.id}" data-track="job_apply">Apply &#8599;</a>' in page
+        assert f'data-share-url="https://yabot.jobs/jobs/{row.id}"' in page
         assert "job-lead" not in page  # the sentence is the meta description now
 
     def test_json_ld_is_a_valid_job_posting(self, db, make_job):
@@ -367,7 +370,7 @@ class TestGenerate:
         assert "noindex" not in page and "Build <strong>things</strong>." in page
         assert "<dt>Closed</dt>" not in page  # the band and the closed box say it
         assert f'<span class="job-card__status"><i aria-hidden="true"></i>Closed {NOW:%b %-d, %Y}</span>' in page
-        assert "Check my fit" not in page
+        assert "Check my fit" not in page and 'class="job-apply"' not in page
         assert _ld(page)["validThrough"] == NOW.date().isoformat()
         assert str(row.id).encode() in store.get("sitemap-job-pages-1.xml")
         assert f"/{path}" in result.touched_paths
