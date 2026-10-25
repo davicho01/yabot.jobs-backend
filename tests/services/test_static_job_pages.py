@@ -192,9 +192,9 @@ class TestRendering:
         assert f'<link rel="canonical" href="https://yabot.jobs/job/{row.id}" />' in page
         assert f'href="https://yabot.jobs/jobs/{row.id}/apply" data-track="apply">Check my fit →</a>' in page
         assert "<strong>things</strong>" in page
-        # Apply opens the app's page for the job, where signing in leads on
-        # to the employer's site; Share hands out the same link.
-        assert f'<a class="job-apply" href="https://yabot.jobs/jobs/{row.id}" data-track="job_apply">Apply &#8599;</a>' in page
+        # Apply goes to log in and on to the app's page for the job; Share
+        # hands out that page.
+        assert f'<a class="job-apply" href="https://yabot.jobs/login?next=/jobs/{row.id}" data-track="job_apply">Log in to apply</a>' in page
         assert f'data-share-url="https://yabot.jobs/jobs/{row.id}"' in page
         assert "job-lead" not in page  # the sentence is the meta description now
 
@@ -789,7 +789,7 @@ class TestContent:
         page = sjp.render_job_page(sjp.load_job_pages(db, [str(row.id)])[str(row.id)])
         assert "<dt>Posted</dt>" in page and "<dt>First found</dt>" in page
         assert "<dt>Closed</dt>" not in page and "Apply by" not in page
-        assert "Last checked" not in page and "/login?next=" not in page
+        assert "Last checked" not in page
         assert '<span class="job-card__status">' not in page
 
     def test_dates_are_eastern_days_not_utc_days(self, db, make_job):
