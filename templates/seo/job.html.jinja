@@ -34,6 +34,12 @@
         {% if job.closed_at %}<span class="job-card__status"><i aria-hidden="true"></i>Closed {{ closed_short }}</span>{% endif %}
       </div>
       <div class="job-card__body">
+        {# Share, just under the band on the right, as on the app's job
+           page: this page's own link, which carries the job's preview. #}
+        <button type="button" class="job-share" data-share-url="{{ page_url }}" data-share-title="{{ job.title }} at {{ job.company_display }}" data-share-id="{{ job.url_id }}" aria-label="Share this job" title="Share">
+          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" aria-hidden="true"><path d="M7.1 9 12.9 5.9M7.1 11l5.8 3.1" stroke="currentColor" stroke-width="1.7" /><circle cx="5" cy="10" r="2.4" stroke="currentColor" stroke-width="1.7" /><circle cx="15" cy="4.8" r="2.4" stroke="currentColor" stroke-width="1.7" /><circle cx="15" cy="15.2" r="2.4" stroke="currentColor" stroke-width="1.7" /></svg>
+          <span class="job-share__copied" hidden>Link copied</span>
+        </button>
         <p class="company-line">{{ job.company_display }}</p>
         <h1>{{ job.title }}</h1>
         {% if job.location %}<p class="meta-line">{{ job.location }}</p>{% endif %}
@@ -107,5 +113,33 @@
   </div>
   </main>
   {% include "_footer.html.jinja" %}
+  <script>
+    // Share: the phone's share sheet where there is one, or else the link
+    // copied. Counted as GA4's share event (gtag, once _analytics' script
+    // has loaded).
+    (function () {
+      var button = document.querySelector(".job-share");
+      if (!button) return;
+      var copied = button.querySelector(".job-share__copied");
+      var timer = 0;
+      function track(method) {
+        if (window.gtag) window.gtag("event", "share", { method: method, content_type: "job", item_id: button.dataset.shareId });
+      }
+      button.addEventListener("click", function () {
+        var url = button.dataset.shareUrl;
+        if (navigator.share) {
+          navigator.share({ title: button.dataset.shareTitle, url: url }).then(function () { track("share_sheet"); }, function () {});
+          return;
+        }
+        if (!navigator.clipboard) return;
+        navigator.clipboard.writeText(url).then(function () {
+          track("copy_link");
+          copied.hidden = false;
+          clearTimeout(timer);
+          timer = setTimeout(function () { copied.hidden = true; }, 2000);
+        }, function () {});
+      });
+    })();
+  </script>
 </body>
 </html>

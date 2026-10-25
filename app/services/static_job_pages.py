@@ -100,8 +100,9 @@ from app.services.static_pages import (
 logger = logging.getLogger("app.static_job_pages")
 
 # Which rendering a page came from. Informational: bumping it re-renders
-# nothing by itself (run the backfill job, --full, for that).
-PAGE_VERSION = 8
+# nothing by itself (run the backfill job, --full, for that). 9: the Share
+# button.
+PAGE_VERSION = 9
 # The first PAGE_VERSION whose crawled jobs carry no made-up validThrough
 # (JobPage.expires); older pages of open crawled jobs get one re-render
 # within EXPIRY_REFRESH_DAYS of the date they'd otherwise show.
