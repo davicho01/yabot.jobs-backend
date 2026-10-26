@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, defer, selectinload, undefer
 
@@ -13,6 +14,7 @@ from app.models.user import User
 from app.schemas.job import JobDetailRead, JobFlagCreate, JobListRead, JobUrlSubmit, MetroRead, SimilarJobsRead
 from app.services import geo
 from app.services.job_locations import location_suggestions, metro_suggestions
+from app.services.static_job_pages import load_job_pages, render_job_share
 from app.services.jobs import (
     build_job_search_statement,
     ensure_user_applicant,
@@ -28,6 +30,9 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 # How many matches past the current page's start GET /jobs counts (50 pages
 # of 20) — see list_job_urls.
 COUNT_AHEAD = 1000
+# A preview is cached this long (by CloudFront, and the preview services
+# themselves), so a link shared around a lot costs one query an hour.
+SHARE_CACHE_CONTROL = "public, max-age=3600"
 
 
 def _is_own_site(host: str | None) -> bool:
@@ -206,6 +211,21 @@ def get_job_url(
     if url_row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job URL not found.")
     return to_job_detail(url_row, hide_url=current_user is None)
+
+
+@router.get("/{url_id}/share", response_class=HTMLResponse, include_in_schema=False)
+def share_job_preview(url_id: uuid.UUID, db: Session = Depends(get_db)) -> HTMLResponse:
+    """The link-preview tags for the app's /jobs/<url_id>: the CloudFront
+    function sends link-preview bots here, since they don't run the app.
+    Built on request (one query per preview) and cached for an hour. Any job
+    the app shows gets its tags; one that's gone gets "no longer available"
+    with a 404."""
+    job = load_job_pages(db, [str(url_id)]).get(str(url_id))
+    return HTMLResponse(
+        render_job_share(job, str(url_id)),
+        status_code=status.HTTP_200_OK if job else status.HTTP_404_NOT_FOUND,
+        headers={"Cache-Control": SHARE_CACHE_CONTROL},
+    )
 
 
 @router.get("/{url_id}/similar", response_model=SimilarJobsRead)

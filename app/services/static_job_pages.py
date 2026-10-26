@@ -109,7 +109,6 @@ PAGE_VERSION = 10
 NO_FALLBACK_EXPIRY_VERSION = 8
 EXPIRY_REFRESH_DAYS = 7
 MANIFEST_KEY = "_meta/job-pages.json"
-SHARE_PREFIX = "jobs/_share/"
 SITEMAP_INDEX_KEY = "sitemap-job-pages.xml"
 SITEMAP_SHARD_SIZE = 45_000  # under the sitemap protocol's 50,000-URL cap
 _SITEMAP_SHARD_RE = re.compile(r"/(sitemap-job-pages-\d+\.xml)</loc>")
@@ -305,12 +304,6 @@ def new_job_path(job: "LinkJob") -> str:
     otherwise."""
     last = "-".join(p for p in (slugify(job.title, _TITLE_SLUG_MAX), job.place_slug, job.url_id) if p)
     return f"jobs/{COUNTRY_SLUG}/{sector_slug(job.sector)}/{job.day.isoformat()}/{last}"
-
-
-def share_key(url_id: str) -> str:
-    """The small page link-preview bots get for the app's /jobs/<url_id>
-    (render_job_share). Under jobs/, which the frontend's deploy leaves alone."""
-    return f"{SHARE_PREFIX}{url_id}"
 
 
 def legacy_job_path(url_id: str) -> str:
@@ -994,21 +987,20 @@ def render_job_gone(job: JobPage | None) -> str:
     )
 
 
-def render_job_share(job: JobPage | None, url_id: str, path: str | None = None) -> str:
+def render_job_share(job: JobPage | None, url_id: str) -> str:
     """The preview tags for the app's /jobs/<url_id>, for link-preview bots
-    (see job_share.html.jinja): the job page's own title and description, or
-    a "no longer available" one once it's gone (no path)."""
-    if job is not None and path is not None:
+    (see job_share.html.jinja; served by GET /jobs/<url_id>/share): the job
+    page's own title and description, or a "no longer available" one for a
+    job that's gone."""
+    if job is not None:
         og_title, title, description = f"{job.title} at {job.company_display}", page_title(job), meta_description(job)
     else:
-        name = f"{job.title} at {job.company_display}" if job else "This job"
-        og_title = title = f"{name} – No Longer Available | Yabot Jobs"
-        description = f"{name} is no longer available. Browse current jobs on Yabot Jobs."
+        og_title = title = "This Job Is No Longer Available | Yabot Jobs"
+        description = "This job is no longer available. Browse current jobs on Yabot Jobs."
     return _TEMPLATE_ENV.get_template("job_share.html.jinja").render(
         title=title,
         og_title=og_title,
         description=description,
-        page_url=_url(path) if path and job is not None else None,
         app_url=_url(f"jobs/{url_id}"),
         base_url=settings.seo_pages_base_url,
     )
@@ -1239,7 +1231,6 @@ def generate_job_pages(
         placeholders.update(missing)
         list(pool.map(lambda key: write_logo_alias(key, None), missing))
         uploads = [(index[i].path, render_job_page(loaded[i], index[i].path, links_for(index[i]))) for i in ids]
-        uploads += [(share_key(i), render_job_share(loaded[i], i, index[i].path)) for i in ids]
         list(pool.map(lambda kv: upload_html(kv[0], kv[1], CACHE_CONTROL), uploads))
         pages.update(
             (i, ManifestEntry(str(PAGE_VERSION), index[i].scanned, index[i].path, rendered_at,
@@ -1287,7 +1278,6 @@ def generate_job_pages(
             batch = removed_ids[start : start + RENDER_BATCH_SIZE]
             loaded = load_job_pages(db, batch)
             uploads = [(previous[i].path, render_job_gone(loaded.get(i))) for i in batch]
-            uploads += [(share_key(i), render_job_share(loaded.get(i), i)) for i in batch]
             list(pool.map(lambda kv: upload_html(kv[0], kv[1], CACHE_CONTROL), uploads))
             for i in batch:
                 pages.pop(i, None)
@@ -1316,7 +1306,6 @@ def generate_job_pages(
     # collapse_invalidation_paths turns into one wildcard (and /job/ pages,
     # moved ones included, into another).
     result.touched_paths.extend(f"/{previous[i].path}" for i in rerendered + removed_ids)
-    result.touched_paths.extend(f"/{share_key(i)}" for i in rerendered + removed_ids)
     result.touched_paths.extend(f"/{path}" for path in moved_from.values())
     result.touched_paths.extend(f"/{path}" for path in hub_paths)
     return result
