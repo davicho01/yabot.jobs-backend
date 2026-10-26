@@ -101,8 +101,8 @@ logger = logging.getLogger("app.static_job_pages")
 
 # Which rendering a page came from. Informational: bumping it re-renders
 # nothing by itself (run the backfill job, --full, for that). 9: the Share
-# button.
-PAGE_VERSION = 9
+# button. 10: "Posted" only for the employer's own date.
+PAGE_VERSION = 10
 # The first PAGE_VERSION whose crawled jobs carry no made-up validThrough
 # (JobPage.expires); older pages of open crawled jobs get one re-render
 # within EXPIRY_REFRESH_DAYS of the date they'd otherwise show.
@@ -558,6 +558,9 @@ class JobPage:
 
     @property
     def date_posted(self) -> date:
+        """The JSON-LD datePosted, which Google requires: the employer's date,
+        else the day we first found it. Wherever a reader sees "Posted", it's
+        only ever the employer's own date."""
         return self.day
 
     @property
@@ -866,7 +869,7 @@ def meta_description(job: JobPage) -> str:
         facts.append(job.salary_display)
     sentences = [
         f"{job.company_display} {hiring} {article} {job.title}{where}.",
-        f"Posted {job.date_posted.strftime('%B %-d, %Y')}.",
+        f"{'Posted' if job.posted_at else 'First found'} {job.date_posted.strftime('%B %-d, %Y')}.",
         f"Closed {_closed_date(job)}." if job.closed_at is not None else "",
         (", ".join(facts) + ".") if facts else "",
         "See details and similar jobs on Yabot Jobs.",

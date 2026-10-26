@@ -289,8 +289,24 @@ class TestRendering:
 
         match = re.search(r'<script type="application/ld\+json">(.*?)</script>', html, re.S)
         payload = json.loads(match.group(1))
-        assert payload["itemListElement"][0]["item"]["title"] == "Senior Backend Engineer"
-        assert payload["itemListElement"][0]["item"]["url"] == "https://yabot.jobs/job/11111111-1111-1111-1111-111111111111"
+        # Only the job's URL: JobPosting markup belongs on the job's own page.
+        assert payload["@type"] == "ItemList"
+        assert payload["itemListElement"] == [
+            {"@type": "ListItem", "position": 1, "url": "https://yabot.jobs/job/11111111-1111-1111-1111-111111111111"}
+        ]
+        assert "JobPosting" not in html
+
+    def test_day_page_does_not_say_posted(self):
+        import re
+
+        # It also lists jobs with no employer date, by the day they were found.
+        jobs = [sp.JobRow(url_id="11111111-1111-1111-1111-111111111111", title="Engineer", company_name="Acme",
+                          location=None, scanned_at_local=MIDDAY)]
+        manifest = sp.add_to_manifest({}, "us", JobSector.ENGINEERING_TECH, date(2026, 9, 26), 1)
+        html = sp.render_day_page(country_slug="us", sector=JobSector.ENGINEERING_TECH, local_day=date(2026, 9, 26),
+                                  jobs=jobs, generated_at=datetime.now(timezone.utc), manifest=manifest)
+        assert re.search(r"<title>New .* Jobs in United States, September 26, 2026 \| Yabot Jobs</title>", html)
+        assert "Posted September" not in html
 
     def test_day_page_shows_salary_range_when_present(self):
         jobs = [
@@ -314,18 +330,6 @@ class TestRendering:
             manifest=manifest,
         )
         assert "$120,000" in html and "$150,000" in html
-
-        import json
-        import re
-
-        match = re.search(r'<script type="application/ld\+json">(.*?)</script>', html, re.S)
-        payload = json.loads(match.group(1))
-        base_salary = payload["itemListElement"][0]["item"]["baseSalary"]
-        assert base_salary == {
-            "@type": "MonetaryAmount",
-            "currency": "USD",
-            "value": {"@type": "QuantitativeValue", "minValue": 120_000, "maxValue": 150_000},
-        }
 
     def test_job_row_salary_display_variants(self):
         no_salary = sp.JobRow(url_id="x", title="t", company_name=None, location=None, scanned_at_local=MIDDAY)

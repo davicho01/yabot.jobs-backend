@@ -3,20 +3,20 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{{ sector_name }} Jobs in {{ country_name }}, Posted {{ date_display }} | Yabot Jobs</title>
-  <meta name="description" content="{{ job_count }} {{ sector_name }} job{{ '' if job_count == 1 else 's' }} posted in {{ country_name }} on {{ date_display }}, updated throughout the day. Free to search and apply on Yabot Jobs." />
+  <title>New {{ sector_name }} Jobs in {{ country_name }}, {{ date_display }} | Yabot Jobs</title>
+  <meta name="description" content="{{ job_count }} {{ sector_name }} job{{ '' if job_count == 1 else 's' }} in {{ country_name }} posted or added on {{ date_display }}, updated throughout the day. Free to search and apply on Yabot Jobs." />
   <link rel="canonical" href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}/{{ date_iso }}" />
   <meta name="robots" content="index, follow" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Yabot Jobs" />
-  <meta property="og:title" content="{{ sector_name }} Jobs in {{ country_name }}, Posted {{ date_display }}" />
-  <meta property="og:description" content="{{ job_count }} {{ sector_name }} job{{ '' if job_count == 1 else 's' }} posted in {{ country_name }} on {{ date_display }}." />
+  <meta property="og:title" content="New {{ sector_name }} Jobs in {{ country_name }}, {{ date_display }}" />
+  <meta property="og:description" content="{{ job_count }} {{ sector_name }} job{{ '' if job_count == 1 else 's' }} in {{ country_name }} posted or added on {{ date_display }}." />
   <meta property="og:url" content="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}/{{ date_iso }}" />
   {% include "_fonts.html.jinja" %}
   {% include "_icons.html.jinja" %}
   {% include "_base_style.html.jinja" %}
   {% with page_type = "day" %}{% include "_analytics.html.jinja" %}{% endwith %}
-  <script type="application/ld+json">{{ job_ld_json|safe }}</script>
+  <script type="application/ld+json">{{ list_ld_json|safe }}</script>
 </head>
 <body>
   {% include "_header.html.jinja" %}
@@ -29,7 +29,7 @@
       <a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_slug }}">{{ sector_name }}</a> &rsaquo;
       <span aria-current="page">{{ date_display }}</span>
     </nav>
-    <h1>{{ sector_name }} Jobs in {{ country_name }}, Posted {{ date_display }}</h1>
+    <h1>New {{ sector_name }} Jobs in {{ country_name }}, {{ date_display }}</h1>
     <p class="meta-line">{{ job_count }} job{{ '' if job_count == 1 else 's' }} found &middot; Updated as of {{ generated_at_display }}</p>
     {% include "_scan_notice.html.jinja" %}
 
