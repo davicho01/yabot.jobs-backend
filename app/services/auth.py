@@ -1,7 +1,7 @@
 import hmac
 import secrets
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2 import id_token as google_id_token
@@ -16,7 +16,7 @@ from app.core.security import generate_token, hash_token
 from app.models.auth import MagicLinkToken, PersonalAccessToken, UserSession
 from app.models.enums import UserRole, UserStatus
 from app.models.user import User
-from app.models.user_activity import UserActiveDay
+from app.models.user_activity import UserActiveHour
 
 
 class AuthError(Exception):
@@ -224,23 +224,23 @@ def get_user_by_session_token(db: Session, raw_token: str) -> User | None:
     return db.get(User, session.user_id)
 
 
-# (day, user ids already recorded that day) for this process, so a user's
-# requests after the first one each day skip the insert. Per instance only —
+# (hour, user ids already recorded that hour) for this process, so a user's
+# requests after the first one each hour skip the insert. Per instance only —
 # other instances insert too, and ON CONFLICT DO NOTHING absorbs that.
-_recorded_active: tuple[date, set[uuid.UUID]] = (date.min, set())
+_recorded_active: tuple[datetime, set[uuid.UUID]] = (datetime.min, set())
 
 
-def record_active_day(db: Session, user: User) -> None:
-    """Note that `user` used the app today (UTC) — see UserActiveDay."""
+def record_active_hour(db: Session, user: User) -> None:
+    """Note that `user` used the app this hour (UTC) — see UserActiveHour."""
     global _recorded_active
-    today = datetime.now(timezone.utc).date()
-    if _recorded_active[0] != today:
-        _recorded_active = (today, set())
+    hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    if _recorded_active[0] != hour:
+        _recorded_active = (hour, set())
     if user.id in _recorded_active[1]:
         return
 
     insert = sqlite_insert if db.get_bind().dialect.name == "sqlite" else pg_insert
-    db.execute(insert(UserActiveDay).values(user_id=user.id, day=today).on_conflict_do_nothing())
+    db.execute(insert(UserActiveHour).values(user_id=user.id, hour=hour).on_conflict_do_nothing())
     _recorded_active[1].add(user.id)
 
 
