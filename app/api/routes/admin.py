@@ -76,6 +76,30 @@ def get_scans_by_month(months: int = Query(6, ge=1, le=60), db: Session = Depend
     return admin_service.get_scans_by_month(db, months=months)
 
 
+
+@router.get("/users-joined-by-day", response_model=list[ScanDayCount])
+def get_users_joined_by_day(days: int = Query(30, ge=1, le=365), db: Session = Depends(get_db)) -> list[dict]:
+    return admin_service.get_users_joined_by_day(db, days=days)
+
+
+@router.get("/users-joined-by-hour", response_model=list[ScanHourCount])
+def get_users_joined_by_hour(
+    hours: int = Query(24, ge=1, le=168),
+    end: datetime | None = Query(None),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    return admin_service.get_users_joined_by_hour(db, hours=hours, end=end)
+
+
+@router.get("/users-joined-by-week", response_model=list[ScanWeekCount])
+def get_users_joined_by_week(weeks: int = Query(26, ge=1, le=104), db: Session = Depends(get_db)) -> list[dict]:
+    return admin_service.get_users_joined_by_week(db, weeks=weeks)
+
+
+@router.get("/users-joined-by-month", response_model=list[ScanMonthCount])
+def get_users_joined_by_month(months: int = Query(6, ge=1, le=60), db: Session = Depends(get_db)) -> list[dict]:
+    return admin_service.get_users_joined_by_month(db, months=months)
+
 JOB_SORT_COLUMNS = {
     "company": JobPosting.company_name,
     "title": JobPosting.title,
