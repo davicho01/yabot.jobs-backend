@@ -238,39 +238,20 @@ def render_day_page(
         next_day=next_day,
         base_url=settings.seo_pages_base_url,
         other_sectors=[(name, slug) for sec, slug, name in _SECTOR_INFO if sec != sector],
-        job_ld_json=_build_job_ld_json(jobs, day_str),
+        list_ld_json=_build_item_list_ld_json(jobs),
     )
 
 
-def _build_job_ld_json(jobs: list[JobRow], day_str: str) -> str:
-    """A JSON-LD ItemList of JobPosting entries, as a pre-escaped string ready
-    to drop straight into a <script type="application/ld+json"> block. Built
-    in Python (not Jinja's own JSON filter — plain jinja2.Environment has no
-    `tojson`, that's a Flask addition) so titles/company names with quotes or
-    unicode are encoded correctly; "</" is escaped so a title/description
-    containing it can't prematurely close the surrounding <script> tag."""
-    item_list = []
-    for i, job in enumerate(jobs):
-        item = {
-            "@type": "JobPosting",
-            "title": job.title,
-            "hiringOrganization": {"@type": "Organization", "name": job.company_name or ""},
-            "jobLocation": {"@type": "Place", "address": job.location or ""},
-            "datePosted": job.posted_at.isoformat() if job.posted_at else day_str,
-            "url": f"{settings.seo_pages_base_url}/{job.href_path}",
-        }
-        if job.salary_min is not None or job.salary_max is not None:
-            value: dict = {"@type": "QuantitativeValue"}
-            if job.salary_min is not None:
-                value["minValue"] = job.salary_min
-            if job.salary_max is not None:
-                value["maxValue"] = job.salary_max
-            item["baseSalary"] = {
-                "@type": "MonetaryAmount",
-                "currency": job.salary_currency or "USD",
-                "value": value,
-            }
-        item_list.append({"@type": "ListItem", "position": i + 1, "item": item})
+def _build_item_list_ld_json(jobs: list[JobRow]) -> str:
+    """A JSON-LD ItemList of the page's job URLs, as a pre-escaped string ready
+    to drop straight into a <script type="application/ld+json"> block. Just
+    the URLs: Google wants JobPosting markup only on a job's own page, never
+    on a page listing many. Built in Python (plain jinja2.Environment has no
+    `tojson`); "</" is escaped so nothing can close the <script> tag early."""
+    item_list = [
+        {"@type": "ListItem", "position": i + 1, "url": f"{settings.seo_pages_base_url}/{job.href_path}"}
+        for i, job in enumerate(jobs)
+    ]
     payload = {"@context": "https://schema.org", "@type": "ItemList", "itemListElement": item_list}
     return json.dumps(payload).replace("</", "<\\/")
 

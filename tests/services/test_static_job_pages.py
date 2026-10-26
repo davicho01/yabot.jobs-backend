@@ -555,6 +555,15 @@ class TestPaths:
             "jobs/us/engineering-tech/2026-10-02/sr-network-development-engineer-raleigh-nc-" + job.url_id
         )
 
+    def test_job_rows_say_posted_only_for_the_employers_date(self):
+        from app.services import static_pages
+
+        rows = static_pages._TEMPLATE_ENV.get_template("_job_rows.html.jinja")
+        undated = _link_job(posted_at=None, found_at=datetime(2026, 10, 3, 14, 0, tzinfo=timezone.utc))
+        html = rows.render(jobs=[_link_job(), undated], base_url="https://yabot.jobs")
+        assert '<span class="job-rows__when">Posted Oct 2</span>' in html
+        assert '<span class="job-rows__when">Added Oct 3</span>' in html
+
     def test_day_falls_back_to_the_eastern_day_we_found_it(self):
         # 02:00 UTC on Oct 3 is still Oct 2 in Eastern time.
         job = _link_job(posted_at=None, found_at=datetime(2026, 10, 3, 2, 0, tzinfo=timezone.utc))
@@ -781,6 +790,8 @@ class TestContent:
         page = self._page(db, make_job, posted_at=None, first_scanned_at=found)
         assert '<div class="job-dates__missing"><dt>Posted</dt><dd>Not listed</dd></div>' in page
         assert _ld(page)["datePosted"]  # Google still gets the day it was found
+        description = html_module.unescape(re.search(r'name="description" content="(.*?)"', page).group(1))
+        assert ". First found October " in description and "Posted" not in description
         dated = self._page(db, make_job, posted_at=date(2026, 10, 18))
         assert "<div><dt>Posted</dt><dd>Oct 18, 2026</dd></div>" in dated
 

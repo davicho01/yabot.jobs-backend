@@ -10,7 +10,7 @@
       <a class="job-rows__title" href="{{ base_url }}/{{ j.path }}" data-track="{{ track | default('job') }}">{{ j.title }}</a>
       <span class="job-rows__meta">{% if not one_company %}<span class="job-rows__company">{{ j.company_display }}</span>{% endif %}{% if j.location %}<span class="job-rows__place">{{ j.location }}</span>{% endif %}</span>
     </div>
-    <span class="job-rows__when">Posted {{ j.day.strftime('%b %-d') }}</span>
+    <span class="job-rows__when">{{ 'Posted' if j.posted_at else 'Added' }} {{ j.day.strftime('%b %-d') }}</span>
   </li>
   {% endfor %}
 </ul>
