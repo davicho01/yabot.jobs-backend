@@ -5,7 +5,7 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.models.enums import UserRole
 from app.models.user import User
-from app.services.auth import get_user_by_pat, get_user_by_session_token
+from app.services.auth import get_user_by_pat, get_user_by_session_token, record_active_hour
 
 __all__ = ["get_db", "get_current_user", "get_current_user_optional", "get_current_admin_user"]
 
@@ -13,6 +13,13 @@ _BEARER_PREFIX = "bearer "
 
 
 def get_current_user_optional(request: Request, db: Session = Depends(get_db)) -> User | None:
+    user = _resolve_user(request, db)
+    if user is not None:
+        record_active_hour(db, user)
+    return user
+
+
+def _resolve_user(request: Request, db: Session) -> User | None:
     # Programmatic clients (e.g. mcp_server/) that can't do the browser
     # cookie flow authenticate with a personal access token instead — see
     # POST /auth/tokens. Browser sessions keep using the cookie.

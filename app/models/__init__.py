@@ -13,9 +13,11 @@ from app.models.resume import Resume, ResumeReview, ResumeScore, ResumeSkillAddi
 from app.models.saved_search import SavedSearch
 from app.models.subscription_evaluation_job import SubscriptionEvaluationJob
 from app.models.user import User
+from app.models.user_activity import UserActiveHour
 
 __all__ = [
     "User",
+    "UserActiveHour",
     "MagicLinkToken",
     "UserSession",
     "PersonalAccessToken",

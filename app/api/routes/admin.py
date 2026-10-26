@@ -100,6 +100,30 @@ def get_users_joined_by_week(weeks: int = Query(26, ge=1, le=104), db: Session =
 def get_users_joined_by_month(months: int = Query(6, ge=1, le=60), db: Session = Depends(get_db)) -> list[dict]:
     return admin_service.get_users_joined_by_month(db, months=months)
 
+
+@router.get("/returning-users-by-hour", response_model=list[ScanHourCount])
+def get_returning_users_by_hour(
+    hours: int = Query(24, ge=1, le=168),
+    end: datetime | None = Query(None),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    return admin_service.get_returning_users_by_hour(db, hours=hours, end=end)
+
+
+@router.get("/returning-users-by-day", response_model=list[ScanDayCount])
+def get_returning_users_by_day(days: int = Query(30, ge=1, le=365), db: Session = Depends(get_db)) -> list[dict]:
+    return admin_service.get_returning_users_by_day(db, days=days)
+
+
+@router.get("/returning-users-by-week", response_model=list[ScanWeekCount])
+def get_returning_users_by_week(weeks: int = Query(26, ge=1, le=104), db: Session = Depends(get_db)) -> list[dict]:
+    return admin_service.get_returning_users_by_week(db, weeks=weeks)
+
+
+@router.get("/returning-users-by-month", response_model=list[ScanMonthCount])
+def get_returning_users_by_month(months: int = Query(6, ge=1, le=60), db: Session = Depends(get_db)) -> list[dict]:
+    return admin_service.get_returning_users_by_month(db, months=months)
+
 JOB_SORT_COLUMNS = {
     "company": JobPosting.company_name,
     "title": JobPosting.title,

@@ -2,13 +2,14 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import ColumnElement, func, select
+from sqlalchemy import ColumnElement, and_, distinct, func, select
 from sqlalchemy.orm import Session
 
 from app.models.crawl_source import CrawlSource
-from app.models.enums import ScanStatus
+from app.models.enums import ScanStatus, UserRole
 from app.models.job_url import JobPostingUrl
 from app.models.user import User
+from app.models.user_activity import UserActiveHour
 
 # (attribute name on the response, how far back the window goes)
 _WINDOWS: list[tuple[str, timedelta]] = [
@@ -72,16 +73,21 @@ def get_dashboard_stats(db: Session) -> dict:
 
 
 def _counts_by_day(
-    db: Session, column: ColumnElement[datetime | None], days: int, extra_filter: ColumnElement[bool] | None = None
+    db: Session,
+    column: ColumnElement[datetime | None],
+    days: int,
+    extra_filter: ColumnElement[bool] | None = None,
+    count: ColumnElement[int] | None = None,
 ) -> list[dict]:
-    """Daily counts of rows whose `column` falls in the last `days` days
-    (today inclusive), with zero-filled gaps so the chart has one point per
-    calendar day regardless of activity."""
+    """Daily counts of rows (or of `count`, e.g. distinct users) whose
+    `column` falls in the last `days` days (today inclusive), with
+    zero-filled gaps so the chart has one point per calendar day regardless
+    of activity."""
     now = datetime.now(timezone.utc)
     start = (now - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
     stmt = (
-        select(func.date_trunc("day", column).label("day"), func.count().label("count"))
+        select(func.date_trunc("day", column).label("day"), (count if count is not None else func.count()).label("count"))
         .where(column >= start)
         .group_by("day")
     )
@@ -102,6 +108,7 @@ def _counts_by_hour(
     hours: int,
     end: datetime | None = None,
     extra_filter: ColumnElement[bool] | None = None,
+    count: ColumnElement[int] | None = None,
 ) -> list[dict]:
     """Hourly counts for a `hours`-hour window ending at `end`'s hour
     (current hour inclusive by default), with zero-filled gaps so the chart
@@ -121,7 +128,7 @@ def _counts_by_hour(
     start = end_hour - timedelta(hours=hours - 1)
 
     stmt = (
-        select(func.date_trunc("hour", column).label("hour"), func.count().label("count"))
+        select(func.date_trunc("hour", column).label("hour"), (count if count is not None else func.count()).label("count"))
         .where(column >= start)
         .where(column < end_hour + timedelta(hours=1))
         .group_by("hour")
@@ -138,7 +145,11 @@ def _counts_by_hour(
 
 
 def _counts_by_week(
-    db: Session, column: ColumnElement[datetime | None], weeks: int, extra_filter: ColumnElement[bool] | None = None
+    db: Session,
+    column: ColumnElement[datetime | None],
+    weeks: int,
+    extra_filter: ColumnElement[bool] | None = None,
+    count: ColumnElement[int] | None = None,
 ) -> list[dict]:
     """Weekly (Monday-start, matching the frontend's ISO-week bucketing)
     counts for the last `weeks` weeks (current week inclusive), with
@@ -149,7 +160,7 @@ def _counts_by_week(
     start = current_week_start - timedelta(weeks=weeks - 1)
 
     stmt = (
-        select(func.date_trunc("week", column).label("week"), func.count().label("count"))
+        select(func.date_trunc("week", column).label("week"), (count if count is not None else func.count()).label("count"))
         .where(column >= start)
         .group_by("week")
     )
@@ -170,7 +181,11 @@ def _add_months(d: date, months: int) -> date:
 
 
 def _counts_by_month(
-    db: Session, column: ColumnElement[datetime | None], months: int, extra_filter: ColumnElement[bool] | None = None
+    db: Session,
+    column: ColumnElement[datetime | None],
+    months: int,
+    extra_filter: ColumnElement[bool] | None = None,
+    count: ColumnElement[int] | None = None,
 ) -> list[dict]:
     """Calendar-month counts for the last `months` months (current month
     inclusive), with zero-filled gaps so the chart has one point per month
@@ -180,7 +195,7 @@ def _counts_by_month(
     start = _add_months(current_month_start.date(), -(months - 1))
 
     stmt = (
-        select(func.date_trunc("month", column).label("month"), func.count().label("count"))
+        select(func.date_trunc("month", column).label("month"), (count if count is not None else func.count()).label("count"))
         .where(column >= start)
         .group_by("month")
     )
@@ -231,6 +246,33 @@ def get_users_joined_by_week(db: Session, weeks: int) -> list[dict]:
 
 def get_users_joined_by_month(db: Session, months: int) -> list[dict]:
     return _counts_by_month(db, User.created_at, months)
+
+
+# A returning user in an hour/day/week/month: a non-admin who used the app
+# then and signed up before that day started. Distinct users, so a
+# day/week/month counts each person once however many hours they were on.
+_RETURNING_FILTER = and_(
+    UserActiveHour.user_id == User.id,
+    User.role != UserRole.ADMIN,
+    User.created_at < func.date_trunc("day", UserActiveHour.hour),
+)
+_DISTINCT_USERS = func.count(distinct(UserActiveHour.user_id))
+
+
+def get_returning_users_by_hour(db: Session, hours: int, end: datetime | None = None) -> list[dict]:
+    return _counts_by_hour(db, UserActiveHour.hour, hours, end, _RETURNING_FILTER, _DISTINCT_USERS)
+
+
+def get_returning_users_by_day(db: Session, days: int) -> list[dict]:
+    return _counts_by_day(db, UserActiveHour.hour, days, _RETURNING_FILTER, _DISTINCT_USERS)
+
+
+def get_returning_users_by_week(db: Session, weeks: int) -> list[dict]:
+    return _counts_by_week(db, UserActiveHour.hour, weeks, _RETURNING_FILTER, _DISTINCT_USERS)
+
+
+def get_returning_users_by_month(db: Session, months: int) -> list[dict]:
+    return _counts_by_month(db, UserActiveHour.hour, months, _RETURNING_FILTER, _DISTINCT_USERS)
 
 
 def get_crawl_source_stats(db: Session, source: CrawlSource) -> dict:
