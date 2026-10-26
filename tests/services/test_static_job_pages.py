@@ -1035,7 +1035,9 @@ class TestSharedChrome:
         from app.services.static_pages import _TEMPLATES_DIR
 
         for path in _TEMPLATES_DIR.glob("*.html.jinja"):
-            if path.name.startswith("_"):
+            # job_share is only ever read by link-preview bots: no logos to
+            # credit, and no visit to count.
+            if path.name.startswith("_") or path.name == "job_share.html.jinja":
                 continue
             source = path.read_text()
             assert '{% include "_footer.html.jinja" %}' in source, path.name
@@ -1066,3 +1068,50 @@ class TestSharedChrome:
 
         assert static_pages.publish_assets() == ["/jobs/_assets/analytics.js"]
         assert b"G-CDDT9RZ59T" in store.get(static_pages.ANALYTICS_SCRIPT_KEY)
+
+
+class TestShareFiles:
+    """jobs/_share/<url_id>: what a link-preview bot gets for the app's /jobs/<url_id>."""
+
+    def test_a_published_job_gets_its_share_file(self, db, make_job, store):
+        row = make_job(title="Platform Engineer")
+        sjp.generate_job_pages(db, now=NOW)
+
+        share = store.get(sjp.share_key(str(row.id))).decode()
+        assert '<meta property="og:title" content="Platform Engineer at Acme Corp" />' in share
+        # A preview card opens the app; search engines are pointed at the static page.
+        assert f'<meta property="og:url" content="https://yabot.jobs/jobs/{row.id}" />' in share
+        assert f'<link rel="canonical" href="https://yabot.jobs/{_path(store, row.id)}" />' in share
+        assert '<meta name="robots" content="noindex, follow" />' in share
+        assert "Acme Corp is hiring a Platform Engineer in Austin, TX." in share
+
+    def test_a_retired_job_gets_a_no_longer_available_share_file(self, db, make_job, store):
+        row = make_job(title="Platform Engineer")
+        sjp.generate_job_pages(db, now=NOW)
+        row.flagged_at = NOW
+        db.commit()
+
+        result = sjp.generate_job_pages(db, now=NOW)
+        share = store.get(sjp.share_key(str(row.id))).decode()
+        assert "Platform Engineer at Acme Corp – No Longer Available | Yabot Jobs" in share
+        assert 'rel="canonical"' not in share
+        assert f"/jobs/_share/{row.id}" in result.touched_paths
+
+    def test_titles_are_escaped(self, db, make_job):
+        row = make_job(title='Engineer "AI" <Lead>')
+        share = sjp.render_job_share(sjp.load_job_pages(db, [str(row.id)])[str(row.id)], str(row.id), "jobs/us/x")
+        assert "<Lead>" not in share and "&lt;Lead&gt;" in share
+
+    def test_backfill_writes_share_files_for_published_pages(self, db, make_job, store):
+        from one_off import backfill_job_share_files as backfill
+
+        rows = [make_job() for _ in range(3)]
+        sjp.generate_job_pages(db, now=NOW)
+        for r in rows:  # as if published before the generator wrote share files
+            store.put(sjp.share_key(str(r.id)), "old", "text/html")
+
+        assert backfill.backfill(db, dry_run=True) is None
+        assert all(store.get(sjp.share_key(str(r.id))) == b"old" for r in rows)
+        assert backfill.backfill(db, max_seconds=-1) == 0  # out of time at once: says where to resume
+        assert backfill.backfill(db) is None
+        assert all(b"og:url" in store.get(sjp.share_key(str(r.id))) for r in rows)

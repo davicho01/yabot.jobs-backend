@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  {#- What a link-preview bot (Slack, iMessage, LinkedIn, X…) gets for the
+      app's job page, /jobs/<url_id>: the CloudFront function serves it this
+      file (jobs/_share/<url_id>) instead of the app shell, which only says
+      "Yabot Jobs". Just the preview tags. og:url stays the app's page, so a
+      preview card opens the app; the canonical is the job's static page.
+      People get the app. See static_job_pages.render_job_share. -#}
+  <title>{{ title }}</title>
+  <meta name="description" content="{{ description }}" />
+  {% if page_url %}<link rel="canonical" href="{{ page_url }}" />{% endif %}
+  <meta name="robots" content="noindex, follow" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Yabot Jobs" />
+  <meta property="og:title" content="{{ og_title }}" />
+  <meta property="og:description" content="{{ description }}" />
+  <meta property="og:url" content="{{ app_url }}" />
+  <meta property="og:image" content="{{ base_url }}/og-image.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+</head>
+<body>
+  <p><a href="{{ app_url }}">{{ og_title }}</a></p>
+</body>
+</html>
