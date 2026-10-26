@@ -387,3 +387,45 @@ class FeedbackStatus(StrEnum):
     NEW = "new"
     READ = "read"
     RESOLVED = "resolved"
+
+
+class CollectionType(StrEnum):
+    """Which dimensions a job collection combines (see
+    app.services.job_collections.COLLECTION_DIMENSIONS) — spec §10's types,
+    those the existing fields support (no technology yet: Q-008), plus the
+    location kinds the hubs already publish (ADR-004)."""
+
+    CATEGORY = "category"
+    ROLE = "role"
+    LOCATION = "location"
+    CATEGORY_LOCATION = "category_location"
+    CATEGORY_REMOTE = "category_remote"
+    ROLE_LOCATION = "role_location"
+    ROLE_REMOTE = "role_remote"
+    CATEGORY_SALARY = "category_salary"
+    ROLE_SALARY = "role_salary"
+    CATEGORY_FRESHNESS = "category_freshness"
+    ROLE_FRESHNESS = "role_freshness"
+
+
+class CollectionStatus(StrEnum):
+    """A job collection's lifecycle (spec §11); the allowed moves between
+    them are app.services.job_collections.TRANSITIONS."""
+
+    CANDIDATE = "candidate"  # proposed, not yet evaluated
+    QUALIFIED = "qualified"  # passed qualification; waiting for approval
+    PUBLISHED = "published"  # approved; page live, noindex
+    INDEXABLE = "indexable"  # page live and indexed
+    PERFORMING = "performing"  # indexed, and earning search traffic
+    DECLINING = "declining"  # indexed, inventory or traffic falling
+    NOINDEX = "noindex"  # page live, taken out of the index
+    ARCHIVED = "archived"  # retired or rejected; no page
+
+
+class CollectionTrigger(StrEnum):
+    """What made a collection change status (JobCollectionEvent.trigger)."""
+
+    MANUAL = "manual"  # a person, through the admin
+    QUALIFICATION = "qualification"  # the qualification service's evaluation
+    LIFECYCLE = "lifecycle"  # an automated lifecycle rule
+    SYSTEM = "system"  # a migration, backfill or other one-off

@@ -6,6 +6,7 @@ from app.models.crawl_source import CrawlSource
 from app.models.feedback import Feedback
 from app.models.free_trial_job import FreeTrialJob
 from app.models.job_application import UserJobApplication
+from app.models.job_collection import JobCollection, JobCollectionEvent
 from app.models.job_posting import JobPosting
 from app.models.job_url import JobPostingUrl
 from app.models.oauth import OAuthAuthorizationRequest, OAuthClient, OAuthRefreshToken
@@ -25,6 +26,8 @@ __all__ = [
     "JobPostingUrl",
     "JobPosting",
     "UserJobApplication",
+    "JobCollection",
+    "JobCollectionEvent",
     "CrawlSource",
     "Company",
     "Resume",
