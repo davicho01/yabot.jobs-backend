@@ -153,6 +153,10 @@ class Settings(BaseSettings):
     # these defaults.
     job_pages_max_renders_per_run: int = 8_000
     job_pages_moves_per_run: int = 4_000
+    # Job collections (app.services.job_collections): off until their pages
+    # are ready (PR-08). The page generator reads it; the collection records
+    # themselves can be created and reviewed either way.
+    job_collections_enabled: bool = False
 
     # Standalone Chromium-rendering service for the rare sites that need JS
     # execution to reveal their content (see app/services/browser_fetch.py).
