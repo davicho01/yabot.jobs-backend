@@ -685,9 +685,12 @@ gcloud scheduler jobs create http retry-failed-scans-hourly \
 #     finish and return 200. A job has no HTTP round-trip to drop: its
 #     execution fails only when the script exits non-zero.
 #
-#     --memory=2Gi/--cpu=1: each run loads the per-job page manifest
-#     (~280k entries), an in-memory index of every live job for related
-#     links, and plans ~8k company/location hubs (see deploy.yml).
+#     --memory=4Gi/--cpu=1: each run loads the per-job page manifest
+#     (~586k entries by 2026-10-26), an in-memory index of every live job
+#     for related links and collection stats, and plans ~9.5k
+#     company/location hubs (see deploy.yml). At 2Gi runs peaked at
+#     1.9-2.0 GiB in late October 2026, before collection stats added
+#     salary/title/last-seen fields to the index.
 #     --task-timeout=1800: a run that spends its full MAX_RENDERS_PER_RUN
 #     re-render budget took ~490s by 2026-10-06. --max-retries=0: the next
 #     run two hours later regenerates the same pages anyway.
@@ -707,7 +710,7 @@ gcloud run jobs deploy generate-static-job-pages \
   --set-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION" \
   --set-env-vars="$COMMON_ENV" \
   --set-secrets="$COMMON_SECRETS,LOGO_DEV_SECRET_KEY=logo-dev-secret-key:latest" \
-  --memory=2Gi \
+  --memory=4Gi \
   --cpu=1 \
   --task-timeout=1800 \
   --max-retries=0 \

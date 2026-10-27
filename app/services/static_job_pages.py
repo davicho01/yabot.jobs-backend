@@ -60,6 +60,7 @@ import html
 import json
 import logging
 import re
+import sys
 import unicodedata
 import uuid
 from collections import defaultdict
@@ -395,9 +396,9 @@ def _eligible_filter(now: datetime):
 
 @dataclass(slots=True)
 class LinkJob:
-    """What's needed to link to a job, group it into hubs and decide whether
-    its page needs rendering — no description, so ~280k of these fit in a
-    run's memory."""
+    """What's needed to link to a job, group it into hubs, count it into a
+    collection's numbers (collection_stats) and decide whether its page needs
+    rendering — no description, so ~280k of these fit in a run's memory."""
 
     url_id: str
     title: str
@@ -414,6 +415,12 @@ class LinkJob:
     scanned: str  # ISO; the page's version
     closed: str = ""  # closed_at (ISO); "" while open
     crawled: bool = False  # found by a crawl (crawl_source_id), so closures are noticed
+    # For collections (collection_dimensions, collection_stats):
+    standard_titles: tuple[str, ...] = ()
+    salary_min: int | None = None
+    salary_max: int | None = None
+    salary_currency: str | None = None
+    last_seen_at: datetime | None = None  # a crawl's last listing; None if never crawled
     path: str = ""
     _place: str | None = None
 
@@ -452,6 +459,8 @@ def load_link_index(db: Session, now: datetime) -> dict[str, LinkJob]:
             JobPosting.title, JobPosting.company_name, JobPosting.company_key, JobPosting.title_key,
             JobPosting.sector, JobPosting.metros, JobPosting.location, JobPosting.workplace_type,
             JobPosting.posted_at, JobPosting.scanned_at, JobPostingUrl.crawl_source_id,
+            JobPosting.standard_titles, JobPosting.salary_min, JobPosting.salary_max, JobPosting.salary_currency,
+            JobPostingUrl.last_seen_at,
         )
         .join(JobPosting, JobPosting.url_id == JobPostingUrl.id)
         .where(_eligible_filter(now))
@@ -480,6 +489,12 @@ def load_link_index(db: Session, now: datetime) -> dict[str, LinkJob]:
             scanned=scanned,
             closed=_iso(row.closed_at) if row.closed_at else "",
             crawled=row.crawl_source_id is not None,
+            # Interned: a few hundred distinct strings across every job.
+            standard_titles=tuple(sys.intern(t) for t in row.standard_titles or ()),
+            salary_min=row.salary_min,
+            salary_max=row.salary_max,
+            salary_currency=sys.intern(row.salary_currency) if row.salary_currency else None,
+            last_seen_at=row.last_seen_at,
         )
     return index
 

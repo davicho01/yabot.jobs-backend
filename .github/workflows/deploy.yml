@@ -400,10 +400,11 @@ jobs:
       # deploy/gcloud-deploy.sh §10. Deploys from the already-built image;
       # command/args/memory/cpu/timeout/secrets (including the logo.dev key)/
       # env vars/Cloud SQL come from that one-time setup and carry forward.
-      # --memory=2Gi there: each run loads the per-job page manifest (~280k
-      # entries), an in-memory index of every live job for related links,
-      # and plans ~8k company/location hubs. At 512Mi the 2026-10-02 10pm
-      # run was killed before publishing 7,121 new pages.
+      # --memory=4Gi there: each run loads the per-job page manifest (~586k
+      # entries by 2026-10-26), an in-memory index of every live job for
+      # related links and collection stats, and plans ~9.5k company/location
+      # hubs. At 512Mi the 2026-10-02 10pm run was killed before publishing
+      # 7,121 new pages; at 2Gi runs peaked at 1.9-2.0 GiB by late October.
       - name: Deploy generate-static-job-pages
         run: gcloud run jobs deploy generate-static-job-pages --image="${{ needs.build.outputs.image_tag }}" --region="$REGION" --project="$PROJECT_ID" --labels=function=generate-static-job-pages
 
