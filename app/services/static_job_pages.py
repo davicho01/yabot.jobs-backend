@@ -1055,9 +1055,11 @@ def build_job_sitemaps(
     hub_paths: Iterable[str] = (),
     days: dict[str, date] | None = None,
     previous_shards: Iterable[str] = (),
+    collection_paths: Iterable[str] = (),
 ) -> dict[str, str]:
     """{key: xml} — numbered shards of the job pages (sitemap-job-pages-<n>),
-    a shard of hub pages (sitemap-hubs-<n>), and the sitemap index
+    a shard of hub pages (sitemap-hubs-<n>), one of indexed collection pages
+    (sitemap-collections-<n>, when there are any), and the sitemap index
     (SITEMAP_INDEX_KEY) that robots.txt points at. `pages` is the manifest's
     {url_id: entry} for the pages to list; `days` their posting days, newest
     listed first. A page's lastmod is when it was last rendered — a rescan
@@ -1076,6 +1078,9 @@ def build_job_sitemaps(
     hubs = sorted(hub_paths)
     if hubs:
         out.update(build_sitemaps("sitemap-hubs", [(path, None) for path in hubs]))
+    collections = sorted(collection_paths)
+    if collections:
+        out.update(build_sitemaps("sitemap-collections", [(path, None) for path in collections]))
     base = settings.seo_pages_base_url
     index_entries = "\n".join(f"  <sitemap><loc>{base}/{key}</loc></sitemap>" for key in sorted(out))
     empty = build_sitemaps("empty", [])["empty-1.xml"]
@@ -1318,7 +1323,12 @@ def generate_job_pages(
     listed = {i: raw for i, raw in pages.items() if i in index and not is_legacy_path(parse_entry(i, raw).path)}
     previous_index = get_page_store().get(SITEMAP_INDEX_KEY) or b""
     previous_shards = _SITEMAP_SHARD_RE.findall(previous_index.decode())
-    sitemaps = build_job_sitemaps(listed, hub_paths, {i: index[i].day for i in listed}, previous_shards)
+    # Collection pages are listed only while indexed (a NOINDEX one keeps
+    # its page, but not a sitemap entry).
+    indexed_collection_paths = [path for page in collection_pages if page.indexable for path in page.paths()]
+    sitemaps = build_job_sitemaps(
+        listed, hub_paths, {i: index[i].day for i in listed}, previous_shards, indexed_collection_paths
+    )
     for key, xml in sitemaps.items():
         upload_xml(key, xml)
         result.touched_paths.append(f"/{key}")
