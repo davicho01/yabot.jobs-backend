@@ -1105,6 +1105,7 @@ class JobPagesResult:
     unchanged: int = 0
     deferred: int = 0  # over this run's render cap; picked up next run
     hubs: int = 0  # hub pages published (static_hub_pages)
+    collections: int = 0  # collections with a page (static_collection_pages)
     # CloudFront paths whose cached copy is now stale (new keys need none).
     touched_paths: list[str] = field(default_factory=list)
     # {url_id: path} of every live page, for the day pages' links.
@@ -1122,7 +1123,7 @@ def generate_job_pages(
     now: datetime | None = None,
     max_renders: int | None = MAX_RENDERS_PER_RUN,
 ) -> JobPagesResult:
-    from app.services import static_hub_pages  # imports this module
+    from app.services import static_collection_pages, static_hub_pages  # import this module
 
     now = now or datetime.now(timezone.utc)
     rendered_at = now.isoformat()
@@ -1190,6 +1191,7 @@ def generate_job_pages(
     # own page but isn't sent anyone's way.
     live = [index[i] for i in live_ids if not index[i].closed]
     hub_plan = static_hub_pages.plan_hubs(live)
+    collection_pages = static_collection_pages.plan_collection_pages(db, live, now)
 
     result = JobPagesResult(
         published=len(new_ids),
@@ -1197,14 +1199,16 @@ def generate_job_pages(
         moved=len(moves),
         legacy_left=len(legacy_ids) - len(moves),
         hubs=len(hub_plan.pages),
+        collections=len(collection_pages),
         job_paths={i: index[i].path for i in live_ids},
         country_links=hub_plan.country_links(),
     )
     logger.info(
         "Job pages: %d new, %d rescanned to check (%d near a stale validThrough), %d to remove, "
-        "%d new deferred to the next run, %d legacy page(s) to move (%d left after); %d hub page(s)%s.",
+        "%d new deferred to the next run, %d legacy page(s) to move (%d left after); %d hub page(s); "
+        "%d collection(s)%s.",
         len(new_ids), len(check_ids), len(expiry_due), len(removed_ids), deferred, len(moves),
-        result.legacy_left, result.hubs, " (dry run)" if dry_run else "",
+        result.legacy_left, result.hubs, result.collections, " (dry run)" if dry_run else "",
     )
     if dry_run:
         result.deferred = deferred
@@ -1301,6 +1305,7 @@ def generate_job_pages(
 
         checkpoint(force=True)
         hub_paths = static_hub_pages.publish_hubs(hub_plan, pool)
+        collection_paths = static_collection_pages.publish_collection_pages(collection_pages, pool)
 
     result.updated = len(rerendered)
     result.moved = len(moved_from)
@@ -1323,6 +1328,7 @@ def generate_job_pages(
     result.touched_paths.extend(f"/{previous[i].path}" for i in rerendered + removed_ids)
     result.touched_paths.extend(f"/{path}" for path in moved_from.values())
     result.touched_paths.extend(f"/{path}" for path in hub_paths)
+    result.touched_paths.extend(f"/{path}" for path in collection_paths)
     return result
 
 
