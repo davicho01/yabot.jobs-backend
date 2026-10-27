@@ -1,4 +1,6 @@
-from fastapi import Depends, HTTPException, Request, status
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from fastapi import Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -32,6 +34,15 @@ def _resolve_user(request: Request, db: Session) -> User | None:
         return None
 
     return get_user_by_session_token(db, raw_token)
+
+
+def get_chart_tz(tz: str = Query("UTC", max_length=64)) -> ZoneInfo:
+    """The IANA timezone (e.g. America/Denver) admin activity charts group
+    their days/weeks/months by — the viewer's own, sent by the frontend."""
+    try:
+        return ZoneInfo(tz)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"Unknown timezone: {tz}")
 
 
 def get_current_user(user: User | None = Depends(get_current_user_optional)) -> User:

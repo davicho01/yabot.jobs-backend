@@ -1,6 +1,7 @@
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import ColumnElement, and_, distinct, func, select
 from sqlalchemy.orm import Session
@@ -10,6 +11,8 @@ from app.models.enums import ScanStatus, UserRole
 from app.models.job_url import JobPostingUrl
 from app.models.user import User
 from app.models.user_activity import UserActiveHour
+
+UTC = ZoneInfo("UTC")
 
 # (attribute name on the response, how far back the window goes)
 _WINDOWS: list[tuple[str, timedelta]] = [
@@ -72,23 +75,34 @@ def get_dashboard_stats(db: Session) -> dict:
     }
 
 
+def _local_trunc(field: str, column: ColumnElement[datetime | None], tz: ZoneInfo) -> ColumnElement[datetime]:
+    """`column` truncated to `field` (day/week/month) on `tz`'s wall clock,
+    so a 9pm-Mountain scan lands on that local date rather than the next UTC
+    one. Postgres timezone() turns the timestamptz into local time first."""
+    return func.date_trunc(field, func.timezone(tz.key, column))
+
+
+def _local_midnight(d: date, tz: ZoneInfo) -> datetime:
+    return datetime.combine(d, time.min, tzinfo=tz)
+
+
 def _counts_by_day(
     db: Session,
     column: ColumnElement[datetime | None],
     days: int,
     extra_filter: ColumnElement[bool] | None = None,
     count: ColumnElement[int] | None = None,
+    tz: ZoneInfo = UTC,
 ) -> list[dict]:
     """Daily counts of rows (or of `count`, e.g. distinct users) whose
-    `column` falls in the last `days` days (today inclusive), with
-    zero-filled gaps so the chart has one point per calendar day regardless
-    of activity."""
-    now = datetime.now(timezone.utc)
-    start = (now - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    `column` falls in the last `days` calendar days in `tz` (today
+    inclusive), with zero-filled gaps so the chart has one point per day
+    regardless of activity."""
+    start_date = datetime.now(tz).date() - timedelta(days=days - 1)
 
     stmt = (
-        select(func.date_trunc("day", column).label("day"), (count if count is not None else func.count()).label("count"))
-        .where(column >= start)
+        select(_local_trunc("day", column, tz).label("day"), (count if count is not None else func.count()).label("count"))
+        .where(column >= _local_midnight(start_date, tz))
         .group_by("day")
     )
     if extra_filter is not None:
@@ -98,7 +112,7 @@ def _counts_by_day(
 
     return [
         {"date": day, "count": counts_by_day.get(day, 0)}
-        for day in (start.date() + timedelta(days=i) for i in range(days))
+        for day in (start_date + timedelta(days=i) for i in range(days))
     ]
 
 
@@ -150,18 +164,18 @@ def _counts_by_week(
     weeks: int,
     extra_filter: ColumnElement[bool] | None = None,
     count: ColumnElement[int] | None = None,
+    tz: ZoneInfo = UTC,
 ) -> list[dict]:
     """Weekly (Monday-start, matching the frontend's ISO-week bucketing)
-    counts for the last `weeks` weeks (current week inclusive), with
+    counts for the last `weeks` weeks in `tz` (current week inclusive), with
     zero-filled gaps so the chart has one point per week regardless of
     activity."""
-    now = datetime.now(timezone.utc)
-    current_week_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-    start = current_week_start - timedelta(weeks=weeks - 1)
+    today = datetime.now(tz).date()
+    start_date = today - timedelta(days=today.weekday()) - timedelta(weeks=weeks - 1)
 
     stmt = (
-        select(func.date_trunc("week", column).label("week"), (count if count is not None else func.count()).label("count"))
-        .where(column >= start)
+        select(_local_trunc("week", column, tz).label("week"), (count if count is not None else func.count()).label("count"))
+        .where(column >= _local_midnight(start_date, tz))
         .group_by("week")
     )
     if extra_filter is not None:
@@ -171,7 +185,7 @@ def _counts_by_week(
 
     return [
         {"week": week, "count": counts_by_week.get(week, 0)}
-        for week in (start.date() + timedelta(weeks=i) for i in range(weeks))
+        for week in (start_date + timedelta(weeks=i) for i in range(weeks))
     ]
 
 
@@ -186,17 +200,16 @@ def _counts_by_month(
     months: int,
     extra_filter: ColumnElement[bool] | None = None,
     count: ColumnElement[int] | None = None,
+    tz: ZoneInfo = UTC,
 ) -> list[dict]:
-    """Calendar-month counts for the last `months` months (current month
-    inclusive), with zero-filled gaps so the chart has one point per month
-    regardless of activity."""
-    now = datetime.now(timezone.utc)
-    current_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    start = _add_months(current_month_start.date(), -(months - 1))
+    """Calendar-month counts for the last `months` months in `tz` (current
+    month inclusive), with zero-filled gaps so the chart has one point per
+    month regardless of activity."""
+    start = _add_months(datetime.now(tz).date().replace(day=1), -(months - 1))
 
     stmt = (
-        select(func.date_trunc("month", column).label("month"), (count if count is not None else func.count()).label("count"))
-        .where(column >= start)
+        select(_local_trunc("month", column, tz).label("month"), (count if count is not None else func.count()).label("count"))
+        .where(column >= _local_midnight(start, tz))
         .group_by("month")
     )
     if extra_filter is not None:
@@ -214,8 +227,10 @@ def _source_filter(crawl_source_id: uuid.UUID | None) -> ColumnElement[bool] | N
     return JobPostingUrl.crawl_source_id == crawl_source_id if crawl_source_id is not None else None
 
 
-def get_scans_by_day(db: Session, days: int, crawl_source_id: uuid.UUID | None = None) -> list[dict]:
-    return _counts_by_day(db, JobPostingUrl.last_scanned_at, days, _source_filter(crawl_source_id))
+def get_scans_by_day(
+    db: Session, days: int, crawl_source_id: uuid.UUID | None = None, tz: ZoneInfo = UTC
+) -> list[dict]:
+    return _counts_by_day(db, JobPostingUrl.last_scanned_at, days, _source_filter(crawl_source_id), tz=tz)
 
 
 def get_scans_by_hour(
@@ -224,55 +239,66 @@ def get_scans_by_hour(
     return _counts_by_hour(db, JobPostingUrl.last_scanned_at, hours, end, _source_filter(crawl_source_id))
 
 
-def get_scans_by_week(db: Session, weeks: int, crawl_source_id: uuid.UUID | None = None) -> list[dict]:
-    return _counts_by_week(db, JobPostingUrl.last_scanned_at, weeks, _source_filter(crawl_source_id))
+def get_scans_by_week(
+    db: Session, weeks: int, crawl_source_id: uuid.UUID | None = None, tz: ZoneInfo = UTC
+) -> list[dict]:
+    return _counts_by_week(db, JobPostingUrl.last_scanned_at, weeks, _source_filter(crawl_source_id), tz=tz)
 
 
-def get_scans_by_month(db: Session, months: int, crawl_source_id: uuid.UUID | None = None) -> list[dict]:
-    return _counts_by_month(db, JobPostingUrl.last_scanned_at, months, _source_filter(crawl_source_id))
+def get_scans_by_month(
+    db: Session, months: int, crawl_source_id: uuid.UUID | None = None, tz: ZoneInfo = UTC
+) -> list[dict]:
+    return _counts_by_month(db, JobPostingUrl.last_scanned_at, months, _source_filter(crawl_source_id), tz=tz)
 
 
-def get_users_joined_by_day(db: Session, days: int) -> list[dict]:
-    return _counts_by_day(db, User.created_at, days)
+def get_users_joined_by_day(db: Session, days: int, tz: ZoneInfo = UTC) -> list[dict]:
+    return _counts_by_day(db, User.created_at, days, tz=tz)
 
 
 def get_users_joined_by_hour(db: Session, hours: int, end: datetime | None = None) -> list[dict]:
     return _counts_by_hour(db, User.created_at, hours, end)
 
 
-def get_users_joined_by_week(db: Session, weeks: int) -> list[dict]:
-    return _counts_by_week(db, User.created_at, weeks)
+def get_users_joined_by_week(db: Session, weeks: int, tz: ZoneInfo = UTC) -> list[dict]:
+    return _counts_by_week(db, User.created_at, weeks, tz=tz)
 
 
-def get_users_joined_by_month(db: Session, months: int) -> list[dict]:
-    return _counts_by_month(db, User.created_at, months)
+def get_users_joined_by_month(db: Session, months: int, tz: ZoneInfo = UTC) -> list[dict]:
+    return _counts_by_month(db, User.created_at, months, tz=tz)
 
 
-# A returning user in an hour/day/week/month: a non-admin who used the app
-# then and signed up before that day started. Distinct users, so a
-# day/week/month counts each person once however many hours they were on.
-_RETURNING_FILTER = and_(
-    UserActiveHour.user_id == User.id,
-    User.role != UserRole.ADMIN,
-    User.created_at < func.date_trunc("day", UserActiveHour.hour),
-)
+def _returning_filter(tz: ZoneInfo) -> ColumnElement[bool]:
+    """A returning user in an hour/day/week/month: a non-admin who used the
+    app then and signed up before that local day (in `tz`) started."""
+    local_day_start = func.timezone(tz.key, _local_trunc("day", UserActiveHour.hour, tz))
+    return and_(
+        UserActiveHour.user_id == User.id,
+        User.role != UserRole.ADMIN,
+        User.created_at < local_day_start,
+    )
+
+
+# Distinct users, so a day/week/month counts each person once however many
+# hours they were on.
 _DISTINCT_USERS = func.count(distinct(UserActiveHour.user_id))
 
 
-def get_returning_users_by_hour(db: Session, hours: int, end: datetime | None = None) -> list[dict]:
-    return _counts_by_hour(db, UserActiveHour.hour, hours, end, _RETURNING_FILTER, _DISTINCT_USERS)
+def get_returning_users_by_hour(
+    db: Session, hours: int, end: datetime | None = None, tz: ZoneInfo = UTC
+) -> list[dict]:
+    return _counts_by_hour(db, UserActiveHour.hour, hours, end, _returning_filter(tz), _DISTINCT_USERS)
 
 
-def get_returning_users_by_day(db: Session, days: int) -> list[dict]:
-    return _counts_by_day(db, UserActiveHour.hour, days, _RETURNING_FILTER, _DISTINCT_USERS)
+def get_returning_users_by_day(db: Session, days: int, tz: ZoneInfo = UTC) -> list[dict]:
+    return _counts_by_day(db, UserActiveHour.hour, days, _returning_filter(tz), _DISTINCT_USERS, tz)
 
 
-def get_returning_users_by_week(db: Session, weeks: int) -> list[dict]:
-    return _counts_by_week(db, UserActiveHour.hour, weeks, _RETURNING_FILTER, _DISTINCT_USERS)
+def get_returning_users_by_week(db: Session, weeks: int, tz: ZoneInfo = UTC) -> list[dict]:
+    return _counts_by_week(db, UserActiveHour.hour, weeks, _returning_filter(tz), _DISTINCT_USERS, tz)
 
 
-def get_returning_users_by_month(db: Session, months: int) -> list[dict]:
-    return _counts_by_month(db, UserActiveHour.hour, months, _RETURNING_FILTER, _DISTINCT_USERS)
+def get_returning_users_by_month(db: Session, months: int, tz: ZoneInfo = UTC) -> list[dict]:
+    return _counts_by_month(db, UserActiveHour.hour, months, _returning_filter(tz), _DISTINCT_USERS, tz)
 
 
 def get_crawl_source_stats(db: Session, source: CrawlSource) -> dict:
