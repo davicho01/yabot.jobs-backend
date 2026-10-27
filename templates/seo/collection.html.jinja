@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  {#- An approved job collection (static_collection_pages): its numbers,
+      how they're counted, and its jobs, PER_PAGE a page. -#}
+  <title>{{ page.title }}{% if number > 1 %} – Page {{ number }}{% endif %} | Yabot Jobs</title>
+  <meta name="description" content="{{ page.description }}" />
+  <link rel="canonical" href="{{ page_url }}" />
+  <meta name="robots" content="{{ robots }}" />
+  {% if number > 1 %}<link rel="prev" href="{{ page_urls[number - 2] }}" />{% endif %}
+  {% if number < page_urls|length %}<link rel="next" href="{{ page_urls[number] }}" />{% endif %}
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Yabot Jobs" />
+  <meta property="og:title" content="{{ page.h1 }}" />
+  <meta property="og:description" content="{{ page.description }}" />
+  <meta property="og:url" content="{{ page_url }}" />
+  <meta property="og:image" content="{{ base_url }}/og-image.png" />
+  {% include "_fonts.html.jinja" %}
+  {% include "_icons.html.jinja" %}
+  {% include "_base_style.html.jinja" %}
+  {% include "_job_style.html.jinja" %}
+  <style>
+    .stats { list-style: none; margin: 1rem 0 1.5rem; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem; }
+    .stats li { padding: 0.75rem 0.9rem; border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-card); }
+    .stats b { display: block; font-size: 1.25rem; color: var(--ink); }
+    .stats span { font-size: 0.85rem; color: var(--ink-soft); }
+    .method { color: var(--ink-soft); font-size: 0.9rem; max-width: 65ch; }
+  </style>
+  {% with page_type = "collection" %}{% include "_analytics.html.jinja" %}{% endwith %}
+  <script type="application/ld+json">{{ ld_json|safe }}</script>
+</head>
+<body>
+  {% include "_header.html.jinja" %}
+  <main id="main">
+  <div class="wrap wrap--narrow">
+    {% with trail=page.trail %}{% include "_breadcrumb.html.jinja" %}{% endwith %}
+    <h1>{{ page.h1 }}{% if number > 1 %} <span class="count">page {{ number }}</span>{% endif %}</h1>
+    <p class="lede">{{ page.description }}</p>
+    {% set s = page.stats %}
+    <ul class="stats" aria-label="About these jobs">
+      <li><b>{{ "{:,}".format(s.open_jobs) }}</b><span>open jobs</span></li>
+      <li><b>{{ "{:,}".format(s.companies_hiring) }}</b><span>companies hiring</span></li>
+      <li><b>{{ "{:,}".format(s.remote_jobs) }} / {{ "{:,}".format(s.hybrid_jobs) }} / {{ "{:,}".format(s.onsite_jobs) }}</b><span>remote / hybrid / on-site</span></li>
+      {% if s.median_salary_min or s.median_salary_max %}<li><b>{% if s.median_salary_min %}${{ "{:,}".format(s.median_salary_min) }}{% endif %}{% if s.median_salary_min and s.median_salary_max %}–{% endif %}{% if s.median_salary_max %}${{ "{:,}".format(s.median_salary_max) }}{% endif %}</b><span>median salary, of {{ "{:,}".format(s.jobs_with_salary) }} listing one</span></li>{% endif %}
+      <li><b>{{ "{:,}".format(s.jobs_found_24h) }}</b><span>found in the last 24 hours</span></li>
+      <li><b>{{ "{:,}".format(s.jobs_verified_24h) }}</b><span>verified in the last 24 hours</span></li>
+    </ul>
+    <div class="head-actions"><a class="btn btn--run" href="{{ page.board[1] }}" data-track="board">{{ page.board[0] }}</a></div>
+
+    <section>
+      <h2>Newest jobs{% if s.open_jobs > jobs|length %} <span class="count">{{ "{:,}".format(first) }}–{{ "{:,}".format(first + jobs|length - 1) }} of {{ "{:,}".format(s.open_jobs) }}</span>{% endif %}</h2>
+      {% with track="collection_job", one_company=False %}{% include "_job_rows.html.jinja" %}{% endwith %}
+    </section>
+
+    {% if page_urls|length > 1 %}
+    <nav class="pager" aria-label="More jobs">
+      <span>{% if number > 1 %}<a href="{{ page_urls[number - 2] }}" rel="prev">&larr; Newer</a>{% endif %}</span>
+      <span>Page {{ number }} of {{ page_urls|length }}</span>
+      <span>{% if number < page_urls|length %}<a href="{{ page_urls[number] }}" rel="next">Older &rarr;</a>{% else %}<a href="{{ page.board[1] }}">All on the board &rarr;</a>{% endif %}</span>
+    </nav>
+    {% endif %}
+
+    {% if page.related %}
+    <section aria-label="Related jobs">
+      <h2>Related jobs</h2>
+      <ul class="chips">{% for label, url in page.related %}<li><a href="{{ url }}" data-track="collection_link">{{ label }}</a></li>{% endfor %}</ul>
+    </section>
+    {% endif %}
+
+    <section aria-label="How these numbers are counted">
+      <h2>How we count</h2>
+      <p class="method">Every number is counted from the open jobs on this page, updated several times each weekday. <b>Found</b> is when Yabot first saw a listing. <b>Verified</b> is the last time we saw it still listed on the employer's own job board; jobs added by hand are never verified. <b>Posted</b> is the employer's own date, shown only when they give one. Median salary uses yearly figures in US dollars from the listings that state one.</p>
+    </section>
+  </div>
+  </main>
+  {% include "_footer.html.jinja" %}
+</body>
+</html>
