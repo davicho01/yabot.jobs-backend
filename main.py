@@ -8,6 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.routes import (
     admin,
+    admin_collections,
     api_keys,
     applications,
     auth,
@@ -68,6 +69,7 @@ app.include_router(feedback.router)
 app.include_router(onboarding.router)
 app.include_router(billing.router)
 app.include_router(admin.router)
+app.include_router(admin_collections.router)
 
 
 @app.get("/health")

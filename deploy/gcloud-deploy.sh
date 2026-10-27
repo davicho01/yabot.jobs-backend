@@ -741,7 +741,7 @@ gcloud scheduler jobs create http generate-static-job-pages-30min \
 # PAGE_VERSION or whose hub/collection links changed since (see
 # static_job_pages), uncapped, so a template change or a new kind of link
 # needs no manual backfill. Most nights that's a few minutes; after a
-# PAGE_VERSION bump it's every page (~2h), hence the 4h timeout override.
+# PAGE_VERSION bump it's every page (~2h), hence the 6h timeout override (the job has 1 CPU).
 gcloud scheduler jobs create http generate-static-job-pages-nightly \
   --location="$REGION" \
   --schedule="30 23 * * 1-5" \
@@ -749,7 +749,7 @@ gcloud scheduler jobs create http generate-static-job-pages-nightly \
   --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/generate-static-job-pages:run" \
   --http-method=POST \
   --headers="Content-Type=application/json" \
-  --message-body='{"overrides":{"containerOverrides":[{"args":["generate_static_job_pages.py","--refresh"]}],"timeoutSeconds":14400}}' \
+  --message-body='{"overrides":{"containerOverrides":[{"args":["generate_static_job_pages.py","--refresh"]}],"timeoutSeconds":21600}}' \
   --oauth-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com"
 
 # ---------------------------------------------------------------------------
