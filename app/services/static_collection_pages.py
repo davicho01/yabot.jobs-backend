@@ -41,11 +41,11 @@ from app.models.enums import CollectionStatus as S
 from app.models.enums import CollectionType
 from app.models.job_collection import JobCollection
 from app.services import collection_dimensions, job_collections, seo_validator, standard_titles
-from app.services.collection_dimensions import REMOTE_SLUG, matches_all
+from app.services.collection_dimensions import REMOTE_SLUG, clause_all, matches_all
 from app.services.collection_stats import CollectionStats, calculate_collection_stats
 from app.services.static_hub_pages import HUB_ROOT, _board, _newest_first, _trail, _url, render_hub_gone
 from app.services.static_job_pages import (
-    CACHE_CONTROL, COUNTRY_SLUG, LinkJob, breadcrumb_ld, eastern, ld_json, slugify,
+    CACHE_CONTROL, COUNTRY_SLUG, LinkJob, breadcrumb_ld, eastern, ld_json, load_link_index, slugify,
 )
 from app.services.static_pages import _TEMPLATE_ENV, read_json, upload_html, write_json
 
@@ -133,6 +133,19 @@ def plan_collection_pages(db: Session, live: list[LinkJob], now: datetime) -> li
             if other is not None and other is not page and len(page.related) < RELATED_MAX:
                 page.related.append((other.h1, _url(other.path)))
     return pages
+
+
+def preview_page(db: Session, collection: JobCollection, now: datetime) -> CollectionPage | None:
+    """The page a renderable collection would get from its open jobs in the
+    database right now, for the admin's preview, whatever its status; None
+    with no open jobs. Its job links go to the live job pages, so a job not
+    published yet links to a 404, and it lists no related pages (those need
+    every collection's page)."""
+    role = collection_dimensions.get("role", collection.role)
+    dims = job_collections.dimensions(collection)
+    jobs = load_link_index(db, now, where=clause_all([role], now)).values()
+    members = [job for job in jobs if not job.closed and matches_all(job, dims, now)]
+    return _page(collection, role.name, members, now) if members else None
 
 
 def _page(collection: JobCollection, role: str, members: list[LinkJob], now: datetime) -> CollectionPage:

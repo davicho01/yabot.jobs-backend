@@ -2,6 +2,7 @@
 app.services.collection_admin)."""
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
@@ -15,9 +16,11 @@ from app.api.routes import admin_collections as routes
 from app.db.base import Base
 from app.models.enums import CollectionStatus as S
 from app.models.enums import CollectionTrigger as T
-from app.models.enums import UserRole
+from app.models.enums import JobSector, UserRole, WorkplaceType
 from app.schemas.collection import AdminCollectionAction, AdminCollectionBulkAction
 from app.services import collection_admin, job_collections
+from app.services import static_collection_pages as scp
+from app.services import static_job_pages as sjp
 
 
 @compiles(JSONB, "sqlite")
@@ -200,3 +203,37 @@ def test_archived_collections_cant_be_reevaluated(db, admin):
     assert exc.value.status_code == 409
     [item] = routes.list_collections(view="archived", collection_type=None, q=None, page=1, page_size=50, db=db).items
     assert item.can_reevaluate is False
+
+
+# ---------------------------------------------------------------- preview
+
+
+def link_job(n: int, **kw) -> sjp.LinkJob:
+    now = datetime.now(timezone.utc)
+    base = dict(
+        url_id=f"job-{n}", title=f"Backend Engineer {n}", company_name=f"Company {n}", domain=f"company{n}.com",
+        company_key=f"company {n}", title_key=None, sector=JobSector.ENGINEERING_TECH, metros=("41620", "UT"),
+        location="Salt Lake City, UT", workplace_type=WorkplaceType.ONSITE, posted_at=now.date(),
+        found_at=now - timedelta(hours=3), scanned=now.isoformat(), standard_titles=("Software Engineer",),
+        salary_min=None, salary_max=None, last_seen_at=now - timedelta(hours=1),
+        path=f"jobs/us/engineering-tech/{now.date()}/backend-engineer-{n}",
+    )
+    base.update(kw)
+    return sjp.LinkJob(**base)
+
+
+def test_preview_renders_the_page_from_its_open_jobs_whatever_its_status(db, monkeypatch):
+    c = collection(db, S.CANDIDATE, score=50)
+    jobs = [link_job(1), link_job(2, standard_titles=("Data Engineer",))]
+    monkeypatch.setattr(scp, "load_link_index", lambda _db, _now, where=None: {j.url_id: j for j in jobs})
+    html = routes.preview_collection(c.id, db=db).body.decode()
+    assert "<h1>Software Engineer jobs</h1>" in html
+    assert "Backend Engineer 1" in html and "Backend Engineer 2" not in html
+
+
+def test_preview_with_no_open_jobs_is_refused(db, monkeypatch):
+    c = collection(db, S.INDEXABLE)
+    monkeypatch.setattr(scp, "load_link_index", lambda _db, _now, where=None: {})
+    with pytest.raises(HTTPException) as exc:
+        routes.preview_collection(c.id, db=db)
+    assert exc.value.status_code == 409

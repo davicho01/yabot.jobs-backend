@@ -1,13 +1,14 @@
 """Admin review of job collections (PR-11, PR-14): the list with scores,
 reasons and likely duplicates, one collection's history, approving,
 no-indexing, archiving or restoring one or a batch
-(app.services.collection_admin), and re-scoring one now
-(app.services.collection_lifecycle)."""
+(app.services.collection_admin), re-scoring one now
+(app.services.collection_lifecycle), and previewing one's page."""
 
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import HTMLResponse
 from sqlalchemy import func, nulls_last, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -25,7 +26,7 @@ from app.schemas.collection import (
     AdminCollectionListRead,
     AdminCollectionRead,
 )
-from app.services import collection_admin, collection_dimensions, collection_lifecycle
+from app.services import collection_admin, collection_dimensions, collection_lifecycle, static_collection_pages
 from app.services.job_collections import CollectionError
 from app.services.static_collection_pages import LIVE_STATUSES, RENDERED_TYPES, collection_path
 from app.services.static_hub_pages import _url
@@ -116,6 +117,19 @@ def list_collections(
 @router.get("/{collection_id}", response_model=AdminCollectionDetailRead)
 def get_collection(collection_id: uuid.UUID, db: Session = Depends(get_db)) -> AdminCollectionDetailRead:
     return _to_detail(db, _get(db, collection_id))
+
+
+@router.get("/{collection_id}/preview", response_class=HTMLResponse)
+def preview_collection(collection_id: uuid.UUID, db: Session = Depends(get_db)) -> HTMLResponse:
+    """Its page as the generator would render it now (page 1), from its open
+    jobs in the database, published or not."""
+    collection = _get(db, collection_id)
+    if collection.collection_type not in RENDERED_TYPES:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This kind of collection has no page.")
+    page = static_collection_pages.preview_page(db, collection, datetime.now(timezone.utc))
+    if page is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No open jobs right now, so no page.")
+    return HTMLResponse(static_collection_pages.render_collection_page(page, 1))
 
 
 @router.post("/{collection_id}/actions", response_model=AdminCollectionDetailRead)
