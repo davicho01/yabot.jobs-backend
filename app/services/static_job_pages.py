@@ -1154,6 +1154,8 @@ class JobPagesResult:
     deferred: int = 0  # over this run's render cap; picked up next run
     refreshed: int = 0  # --refresh: pages of an older PAGE_VERSION, or with outdated links
     hubs: int = 0  # hub pages published (static_hub_pages)
+    seo_errors: int = 0  # collection pages failing seo_validator: kept out of the index
+    seo_warnings: int = 0
     collections: int = 0  # collections with a page (static_collection_pages)
     # CloudFront paths whose cached copy is now stale (new keys need none).
     touched_paths: list[str] = field(default_factory=list)
@@ -1173,7 +1175,7 @@ def generate_job_pages(
     now: datetime | None = None,
     max_renders: int | None = MAX_RENDERS_PER_RUN,
 ) -> JobPagesResult:
-    from app.services import static_collection_pages, static_hub_pages  # import this module
+    from app.services import seo_validator, static_collection_pages, static_hub_pages  # import this module
 
     now = now or datetime.now(timezone.utc)
     rendered_at = now.isoformat()
@@ -1242,6 +1244,7 @@ def generate_job_pages(
     live = [index[i] for i in live_ids if not index[i].closed]
     hub_plan = static_hub_pages.plan_hubs(live)
     collection_pages = static_collection_pages.plan_collection_pages(db, live, now)
+    seo_issues = static_collection_pages.validate_collection_pages(collection_pages)
 
     result = JobPagesResult(
         published=len(new_ids),
@@ -1250,6 +1253,8 @@ def generate_job_pages(
         legacy_left=len(legacy_ids) - len(moves),
         hubs=len(hub_plan.pages),
         collections=len(collection_pages),
+        seo_errors=sum(i.severity is seo_validator.Severity.ERROR for i in seo_issues),
+        seo_warnings=sum(i.severity is seo_validator.Severity.WARNING for i in seo_issues),
         job_paths={i: index[i].path for i in live_ids},
         country_links=hub_plan.country_links(),
     )
@@ -1279,9 +1284,10 @@ def generate_job_pages(
     logger.info(
         "Job pages: %d new, %d rescanned to check (%d near a stale validThrough), %d to remove, "
         "%d new deferred to the next run, %d legacy page(s) to move (%d left after); %d hub page(s); "
-        "%d collection(s); %d to refresh%s.",
+        "%d collection(s) (SEO checks: %d error(s), %d warning(s)); %d to refresh%s.",
         len(new_ids), len(check_ids), len(expiry_due), len(removed_ids), deferred, len(moves),
-        result.legacy_left, result.hubs, result.collections, result.refreshed, " (dry run)" if dry_run else "",
+        result.legacy_left, result.hubs, result.collections, result.seo_errors, result.seo_warnings,
+        result.refreshed, " (dry run)" if dry_run else "",
     )
     if dry_run:
         result.deferred = deferred
@@ -1402,6 +1408,9 @@ def generate_job_pages(
         upload_xml(key, xml)
         result.touched_paths.append(f"/{key}")
     write_json(SITEMAP_DATES_KEY, sitemaps.dates)
+    if collection_pages:
+        checked = sum(page.page_count for page in collection_pages)
+        write_json(seo_validator.REPORT_KEY, seo_validator.report(seo_issues, checked, rendered_at))
     # Hubs are rewritten every run; they all sit under /jobs/, which
     # collapse_invalidation_paths turns into one wildcard (and /job/ pages,
     # moved ones included, into another).

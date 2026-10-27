@@ -40,7 +40,7 @@ from app.core.config import settings
 from app.models.enums import CollectionStatus as S
 from app.models.enums import CollectionType
 from app.models.job_collection import JobCollection
-from app.services import collection_dimensions, job_collections, standard_titles
+from app.services import collection_dimensions, job_collections, seo_validator, standard_titles
 from app.services.collection_dimensions import REMOTE_SLUG, matches_all
 from app.services.collection_stats import CollectionStats, calculate_collection_stats
 from app.services.static_hub_pages import HUB_ROOT, _board, _newest_first, _trail, _url, render_hub_gone
@@ -212,6 +212,27 @@ def render_collection_page(page: CollectionPage, number: int) -> str:
         base_url=settings.seo_pages_base_url,
         country_slug=COUNTRY_SLUG,
     )
+
+
+def validate_collection_pages(pages: list[CollectionPage]) -> list[seo_validator.Issue]:
+    """Render and check every page (seo_validator), and take any collection
+    with an ERROR out of the index for this run: noindex, so no sitemap
+    entry and no links to it. Its status is left alone."""
+    issues = [
+        issue
+        for page in pages
+        for n, path in enumerate(page.paths(), start=1)
+        for issue in seo_validator.check_page(
+            path, render_collection_page(page, n), url=_url(path), indexable=page.indexable
+        )
+    ]
+    issues += seo_validator.check_collections(pages)
+    broken = seo_validator.errors_by_collection(pages, issues)
+    for page in pages:
+        if page.path in broken and page.indexable:
+            page.indexable = False
+            logger.warning("SEO check failed for %s: kept out of the index this run.", page.path)
+    return issues
 
 
 def job_list_hash(page: CollectionPage, number: int) -> str:
