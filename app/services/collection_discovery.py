@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.models.enums import CollectionStatus as S
 from app.models.enums import CollectionTrigger as T
@@ -89,16 +89,26 @@ def discover(
 ) -> list[Proposal]:
     """The new collections proposed this run (at most `limit`), recorded
     when `apply`."""
-    existing = set(db.scalars(select(JobCollection.key)))
-    new = [p for p in propose(live, now) if p.evaluation.recommendation in PROPOSED and p.key not in existing]
+    registry = {c.key: c for c in db.scalars(select(JobCollection).options(selectinload(JobCollection.events)))}
+    returning = {key for key, c in registry.items() if _archived_by_lifecycle(c)}
+    new = [
+        p for p in propose(live, now)
+        if p.evaluation.recommendation in PROPOSED and (p.key not in registry or p.key in returning)
+    ]
     new = new[:limit]
     if not apply:
         return new
     for proposal in new:
         e = proposal.evaluation
-        collection = job_collections.create_collection(
-            db, reason="found by discovery", trigger=T.SYSTEM, **proposal.values
-        )
+        if proposal.key in returning:
+            collection = registry[proposal.key]
+            job_collections.transition(
+                db, collection, S.CANDIDATE, reason="found by discovery again", trigger=T.LIFECYCLE
+            )
+        else:
+            collection = job_collections.create_collection(
+                db, reason="found by discovery", trigger=T.SYSTEM, **proposal.values
+            )
         if e.recommendation == Recommendation.INDEX:
             job_collections.transition(
                 db, collection, S.QUALIFIED, reason=f"scored {e.total}", trigger=T.QUALIFICATION, details=e.as_dict()
@@ -108,3 +118,7 @@ def discover(
         collection.last_evaluated_at = now
     db.commit()
     return new
+
+
+def _archived_by_lifecycle(collection: JobCollection) -> bool:
+    return collection.status == S.ARCHIVED and bool(collection.events) and collection.events[-1].trigger == T.LIFECYCLE

@@ -158,3 +158,44 @@ def test_names(db):
     assert collection_admin.collection_name(collection(db, role="software-engineer", location="raleigh-nc")).startswith(
         "Software Engineer jobs in "
     )
+
+
+# ------------------------------------------------------------ re-scoring (PR-14)
+
+
+def test_list_shows_duplicates_and_dates(db, admin):
+    c = collection(db, S.INDEXABLE, score=70)
+    c.qualification = c.qualification | {
+        "freshness_score": 0.8, "duplicates": ["role=backend-engineer"], "below_bar_since": "2026-10-25",
+        "empty_since": None,
+    }
+    db.commit()
+    [item] = routes.list_collections(view="live", collection_type=None, q=None, page=1, page_size=50, db=db).items
+    assert item.duplicates == ["role=backend-engineer"]
+    assert (item.freshness_score, item.below_bar_since, item.empty_since) == (0.8, "2026-10-25", None)
+    assert item.can_reevaluate is True
+
+
+def test_reevaluate_rescores_and_returns_the_detail(db, admin, monkeypatch):
+    from app.services import collection_lifecycle
+
+    c = collection(db, S.CANDIDATE, score=50)
+    calls = []
+
+    def reevaluate_one(_db, target, _now):
+        calls.append(target.id)
+        target.qualification_score = 88
+        return []
+
+    monkeypatch.setattr(collection_lifecycle, "reevaluate_one", reevaluate_one)
+    detail = routes.reevaluate_collection(c.id, db=db)
+    assert calls == [c.id] and detail.qualification_score == 88
+
+
+def test_archived_collections_cant_be_reevaluated(db, admin):
+    c = collection(db, S.ARCHIVED, score=50)
+    with pytest.raises(HTTPException) as exc:
+        routes.reevaluate_collection(c.id, db=db)
+    assert exc.value.status_code == 409
+    [item] = routes.list_collections(view="archived", collection_type=None, q=None, page=1, page_size=50, db=db).items
+    assert item.can_reevaluate is False

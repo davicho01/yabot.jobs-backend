@@ -10,9 +10,8 @@ with the admin and their reason.
   archive   its page comes down on the next run.
   restore   an archived collection is proposed again (candidate).
 
-Scores aren't recomputed here: that needs the generator's index of every
-live job, which the API doesn't load. one_off.publish_collection_batch
-refreshes them.
+Scores aren't recomputed here: collection_lifecycle re-scores every
+collection nightly, and one on demand (the admin's Re-evaluate).
 
 Adds and flushes; the caller commits.
 """

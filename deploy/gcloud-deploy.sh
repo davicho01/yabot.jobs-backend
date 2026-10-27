@@ -753,9 +753,12 @@ gcloud scheduler jobs create http generate-static-job-pages-nightly \
   --oauth-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com"
 
 # Collection upkeep: the same job running collection_maintenance.py instead,
-# half an hour before the nightly refresh. It records new collections worth
-# a page for approval on the admin page (app.services.collection_discovery)
-# and publishes nothing. One pass over the live jobs: a few minutes.
+# half an hour before the nightly refresh. It re-scores every collection
+# and applies the lifecycle rules (app.services.collection_lifecycle: below
+# the bar for days -> noindex, no jobs for weeks -> archived), then records
+# new collections worth a page for approval on the admin page
+# (app.services.collection_discovery). It never publishes or indexes
+# anything. One pass over the live jobs: a few minutes.
 gcloud scheduler jobs create http collection-maintenance-nightly \
   --location="$REGION" \
   --schedule="0 23 * * 1-5" \

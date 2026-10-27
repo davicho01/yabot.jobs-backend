@@ -1,15 +1,18 @@
-"""Admin review of job collections (PR-11): the list with scores and
-reasons, one collection's history, and approving, no-indexing, archiving or
-restoring one or a batch (app.services.collection_admin)."""
+"""Admin review of job collections (PR-11, PR-14): the list with scores,
+reasons and likely duplicates, one collection's history, approving,
+no-indexing, archiving or restoring one or a batch
+(app.services.collection_admin), and re-scoring one now
+(app.services.collection_lifecycle)."""
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, nulls_last, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_admin_user, get_db
-from app.models.enums import CollectionType
+from app.models.enums import CollectionStatus, CollectionType
 from app.models.job_collection import JobCollection
 from app.models.user import User
 from app.schemas.collection import (
@@ -22,7 +25,7 @@ from app.schemas.collection import (
     AdminCollectionListRead,
     AdminCollectionRead,
 )
-from app.services import collection_admin
+from app.services import collection_admin, collection_dimensions, collection_lifecycle
 from app.services.job_collections import CollectionError
 from app.services.static_collection_pages import LIVE_STATUSES, RENDERED_TYPES, collection_path
 from app.services.static_hub_pages import _url
@@ -47,9 +50,15 @@ def _to_read(collection: JobCollection) -> dict:
         issues=list(qualification.get("issues") or []),
         open_jobs=stats.get("open_jobs"),
         companies=stats.get("companies_hiring"),
+        freshness_score=qualification.get("freshness_score"),
+        duplicates=list(qualification.get("duplicates") or []),
+        below_bar_since=qualification.get("below_bar_since"),
+        empty_since=qualification.get("empty_since"),
         last_evaluated_at=collection.last_evaluated_at,
         updated_at=collection.updated_at,
         actions=collection_admin.available_actions(collection),
+        can_reevaluate=collection.status != CollectionStatus.ARCHIVED
+        and collection.role is not None and collection_dimensions.get("role", collection.role) is not None,
     )
 
 
@@ -121,6 +130,21 @@ def act_on_collection(
     except CollectionError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     db.flush()
+    db.refresh(collection, ["events"])
+    return _to_detail(db, collection)
+
+
+@router.post("/{collection_id}/reevaluate", response_model=AdminCollectionDetailRead)
+def reevaluate_collection(collection_id: uuid.UUID, db: Session = Depends(get_db)) -> AdminCollectionDetailRead:
+    """Re-score it now from its open jobs, applying the lifecycle rules as
+    the nightly run would (collection_lifecycle)."""
+    collection = _get(db, collection_id)
+    if collection.status == CollectionStatus.ARCHIVED:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Restore it first: archived ones aren't scored.")
+    try:
+        collection_lifecycle.reevaluate_one(db, collection, datetime.now(timezone.utc))
+    except CollectionError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     db.refresh(collection, ["events"])
     return _to_detail(db, collection)
 

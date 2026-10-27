@@ -75,7 +75,7 @@ from typing import Iterable
 from urllib.parse import urlencode
 
 from markdown_it import MarkdownIt
-from sqlalchemy import and_, or_, select
+from sqlalchemy import ColumnElement, and_, or_, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -463,8 +463,9 @@ class LinkJob:
         return resolution.place.name if resolution is not None and resolution.place is not None else None
 
 
-def load_link_index(db: Session, now: datetime) -> dict[str, LinkJob]:
-    """Every job that should have a live page, keyed by url_id."""
+def load_link_index(db: Session, now: datetime, where: ColumnElement[bool] | None = None) -> dict[str, LinkJob]:
+    """Every job that should have a live page, keyed by url_id; just those
+    matching `where` (a JobPosting condition) when given."""
     stmt = (
         select(
             JobPostingUrl.id, JobPostingUrl.domain, JobPostingUrl.created_at, JobPostingUrl.closed_at,
@@ -477,6 +478,8 @@ def load_link_index(db: Session, now: datetime) -> dict[str, LinkJob]:
         .join(JobPosting, JobPosting.url_id == JobPostingUrl.id)
         .where(_eligible_filter(now))
     )
+    if where is not None:
+        stmt = stmt.where(where)
     index: dict[str, LinkJob] = {}
     for row in _execute_with_retry(db, stmt):
         key = str(row.id)
