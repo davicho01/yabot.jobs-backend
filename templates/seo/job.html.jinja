@@ -23,8 +23,12 @@
 <body>
   {% include "_header.html.jinja" %}
   <main id="main">
-  <div class="wrap wrap--narrow">
+  <div class="wrap wrap--job">
     {% include "_breadcrumb.html.jinja" %}
+    {#- Desktop: the card, with a column on the right of where to go next —
+        browse more jobs, more at the company, similar jobs — so it isn't
+        missed below a long description; phones: the same, after the card. -#}
+    <div class="job-layout">
     {# The shared job page's card (the app's /jobs/:id): the plum band with
        the logo tile, then the posting on a white card. #}
     <article class="job-card">
@@ -94,6 +98,18 @@
       </div>
     </article>
 
+    <aside class="job-side" aria-label="More jobs">
+    {% if links.collections or links.location_hubs or sector_link %}
+    <nav class="job-more" aria-labelledby="more-h">
+      <h2 id="more-h">Browse more jobs</h2>
+      <ul>
+        {% for label, path in links.collections %}<li><a href="{{ base_url }}/{{ path }}" data-track="collection_link">{{ label }}</a></li>{% endfor %}
+        {% for label, path in links.location_hubs %}<li><a href="{{ base_url }}/{{ path }}" data-track="location_hub">{{ label }}</a></li>{% endfor %}
+        {% if sector_link %}<li><a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_link[0] }}" data-track="sector">{{ sector_link[1] }} jobs in {{ country_name }}</a></li>{% endif %}
+      </ul>
+    </nav>
+    {% endif %}
+
     {% if links.same_company %}
     <section class="job-related" aria-labelledby="company-h">
       <h2 id="company-h">More jobs at {{ job.company_display }}</h2>
@@ -108,17 +124,8 @@
       {% with jobs=links.similar, track="similar_job" %}{% include "_job_rows.html.jinja" %}{% endwith %}
     </section>
     {% endif %}
-
-    {% if links.collections or links.location_hubs or sector_link %}
-    <nav class="job-more" aria-labelledby="more-h">
-      <h2 id="more-h">Browse more jobs</h2>
-      <ul class="chips">
-        {% for label, path in links.collections %}<li><a href="{{ base_url }}/{{ path }}" data-track="collection_link">{{ label }}</a></li>{% endfor %}
-        {% for label, path in links.location_hubs %}<li><a href="{{ base_url }}/{{ path }}" data-track="location_hub">{{ label }}</a></li>{% endfor %}
-        {% if sector_link %}<li><a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_link[0] }}" data-track="sector">{{ sector_link[1] }} jobs in {{ country_name }}</a></li>{% endif %}
-      </ul>
-    </nav>
-    {% endif %}
+    </aside>
+    </div>
   </div>
   </main>
   {% include "_footer.html.jinja" %}

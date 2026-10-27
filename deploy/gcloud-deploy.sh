@@ -252,9 +252,11 @@ gcloud run jobs deploy redo-dedup \
 #     once. The scheduled generate-static-job-pages job (§10) keeps
 #     them up to date incrementally afterwards, but a first full render of
 #     every live job won't fit in its 1800s timeout. Also the only way to
-#     re-render existing pages after a template change (bumping
-#     static_job_pages.PAGE_VERSION just records the version; it re-renders
-#     nothing by itself). Deploy once, then execute by hand — --dry-run
+#     re-render every page at once; the nightly refresh run (§10) picks up
+#     a PAGE_VERSION bump or changed links on its own. Needs
+#     JOB_COLLECTIONS_ENABLED like the scheduled job: without it, a run
+#     retires every collection page. Its image isn't updated by deploy.yml,
+#     so redeploy it first. Deploy once, then execute by hand — --dry-run
 #     first for the counts:
 #       gcloud run jobs execute generate-job-pages-backfill --region="$REGION" --args=generate_static_job_pages.py,--full,--dry-run --wait
 #       gcloud run jobs execute generate-job-pages-backfill --region="$REGION" --wait
@@ -265,7 +267,7 @@ gcloud run jobs deploy generate-job-pages-backfill \
   --region="$REGION" \
   --command=python --args=generate_static_job_pages.py,--full \
   --set-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION" \
-  --set-env-vars="$COMMON_ENV" \
+  --set-env-vars="$COMMON_ENV,JOB_COLLECTIONS_ENABLED=true" \
   --set-secrets="$COMMON_SECRETS" \
   --task-timeout=3600 \
   --labels=function=generate-job-pages-backfill
@@ -732,6 +734,22 @@ gcloud scheduler jobs create http generate-static-job-pages-30min \
   --time-zone="America/New_York" \
   --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/generate-static-job-pages:run" \
   --http-method=POST \
+  --oauth-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com"
+
+# The nightly refresh: the same job, with --refresh, after the day's last
+# run (9pm ET). It re-renders just the job pages rendered by an older
+# PAGE_VERSION or whose hub/collection links changed since (see
+# static_job_pages), uncapped, so a template change or a new kind of link
+# needs no manual backfill. Most nights that's a few minutes; after a
+# PAGE_VERSION bump it's every page (~2h), hence the 4h timeout override.
+gcloud scheduler jobs create http generate-static-job-pages-nightly \
+  --location="$REGION" \
+  --schedule="30 23 * * 1-5" \
+  --time-zone="America/New_York" \
+  --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/generate-static-job-pages:run" \
+  --http-method=POST \
+  --headers="Content-Type=application/json" \
+  --message-body='{"overrides":{"containerOverrides":[{"args":["generate_static_job_pages.py","--refresh"]}],"timeoutSeconds":14400}}' \
   --oauth-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com"
 
 # ---------------------------------------------------------------------------

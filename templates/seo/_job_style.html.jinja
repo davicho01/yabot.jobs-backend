@@ -51,6 +51,21 @@
   .job-desc { overflow-wrap: anywhere; }
   .job-desc h3 { font-size: 1.08rem; margin: 1.5rem 0 0.4rem; }
   .job-desc a { color: var(--focus); }
+  .wrap--job { max-width: calc(var(--read) + 360px + 2rem + 2.5rem); }
+  .job-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.5rem; }
+  .job-side { display: flex; flex-direction: column; gap: 1.5rem; min-width: 0; }
+  .job-side h2 { margin: 0 0 0.75rem; font-size: 1.1rem; }
+  .job-side .more-link { margin-top: 0.75rem; }
+  .job-more { padding: 1.1rem 1.25rem; border-radius: 24px; background: var(--surface); box-shadow: var(--shadow-card); }
+  .job-side .job-more h2 { margin: 0 0 0.35rem; font-size: 1rem; }
+  .job-more ul { list-style: none; margin: 0; padding: 0; }
+  .job-more li + li { border-top: 1px solid var(--line); }
+  .job-more a { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.65rem 0; font-size: 0.92rem; font-weight: 600; text-decoration: none; color: var(--ink); }
+  .job-more a::after { content: "\2192"; color: var(--ink-soft); }
+  .job-more a:hover { color: var(--focus); }
+  @media (min-width: 1100px) {
+    .job-layout { grid-template-columns: minmax(0, var(--read)) 360px; column-gap: 2rem; align-items: start; }
+  }
   @media (max-width: 760px) {
     .job-card { border-radius: 26px; }
     .job-card__band { height: 80px; }
