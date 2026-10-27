@@ -286,7 +286,8 @@ def render_country_index(
     already ordered how they should list (see sector_totals() below) — this
     just renders, it doesn't re-sort. `hub_links`: {"companies": [...],
     "locations": [...]} of (name, path, count) from
-    static_hub_pages.HubPlan.country_links, listed under the sectors."""
+    static_hub_pages.HubPlan.country_links, listed under the sectors, and
+    "roles" from static_collection_pages.CollectionLinks.top_roles."""
     country_name = COUNTRY_NAMES[country_slug]
     template = _TEMPLATE_ENV.get_template("country_index.html.jinja")
     return template.render(

@@ -404,6 +404,12 @@ class TestRenderCountryIndex:
         assert "/jobs/us/sales" in html
         assert "United States" in html
 
+    def test_lists_popular_roles_when_there_are_any(self):
+        roles = [("Software Engineer", "jobs/us/software-engineer", 4588)]
+        html = sp.render_country_index(country_slug="us", sector_totals=[], hub_links={"roles": roles})
+        assert "Popular roles" in html and "https://yabot.jobs/jobs/us/software-engineer" in html
+        assert "Popular roles" not in sp.render_country_index(country_slug="us", sector_totals=[])
+
 
 class TestGenerateForDate:
     def test_dry_run_returns_counts_without_touching_s3(self, db, make_posting, monkeypatch):

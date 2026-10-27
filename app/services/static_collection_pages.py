@@ -57,6 +57,8 @@ LIVE_STATUSES = frozenset({S.PUBLISHED, S.INDEXABLE, S.PERFORMING, S.DECLINING, 
 RESERVED_SEGMENTS = frozenset({"companies", "locations", "other", "_assets", "_meta", "_share"})
 PAGE_SEGMENT = "page"
 RELATED_MAX = 12
+JOB_LINKS_MAX = 2  # a job page's links to its collections: the role, and its remote page
+COUNTRY_ROLES_MAX = 12  # role pages listed on /jobs/us
 
 
 def collection_path(collection: JobCollection) -> str:
@@ -114,10 +116,14 @@ def plan_collection_pages(db: Session, live: list[LinkJob], now: datetime) -> li
         if members:  # none open: its page is retired like a removed one
             pages.append(_page(collection, role.name, members, now))
 
-    # Related: the role's related standard titles that have a live page
-    # of the same kind (same location, or none).
+    # Related: a role page's remote page first, then the role's related
+    # standard titles that have a live page of the same kind (same
+    # location, or none).
     by_key = {(p.collection.role, p.collection.location): p for p in pages}
     for page in pages:
+        remote = by_key.get((page.collection.role, REMOTE_SLUG)) if page.collection.location is None else None
+        if remote is not None:
+            page.related.append((remote.h1, _url(remote.path)))
         related_titles = standard_titles.related([collection_dimensions.get("role", page.collection.role).name])
         for title in related_titles:
             other = by_key.get((slugify(title), page.collection.location))
@@ -158,6 +164,34 @@ def _page(collection: JobCollection, role: str, members: list[LinkJob], now: dat
         trail=_trail(*crumbs, (collection.h1 or h1, None)),
         board=(f"Search all {role} jobs on Yabot", _board(**board)),
     )
+
+
+class CollectionLinks:
+    """Links to the indexed collection pages from the generator's other
+    pages: job pages and the /jobs/us page. A NOINDEX collection keeps its
+    page but isn't sent anyone's way."""
+
+    def __init__(self, pages: list[CollectionPage]) -> None:
+        self._pages = {(p.collection.role, p.collection.location): p for p in pages if p.indexable}
+
+    def for_job(self, job: LinkJob) -> list[tuple[str, str]]:
+        """(label, path): the page of the job's first standard title that
+        has one, and that title's remote page when the job is remote."""
+        for title in job.standard_titles:
+            role = slugify(title)
+            pages = [self._pages.get((role, None))]
+            if job.workplace_type == "remote":
+                pages.append(self._pages.get((role, REMOTE_SLUG)))
+            links = [(p.h1, p.path) for p in pages if p is not None]
+            if links:
+                return links[:JOB_LINKS_MAX]
+        return []
+
+    def top_roles(self) -> list[tuple[str, str, int]]:
+        """(name, path, open jobs) of the biggest role pages, for /jobs/us."""
+        roles = [p for (_, location), p in self._pages.items() if location is None]
+        roles.sort(key=lambda p: (-p.stats.open_jobs, p.h1))
+        return [(p.h1.removesuffix(" jobs"), p.path, p.stats.open_jobs) for p in roles[:COUNTRY_ROLES_MAX]]
 
 
 def render_collection_page(page: CollectionPage, number: int) -> str:

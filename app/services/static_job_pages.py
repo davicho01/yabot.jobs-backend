@@ -964,6 +964,7 @@ class PageLinks:
     similar: list[LinkJob] = field(default_factory=list)
     company_hub: str | None = None  # path
     location_hubs: list[tuple[str, str]] = field(default_factory=list)  # (label, path)
+    collections: list[tuple[str, str]] = field(default_factory=list)  # (label, path)
 
 
 def render_job_page(job: JobPage, path: str | None = None, links: PageLinks | None = None) -> str:
@@ -1056,10 +1057,12 @@ def build_job_sitemaps(
     days: dict[str, date] | None = None,
     previous_shards: Iterable[str] = (),
     collection_paths: Iterable[str] = (),
+    collections_lastmod: str | None = None,
 ) -> dict[str, str]:
     """{key: xml} — numbered shards of the job pages (sitemap-job-pages-<n>),
     a shard of hub pages (sitemap-hubs-<n>), one of indexed collection pages
-    (sitemap-collections-<n>, when there are any), and the sitemap index
+    (sitemap-collections-<n>, when there are any, all with
+    `collections_lastmod`: they're re-rendered every run), and the sitemap index
     (SITEMAP_INDEX_KEY) that robots.txt points at. `pages` is the manifest's
     {url_id: entry} for the pages to list; `days` their posting days, newest
     listed first. A page's lastmod is when it was last rendered — a rescan
@@ -1080,7 +1083,7 @@ def build_job_sitemaps(
         out.update(build_sitemaps("sitemap-hubs", [(path, None) for path in hubs]))
     collections = sorted(collection_paths)
     if collections:
-        out.update(build_sitemaps("sitemap-collections", [(path, None) for path in collections]))
+        out.update(build_sitemaps("sitemap-collections", [(path, collections_lastmod) for path in collections]))
     base = settings.seo_pages_base_url
     index_entries = "\n".join(f"  <sitemap><loc>{base}/{key}</loc></sitemap>" for key in sorted(out))
     empty = build_sitemaps("empty", [])["empty-1.xml"]
@@ -1208,6 +1211,9 @@ def generate_job_pages(
         job_paths={i: index[i].path for i in live_ids},
         country_links=hub_plan.country_links(),
     )
+    collection_links = static_collection_pages.CollectionLinks(collection_pages)
+    if roles := collection_links.top_roles():
+        result.country_links["roles"] = roles
     logger.info(
         "Job pages: %d new, %d rescanned to check (%d near a stale validThrough), %d to remove, "
         "%d new deferred to the next run, %d legacy page(s) to move (%d left after); %d hub page(s); "
@@ -1228,6 +1234,7 @@ def generate_job_pages(
             similar=related.similar(job, exclude=same_company),
             company_hub=hub_plan.company_path(job),
             location_hubs=hub_plan.location_links(job),
+            collections=collection_links.for_job(job),
         )
 
     # What's live in the bucket, kept current as batches land and saved
@@ -1327,7 +1334,8 @@ def generate_job_pages(
     # its page, but not a sitemap entry).
     indexed_collection_paths = [path for page in collection_pages if page.indexable for path in page.paths()]
     sitemaps = build_job_sitemaps(
-        listed, hub_paths, {i: index[i].day for i in listed}, previous_shards, indexed_collection_paths
+        listed, hub_paths, {i: index[i].day for i in listed}, previous_shards, indexed_collection_paths,
+        eastern(now).date().isoformat(),
     )
     for key, xml in sitemaps.items():
         upload_xml(key, xml)
