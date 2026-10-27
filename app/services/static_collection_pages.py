@@ -14,7 +14,8 @@ A collection has a page while its status is live (LIVE_STATUSES); it is
 indexed only while job_collections.is_indexable — a NOINDEX one keeps its
 page with noindex. A page that goes away (archived, back to candidate, or
 the flag turned off) gets the hubs' noindex "no current jobs" page, tracked
-in _meta/collection-pages.json. Nothing here runs unless
+in _meta/collection-pages.json with the date each page's job list last
+changed (its sitemap lastmod). Nothing here runs unless
 settings.job_collections_enabled.
 
 Paths can't collide with the other pages under /jobs/us/: a role slug is
@@ -24,6 +25,8 @@ never a sector slug or one of RESERVED_SEGMENTS (tests check), and
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import math
 from collections import defaultdict
@@ -37,7 +40,7 @@ from app.core.config import settings
 from app.models.enums import CollectionStatus as S
 from app.models.enums import CollectionType
 from app.models.job_collection import JobCollection
-from app.services import collection_dimensions, job_collections, standard_titles
+from app.services import collection_dimensions, job_collections, seo_validator, standard_titles
 from app.services.collection_dimensions import REMOTE_SLUG, matches_all
 from app.services.collection_stats import CollectionStats, calculate_collection_stats
 from app.services.static_hub_pages import HUB_ROOT, _board, _newest_first, _trail, _url, render_hub_gone
@@ -211,14 +214,53 @@ def render_collection_page(page: CollectionPage, number: int) -> str:
     )
 
 
-def publish_collection_pages(pages: list[CollectionPage], pool) -> list[str]:
+def validate_collection_pages(pages: list[CollectionPage]) -> list[seo_validator.Issue]:
+    """Render and check every page (seo_validator), and take any collection
+    with an ERROR out of the index for this run: noindex, so no sitemap
+    entry and no links to it. Its status is left alone."""
+    issues = [
+        issue
+        for page in pages
+        for n, path in enumerate(page.paths(), start=1)
+        for issue in seo_validator.check_page(
+            path, render_collection_page(page, n), url=_url(path), indexable=page.indexable
+        )
+    ]
+    issues += seo_validator.check_collections(pages)
+    broken = seo_validator.errors_by_collection(pages, issues)
+    for page in pages:
+        if page.path in broken and page.indexable:
+            page.indexable = False
+            logger.warning("SEO check failed for %s: kept out of the index this run.", page.path)
+    return issues
+
+
+def job_list_hash(page: CollectionPage, number: int) -> str:
+    """What a sitemap's lastmod for page `number` follows: its jobs and how
+    many pages there are, not the counts and "updated" date that change
+    every run."""
+    start = (number - 1) * PER_PAGE
+    fields = [page.page_count, [job.url_id for job in page.jobs[start : start + PER_PAGE]]]
+    return hashlib.sha256(json.dumps(fields).encode()).hexdigest()[:12]
+
+
+def publish_collection_pages(pages: list[CollectionPage], pool, today: str) -> tuple[list[str], dict[str, str]]:
     """Upload every page of every collection, a noindex page for any path
-    published before that's gone, and record what's live. Returns the live
-    paths, for invalidation."""
-    previous = set((read_json(COLLECTION_MANIFEST_KEY) or {}).get("paths", []))
+    published before that's gone, and record what's live. Returns the paths
+    to invalidate (live and retired) and each live path's lastmod: `today`
+    (an ISO date) when its job list changed since the last run, else the
+    date it last did."""
+    manifest = read_json(COLLECTION_MANIFEST_KEY) or {}
+    previous = set(manifest.get("paths", []))
+    previous_dates = manifest.get("dates", {})
     uploads = [(path, page, n) for page in pages for n, path in enumerate(page.paths(), start=1)]
     live = sorted(path for path, _, _ in uploads)
     retired = sorted(previous - set(live))
+    dates = {}
+    for path, page, n in uploads:
+        digest = job_list_hash(page, n)
+        old = previous_dates.get(path)
+        dates[path] = old if old and old[0] == digest else [digest, today]
 
     def publish(item) -> None:
         path, page, n = item
@@ -226,6 +268,6 @@ def publish_collection_pages(pages: list[CollectionPage], pool) -> list[str]:
 
     list(pool.map(publish, uploads + [(path, None, 0) for path in retired]))
     if pages or previous:
-        write_json(COLLECTION_MANIFEST_KEY, {"paths": live})
+        write_json(COLLECTION_MANIFEST_KEY, {"paths": live, "dates": dates})
     logger.info("Published %d collection page(s) for %d collection(s); %d retired.", len(live), len(pages), len(retired))
-    return live + retired
+    return live + retired, {path: date for path, (_, date) in dates.items()}

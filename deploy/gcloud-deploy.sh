@@ -752,6 +752,23 @@ gcloud scheduler jobs create http generate-static-job-pages-nightly \
   --message-body='{"overrides":{"containerOverrides":[{"args":["generate_static_job_pages.py","--refresh"]}],"timeoutSeconds":21600}}' \
   --oauth-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com"
 
+# Collection upkeep: the same job running collection_maintenance.py instead,
+# half an hour before the nightly refresh. It re-scores every collection
+# and applies the lifecycle rules (app.services.collection_lifecycle: below
+# the bar for days -> noindex, no jobs for weeks -> archived), then records
+# new collections worth a page for approval on the admin page
+# (app.services.collection_discovery). It never publishes or indexes
+# anything. One pass over the live jobs: a few minutes.
+gcloud scheduler jobs create http collection-maintenance-nightly \
+  --location="$REGION" \
+  --schedule="0 23 * * 1-5" \
+  --time-zone="America/New_York" \
+  --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/generate-static-job-pages:run" \
+  --http-method=POST \
+  --headers="Content-Type=application/json" \
+  --message-body='{"overrides":{"containerOverrides":[{"args":["collection_maintenance.py","--apply"]}]}}' \
+  --oauth-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com"
+
 # ---------------------------------------------------------------------------
 # 11. find-official-sites — Cloud Function (2nd gen), triggered daily by
 #     Scheduler. Deploys from source (this repo), entry point is dispatch()
