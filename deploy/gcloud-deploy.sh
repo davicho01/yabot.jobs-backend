@@ -691,6 +691,9 @@ gcloud scheduler jobs create http retry-failed-scans-hourly \
 #     company/location hubs (see deploy.yml). At 2Gi runs peaked at
 #     1.9-2.0 GiB in late October 2026, before collection stats added
 #     salary/title/last-seen fields to the index.
+#     JOB_COLLECTIONS_ENABLED=true: publishes the approved job-collection
+#     pages (app.services.static_collection_pages) and their sitemap; on
+#     since 2026-10-27.
 #     --task-timeout=1800: a run that spends its full MAX_RENDERS_PER_RUN
 #     re-render budget took ~490s by 2026-10-06. --max-retries=0: the next
 #     run two hours later regenerates the same pages anyway.
@@ -708,7 +711,7 @@ gcloud run jobs deploy generate-static-job-pages \
   --region="$REGION" \
   --command=python --args=generate_static_job_pages.py \
   --set-cloudsql-instances="$CLOUDSQL_INSTANCE_CONNECTION" \
-  --set-env-vars="$COMMON_ENV" \
+  --set-env-vars="$COMMON_ENV,JOB_COLLECTIONS_ENABLED=true" \
   --set-secrets="$COMMON_SECRETS,LOGO_DEV_SECRET_KEY=logo-dev-secret-key:latest" \
   --memory=4Gi \
   --cpu=1 \

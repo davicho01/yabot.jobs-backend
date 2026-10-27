@@ -291,6 +291,20 @@ class TestSitemaps:
         assert "sitemap-job-pages-2.xml" not in out["sitemap-job-pages.xml"]
 
 
+    def test_indexed_collection_pages_get_their_own_shard(self):
+        out = sjp.build_job_sitemaps(
+            {"a": "3|2026-10-01T00:00:00+00:00"},
+            collection_paths=["jobs/us/software-engineer/page/2", "jobs/us/software-engineer"],
+        )
+        xml = out["sitemap-collections-1.xml"]
+        assert xml.index("<loc>https://yabot.jobs/jobs/us/software-engineer</loc>") < xml.index("/page/2</loc>")
+        assert "<loc>https://yabot.jobs/sitemap-collections-1.xml</loc>" in out["sitemap-job-pages.xml"]
+
+    def test_no_collection_shard_without_collections(self):
+        out = sjp.build_job_sitemaps({"a": "3|2026-10-01T00:00:00+00:00"})
+        assert not any(key.startswith("sitemap-collections") for key in out)
+
+
 class TestGenerate:
     def test_dry_run_writes_nothing(self, db, make_job, monkeypatch):
         make_job()
