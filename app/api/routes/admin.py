@@ -1,12 +1,13 @@
 import uuid
 from datetime import datetime
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import asc, desc, func, or_, select, tuple_
 from sqlalchemy.orm import Session, joinedload
 
-from app.api.deps import get_current_admin_user, get_db
+from app.api.deps import get_chart_tz, get_current_admin_user, get_db
 from app.models.company import Company
 from app.models.crawl_source import CrawlSource
 from app.models.enums import FeedbackKind, FeedbackStatus, ScanStatus
@@ -53,8 +54,10 @@ def get_dashboard(db: Session = Depends(get_db)) -> dict:
 
 
 @router.get("/scans-by-day", response_model=list[ScanDayCount])
-def get_scans_by_day(days: int = Query(90, ge=1, le=365), db: Session = Depends(get_db)) -> list[dict]:
-    return admin_service.get_scans_by_day(db, days=days)
+def get_scans_by_day(
+    days: int = Query(90, ge=1, le=365), tz: ZoneInfo = Depends(get_chart_tz), db: Session = Depends(get_db)
+) -> list[dict]:
+    return admin_service.get_scans_by_day(db, days=days, tz=tz)
 
 
 @router.get("/scans-by-hour", response_model=list[ScanHourCount])
@@ -67,19 +70,25 @@ def get_scans_by_hour(
 
 
 @router.get("/scans-by-week", response_model=list[ScanWeekCount])
-def get_scans_by_week(weeks: int = Query(26, ge=1, le=104), db: Session = Depends(get_db)) -> list[dict]:
-    return admin_service.get_scans_by_week(db, weeks=weeks)
+def get_scans_by_week(
+    weeks: int = Query(26, ge=1, le=104), tz: ZoneInfo = Depends(get_chart_tz), db: Session = Depends(get_db)
+) -> list[dict]:
+    return admin_service.get_scans_by_week(db, weeks=weeks, tz=tz)
 
 
 @router.get("/scans-by-month", response_model=list[ScanMonthCount])
-def get_scans_by_month(months: int = Query(6, ge=1, le=60), db: Session = Depends(get_db)) -> list[dict]:
-    return admin_service.get_scans_by_month(db, months=months)
+def get_scans_by_month(
+    months: int = Query(6, ge=1, le=60), tz: ZoneInfo = Depends(get_chart_tz), db: Session = Depends(get_db)
+) -> list[dict]:
+    return admin_service.get_scans_by_month(db, months=months, tz=tz)
 
 
 
 @router.get("/users-joined-by-day", response_model=list[ScanDayCount])
-def get_users_joined_by_day(days: int = Query(30, ge=1, le=365), db: Session = Depends(get_db)) -> list[dict]:
-    return admin_service.get_users_joined_by_day(db, days=days)
+def get_users_joined_by_day(
+    days: int = Query(30, ge=1, le=365), tz: ZoneInfo = Depends(get_chart_tz), db: Session = Depends(get_db)
+) -> list[dict]:
+    return admin_service.get_users_joined_by_day(db, days=days, tz=tz)
 
 
 @router.get("/users-joined-by-hour", response_model=list[ScanHourCount])
@@ -92,37 +101,48 @@ def get_users_joined_by_hour(
 
 
 @router.get("/users-joined-by-week", response_model=list[ScanWeekCount])
-def get_users_joined_by_week(weeks: int = Query(26, ge=1, le=104), db: Session = Depends(get_db)) -> list[dict]:
-    return admin_service.get_users_joined_by_week(db, weeks=weeks)
+def get_users_joined_by_week(
+    weeks: int = Query(26, ge=1, le=104), tz: ZoneInfo = Depends(get_chart_tz), db: Session = Depends(get_db)
+) -> list[dict]:
+    return admin_service.get_users_joined_by_week(db, weeks=weeks, tz=tz)
 
 
 @router.get("/users-joined-by-month", response_model=list[ScanMonthCount])
-def get_users_joined_by_month(months: int = Query(6, ge=1, le=60), db: Session = Depends(get_db)) -> list[dict]:
-    return admin_service.get_users_joined_by_month(db, months=months)
+def get_users_joined_by_month(
+    months: int = Query(6, ge=1, le=60), tz: ZoneInfo = Depends(get_chart_tz), db: Session = Depends(get_db)
+) -> list[dict]:
+    return admin_service.get_users_joined_by_month(db, months=months, tz=tz)
 
 
 @router.get("/returning-users-by-hour", response_model=list[ScanHourCount])
 def get_returning_users_by_hour(
     hours: int = Query(24, ge=1, le=168),
     end: datetime | None = Query(None),
+    tz: ZoneInfo = Depends(get_chart_tz),
     db: Session = Depends(get_db),
 ) -> list[dict]:
-    return admin_service.get_returning_users_by_hour(db, hours=hours, end=end)
+    return admin_service.get_returning_users_by_hour(db, hours=hours, end=end, tz=tz)
 
 
 @router.get("/returning-users-by-day", response_model=list[ScanDayCount])
-def get_returning_users_by_day(days: int = Query(30, ge=1, le=365), db: Session = Depends(get_db)) -> list[dict]:
-    return admin_service.get_returning_users_by_day(db, days=days)
+def get_returning_users_by_day(
+    days: int = Query(30, ge=1, le=365), tz: ZoneInfo = Depends(get_chart_tz), db: Session = Depends(get_db)
+) -> list[dict]:
+    return admin_service.get_returning_users_by_day(db, days=days, tz=tz)
 
 
 @router.get("/returning-users-by-week", response_model=list[ScanWeekCount])
-def get_returning_users_by_week(weeks: int = Query(26, ge=1, le=104), db: Session = Depends(get_db)) -> list[dict]:
-    return admin_service.get_returning_users_by_week(db, weeks=weeks)
+def get_returning_users_by_week(
+    weeks: int = Query(26, ge=1, le=104), tz: ZoneInfo = Depends(get_chart_tz), db: Session = Depends(get_db)
+) -> list[dict]:
+    return admin_service.get_returning_users_by_week(db, weeks=weeks, tz=tz)
 
 
 @router.get("/returning-users-by-month", response_model=list[ScanMonthCount])
-def get_returning_users_by_month(months: int = Query(6, ge=1, le=60), db: Session = Depends(get_db)) -> list[dict]:
-    return admin_service.get_returning_users_by_month(db, months=months)
+def get_returning_users_by_month(
+    months: int = Query(6, ge=1, le=60), tz: ZoneInfo = Depends(get_chart_tz), db: Session = Depends(get_db)
+) -> list[dict]:
+    return admin_service.get_returning_users_by_month(db, months=months, tz=tz)
 
 JOB_SORT_COLUMNS = {
     "company": JobPosting.company_name,

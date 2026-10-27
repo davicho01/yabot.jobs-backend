@@ -1,12 +1,13 @@
 import uuid
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_admin_user, get_db
+from app.api.deps import get_chart_tz, get_current_admin_user, get_db
 from app.models.company import Company
 from app.models.crawl_source import CrawlSource
 from app.models.enums import CrawlSourceStatus, ScanStatus
@@ -248,12 +249,15 @@ def get_crawl_source_stats(source_id: uuid.UUID, db: Session = Depends(get_db)) 
 
 @router.get("/{source_id}/scans-by-day", response_model=list[ScanDayCount])
 def get_crawl_source_scans_by_day(
-    source_id: uuid.UUID, days: int = Query(90, ge=1, le=365), db: Session = Depends(get_db)
+    source_id: uuid.UUID,
+    days: int = Query(90, ge=1, le=365),
+    tz: ZoneInfo = Depends(get_chart_tz),
+    db: Session = Depends(get_db),
 ) -> list[dict]:
     source = db.get(CrawlSource, source_id)
     if source is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Crawl source not found.")
-    return admin_service.get_scans_by_day(db, days=days, crawl_source_id=source_id)
+    return admin_service.get_scans_by_day(db, days=days, crawl_source_id=source_id, tz=tz)
 
 
 @router.get("/{source_id}/scans-by-hour", response_model=list[ScanHourCount])
@@ -271,19 +275,25 @@ def get_crawl_source_scans_by_hour(
 
 @router.get("/{source_id}/scans-by-week", response_model=list[ScanWeekCount])
 def get_crawl_source_scans_by_week(
-    source_id: uuid.UUID, weeks: int = Query(26, ge=1, le=104), db: Session = Depends(get_db)
+    source_id: uuid.UUID,
+    weeks: int = Query(26, ge=1, le=104),
+    tz: ZoneInfo = Depends(get_chart_tz),
+    db: Session = Depends(get_db),
 ) -> list[dict]:
     source = db.get(CrawlSource, source_id)
     if source is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Crawl source not found.")
-    return admin_service.get_scans_by_week(db, weeks=weeks, crawl_source_id=source_id)
+    return admin_service.get_scans_by_week(db, weeks=weeks, crawl_source_id=source_id, tz=tz)
 
 
 @router.get("/{source_id}/scans-by-month", response_model=list[ScanMonthCount])
 def get_crawl_source_scans_by_month(
-    source_id: uuid.UUID, months: int = Query(6, ge=1, le=60), db: Session = Depends(get_db)
+    source_id: uuid.UUID,
+    months: int = Query(6, ge=1, le=60),
+    tz: ZoneInfo = Depends(get_chart_tz),
+    db: Session = Depends(get_db),
 ) -> list[dict]:
     source = db.get(CrawlSource, source_id)
     if source is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Crawl source not found.")
-    return admin_service.get_scans_by_month(db, months=months, crawl_source_id=source_id)
+    return admin_service.get_scans_by_month(db, months=months, crawl_source_id=source_id, tz=tz)
