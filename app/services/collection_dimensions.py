@@ -52,7 +52,7 @@ from app.services.static_pages import SECTOR_DISPLAY_NAMES, SECTORS_BY_SLUG, day
 REMOTE_SLUG = "remote"
 SALARY_FLOORS = (50_000, 75_000, 100_000, 150_000, 200_000)
 SALARY_PLAUSIBLE_MAX = 2_000_000
-_SALARY_CURRENCIES = (None, "USD")
+SALARY_CURRENCIES = (None, "USD")
 
 
 class DimensionJob(Protocol):
@@ -173,7 +173,7 @@ def salary(slug: str) -> Dimension | None:
 
     def matches(job: DimensionJob, now: datetime) -> bool:
         low = job.salary_min if job.salary_min is not None else job.salary_max
-        return low is not None and floor <= low <= SALARY_PLAUSIBLE_MAX and job.salary_currency in _SALARY_CURRENCIES
+        return low is not None and floor <= low <= SALARY_PLAUSIBLE_MAX and job.salary_currency in SALARY_CURRENCIES
 
     def clause(now: datetime) -> ColumnElement[bool]:
         low = func.coalesce(JobPosting.salary_min, JobPosting.salary_max)
