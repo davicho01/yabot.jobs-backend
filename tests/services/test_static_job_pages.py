@@ -300,6 +300,10 @@ class TestSitemaps:
         assert xml.index("<loc>https://yabot.jobs/jobs/us/software-engineer</loc>") < xml.index("/page/2</loc>")
         assert "<loc>https://yabot.jobs/sitemap-collections-1.xml</loc>" in out["sitemap-job-pages.xml"]
 
+    def test_collection_pages_carry_the_run_date(self):
+        out = sjp.build_job_sitemaps({}, collection_paths=["jobs/us/software-engineer"], collections_lastmod="2026-10-27")
+        assert "<loc>https://yabot.jobs/jobs/us/software-engineer</loc><lastmod>2026-10-27</lastmod>" in out["sitemap-collections-1.xml"]
+
     def test_no_collection_shard_without_collections(self):
         out = sjp.build_job_sitemaps({"a": "3|2026-10-01T00:00:00+00:00"})
         assert not any(key.startswith("sitemap-collections") for key in out)
@@ -758,6 +762,12 @@ class TestContent:
     def _page(self, db, make_job, **kwargs):
         row = make_job(**kwargs)
         return sjp.render_job_page(sjp.load_job_pages(db, [str(row.id)])[str(row.id)])
+
+    def test_links_to_its_collections(self, db, make_job):
+        row = make_job()
+        links = sjp.PageLinks(collections=[("Software Engineer jobs", "jobs/us/software-engineer")])
+        page = sjp.render_job_page(sjp.load_job_pages(db, [str(row.id)])[str(row.id)], links=links)
+        assert 'href="https://yabot.jobs/jobs/us/software-engineer" data-track="collection_link">Software Engineer jobs</a>' in page
 
     def test_title_fits_in_60_and_meta_description_in_160(self, db, make_job):
         page = self._page(db, make_job, title="Senior Staff Distributed Systems Reliability Engineer, Platform Infrastructure")

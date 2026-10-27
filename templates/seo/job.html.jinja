@@ -109,10 +109,11 @@
     </section>
     {% endif %}
 
-    {% if links.location_hubs or sector_link %}
+    {% if links.collections or links.location_hubs or sector_link %}
     <nav class="job-more" aria-labelledby="more-h">
       <h2 id="more-h">Browse more jobs</h2>
       <ul class="chips">
+        {% for label, path in links.collections %}<li><a href="{{ base_url }}/{{ path }}" data-track="collection_link">{{ label }}</a></li>{% endfor %}
         {% for label, path in links.location_hubs %}<li><a href="{{ base_url }}/{{ path }}" data-track="location_hub">{{ label }}</a></li>{% endfor %}
         {% if sector_link %}<li><a href="{{ base_url }}/jobs/{{ country_slug }}/{{ sector_link[0] }}" data-track="sector">{{ sector_link[1] }} jobs in {{ country_name }}</a></li>{% endif %}
       </ul>

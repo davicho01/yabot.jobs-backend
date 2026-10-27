@@ -159,6 +159,50 @@ def test_related_links_go_to_live_pages_only(db, enabled):
     assert [label for label, _ in pages["jobs/us/software-engineer"].related] == [f"{other.name} jobs"]
 
 
+def test_a_role_page_links_its_remote_page_first(db, enabled):
+    collection(db, S.INDEXABLE, role="software-engineer")
+    collection(db, S.INDEXABLE, role="software-engineer", location=cd.REMOTE_SLUG)
+    pages = {p.path: p for p in scp.plan_collection_pages(db, [job(workplace_type=WorkplaceType.REMOTE)], NOW)}
+    assert pages["jobs/us/software-engineer"].related[0] == (
+        "Remote Software Engineer jobs", "https://yabot.jobs/jobs/us/software-engineer/remote"
+    )
+    assert not any("/remote" in url for _, url in pages["jobs/us/software-engineer/remote"].related)
+
+
+# ---------------------------------------------------------------- links in
+
+
+def test_job_pages_link_their_indexed_collections(db, enabled):
+    collection(db, S.INDEXABLE, role="software-engineer")
+    collection(db, S.INDEXABLE, role="software-engineer", location=cd.REMOTE_SLUG)
+    remote = job(workplace_type=WorkplaceType.REMOTE)
+    links = scp.CollectionLinks(scp.plan_collection_pages(db, [remote, job()], NOW))
+    assert links.for_job(remote) == [
+        ("Software Engineer jobs", "jobs/us/software-engineer"),
+        ("Remote Software Engineer jobs", "jobs/us/software-engineer/remote"),
+    ]
+    assert links.for_job(job()) == [("Software Engineer jobs", "jobs/us/software-engineer")]
+    assert links.for_job(job(standard_titles=())) == []
+
+
+def test_noindex_collections_get_no_links_in(db, enabled):
+    collection(db, S.NOINDEX, role="software-engineer")
+    links = scp.CollectionLinks(scp.plan_collection_pages(db, [job()], NOW))
+    assert links.for_job(job()) == [] and links.top_roles() == []
+
+
+def test_top_roles_are_the_biggest_role_pages(db, enabled):
+    from app.services import standard_titles
+
+    other = cd.get("role", sjp.slugify(next(t for t in standard_titles.related(["Software Engineer"]) if t != "Software Engineer")))
+    collection(db, S.INDEXABLE, role="software-engineer")
+    collection(db, S.INDEXABLE, role=other.slug)
+    collection(db, S.INDEXABLE, role="software-engineer", location=cd.REMOTE_SLUG)
+    live = [job() for _ in range(3)] + [job(standard_titles=(other.name,))] + [job(workplace_type=WorkplaceType.REMOTE)]
+    links = scp.CollectionLinks(scp.plan_collection_pages(db, live, NOW))
+    assert links.top_roles() == [("Software Engineer", "jobs/us/software-engineer", 4), (other.name, f"jobs/us/{other.slug}", 1)]
+
+
 # ---------------------------------------------------------------- rendering
 
 

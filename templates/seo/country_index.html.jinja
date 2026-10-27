@@ -36,6 +36,13 @@
     {% for slug, sector_name, count in sector_totals %}{% set _ = sectors.append((sector_name, base_url ~ "/jobs/" ~ country_slug ~ "/" ~ slug, count)) %}{% endfor %}
     {{ rows(sectors) }}
 
+    {% if hub_links.roles %}
+    <h2>Popular roles</h2>
+    {% set roles = [] %}
+    {% for name, path, count in hub_links.roles %}{% set _ = roles.append((name, base_url ~ "/" ~ path, count)) %}{% endfor %}
+    {{ rows(roles) }}
+    {% endif %}
+
     {% if hub_links.locations %}
     <h2>Top locations</h2>
     {% set places = [] %}
