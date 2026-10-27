@@ -255,23 +255,41 @@ def test_publish_and_retire(db, enabled, store):
     c = collection(db, S.INDEXABLE, role="software-engineer")
     live = [job() for _ in range(60)]
     with ThreadPoolExecutor(2) as pool:
-        paths = scp.publish_collection_pages(scp.plan_collection_pages(db, live, NOW), pool)
+        paths, _ = scp.publish_collection_pages(scp.plan_collection_pages(db, live, NOW), pool, "2026-10-27")
         assert paths == ["jobs/us/software-engineer", "jobs/us/software-engineer/page/2"]
         assert "Software Engineer jobs" in store.get("jobs/us/software-engineer").decode()
 
         c.status = S.ARCHIVED
         db.flush()
-        paths = scp.publish_collection_pages(scp.plan_collection_pages(db, live, NOW), pool)
+        paths, _ = scp.publish_collection_pages(scp.plan_collection_pages(db, live, NOW), pool, "2026-10-28")
     assert paths == ["jobs/us/software-engineer", "jobs/us/software-engineer/page/2"]  # to invalidate
     gone = store.get("jobs/us/software-engineer/page/2").decode()
     assert "noindex, follow" in gone and "No current jobs" in gone
-    assert page_store.get_page_store().get(scp.COLLECTION_MANIFEST_KEY) == b'{"paths": []}'
+    assert page_store.get_page_store().get(scp.COLLECTION_MANIFEST_KEY) == b'{"dates": {}, "paths": []}'
 
 
 def test_publishing_with_nothing_writes_nothing(store):
     with ThreadPoolExecutor(1) as pool:
-        assert scp.publish_collection_pages([], pool) == []
+        assert scp.publish_collection_pages([], pool, "2026-10-27") == ([], {})
     assert store.get(scp.COLLECTION_MANIFEST_KEY) is None
+
+
+def test_a_page_keeps_its_date_until_its_jobs_change(db, enabled, store):
+    collection(db, S.INDEXABLE, role="software-engineer")
+    live = [job() for _ in range(60)]
+    with ThreadPoolExecutor(2) as pool:
+        _, dates = scp.publish_collection_pages(scp.plan_collection_pages(db, live, NOW), pool, "2026-10-27")
+        assert dates == {"jobs/us/software-engineer": "2026-10-27", "jobs/us/software-engineer/page/2": "2026-10-27"}
+
+        # A later run with the same jobs: the "updated" date moved, the job list didn't.
+        later = NOW + timedelta(days=1)
+        _, dates = scp.publish_collection_pages(scp.plan_collection_pages(db, live, later), pool, "2026-10-28")
+        assert set(dates.values()) == {"2026-10-27"}
+
+        # A new job: page 1 shows it first, and page 2's list shifts too.
+        live.append(job(posted_at=TODAY, found_at=NOW))
+        _, dates = scp.publish_collection_pages(scp.plan_collection_pages(db, live, later), pool, "2026-10-28")
+    assert set(dates.values()) == {"2026-10-28"}
 
 
 # ------------------------------------------------------- approving a batch

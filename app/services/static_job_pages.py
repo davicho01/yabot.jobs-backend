@@ -115,6 +115,8 @@ NO_FALLBACK_EXPIRY_VERSION = 8
 EXPIRY_REFRESH_DAYS = 7
 MANIFEST_KEY = "_meta/job-pages.json"
 SITEMAP_INDEX_KEY = "sitemap-job-pages.xml"
+# {sitemap key: [content hash, date it last changed]}, for the index's lastmods.
+SITEMAP_DATES_KEY = "_meta/sitemaps.json"
 SITEMAP_SHARD_SIZE = 45_000  # under the sitemap protocol's 50,000-URL cap
 _SITEMAP_SHARD_RE = re.compile(r"/(sitemap-job-pages-\d+\.xml)</loc>")
 # Nothing re-checks a user-submitted URL unless someone rescans it, so this
@@ -1069,26 +1071,38 @@ def build_sitemaps(prefix: str, urls: list[tuple[str, str | None]]) -> dict[str,
     return out
 
 
+@dataclass
+class JobSitemaps:
+    files: dict[str, str]  # {key: xml}, the index included
+    dates: dict[str, list[str]]  # SITEMAP_DATES_KEY's content, for the next run
+
+
 def build_job_sitemaps(
     pages: dict[str, str],
     hub_paths: Iterable[str] = (),
     days: dict[str, date] | None = None,
     previous_shards: Iterable[str] = (),
-    collection_paths: Iterable[str] = (),
-    collections_lastmod: str | None = None,
-) -> dict[str, str]:
-    """{key: xml} — numbered shards of the job pages (sitemap-job-pages-<n>),
-    a shard of hub pages (sitemap-hubs-<n>), one of indexed collection pages
-    (sitemap-collections-<n>, when there are any, all with
-    `collections_lastmod`: they're re-rendered every run), and the sitemap index
-    (SITEMAP_INDEX_KEY) that robots.txt points at. `pages` is the manifest's
-    {url_id: entry} for the pages to list; `days` their posting days, newest
-    listed first. A page's lastmod is when it was last rendered — a rescan
-    that changed nothing doesn't move it — else its scan date for entries
-    from before rendered_at was recorded. Any of `previous_shards` (job-page
-    shard keys an earlier run published) not produced now gets an empty
-    urlset, so a shrinking sitemap leaves no stale shard behind."""
+    collection_urls: Iterable[tuple[str, str | None]] = (),
+    previous_dates: dict[str, list[str]] | None = None,
+    today: str | None = None,
+) -> JobSitemaps:
+    """Numbered shards of the job pages (sitemap-job-pages-<n>), a shard of
+    hub pages (sitemap-hubs-<n>), one of indexed collection pages
+    (sitemap-collections-<n>, when there are any; `collection_urls` are
+    their (path, lastmod)), and the sitemap index (SITEMAP_INDEX_KEY) that
+    robots.txt points at. `pages` is the manifest's {url_id: entry} for the
+    pages to list; `days` their posting days, newest listed first. A page's
+    lastmod is when it was last rendered — a rescan that changed nothing
+    doesn't move it — else its scan date for entries from before
+    rendered_at was recorded. Any of `previous_shards` (job-page shard keys
+    an earlier run published) not produced now gets an empty urlset, so a
+    shrinking sitemap leaves no stale shard behind.
+
+    The index dates each file it lists with when its content last changed:
+    `today` (an ISO date) if it differs from what `previous_dates`
+    recorded, else the date recorded then. Without `today`, no dates."""
     days = days or {}
+    previous_dates = previous_dates or {}
     job_urls = []
     for url_id, raw in pages.items():
         entry = parse_entry(url_id, raw)
@@ -1099,11 +1113,19 @@ def build_job_sitemaps(
     hubs = sorted(hub_paths)
     if hubs:
         out.update(build_sitemaps("sitemap-hubs", [(path, None) for path in hubs]))
-    collections = sorted(collection_paths)
+    collections = sorted(collection_urls)
     if collections:
-        out.update(build_sitemaps("sitemap-collections", [(path, collections_lastmod) for path in collections]))
+        out.update(build_sitemaps("sitemap-collections", collections))
+    dates = {}
+    for key, xml in out.items():
+        digest = hashlib.sha256(xml.encode()).hexdigest()[:12]
+        old = previous_dates.get(key)
+        dates[key] = old if old and old[0] == digest else [digest, today]
     base = settings.seo_pages_base_url
-    index_entries = "\n".join(f"  <sitemap><loc>{base}/{key}</loc></sitemap>" for key in sorted(out))
+    index_entries = "\n".join(
+        f"  <sitemap><loc>{base}/{key}</loc>" + (f"<lastmod>{dates[key][1]}</lastmod>" if dates[key][1] else "") + "</sitemap>"
+        for key in sorted(out)
+    )
     empty = build_sitemaps("empty", [])["empty-1.xml"]
     stale = {key: empty for key in previous_shards if key not in out}
     out[SITEMAP_INDEX_KEY] = (
@@ -1112,7 +1134,7 @@ def build_job_sitemaps(
         f"{index_entries}\n"
         "</sitemapindex>\n"
     )
-    return out | stale
+    return JobSitemaps(out | stale, dates)
 
 
 # ---------------------------------------------------------------------------
@@ -1352,7 +1374,9 @@ def generate_job_pages(
 
         checkpoint(force=True)
         hub_paths = static_hub_pages.publish_hubs(hub_plan, pool)
-        collection_paths = static_collection_pages.publish_collection_pages(collection_pages, pool)
+        collection_paths, collection_dates = static_collection_pages.publish_collection_pages(
+            collection_pages, pool, eastern(now).date().isoformat()
+        )
 
     result.updated = len(rerendered)
     result.moved = len(moved_from)
@@ -1367,14 +1391,17 @@ def generate_job_pages(
     previous_shards = _SITEMAP_SHARD_RE.findall(previous_index.decode())
     # Collection pages are listed only while indexed (a NOINDEX one keeps
     # its page, but not a sitemap entry).
-    indexed_collection_paths = [path for page in collection_pages if page.indexable for path in page.paths()]
+    indexed_collection_urls = [
+        (path, collection_dates[path]) for page in collection_pages if page.indexable for path in page.paths()
+    ]
     sitemaps = build_job_sitemaps(
-        listed, hub_paths, {i: index[i].day for i in listed}, previous_shards, indexed_collection_paths,
-        eastern(now).date().isoformat(),
+        listed, hub_paths, {i: index[i].day for i in listed}, previous_shards, indexed_collection_urls,
+        read_json(SITEMAP_DATES_KEY) or {}, eastern(now).date().isoformat(),
     )
-    for key, xml in sitemaps.items():
+    for key, xml in sitemaps.files.items():
         upload_xml(key, xml)
         result.touched_paths.append(f"/{key}")
+    write_json(SITEMAP_DATES_KEY, sitemaps.dates)
     # Hubs are rewritten every run; they all sit under /jobs/, which
     # collapse_invalidation_paths turns into one wildcard (and /job/ pages,
     # moved ones included, into another).

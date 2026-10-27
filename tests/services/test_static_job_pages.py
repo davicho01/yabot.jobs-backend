@@ -257,28 +257,28 @@ class TestSitemaps:
         monkeypatch.setattr(sjp, "SITEMAP_SHARD_SIZE", 2)
         out = sjp.build_job_sitemaps(
             {"a": "3|2026-10-01T00:00:00+00:00", "b": "3|2026-10-02T00:00:00+00:00", "c": "3|2026-10-02T00:00:00+00:00"}
-        )
+        ).files
         assert set(out) == {"sitemap-job-pages.xml", "sitemap-job-pages-1.xml", "sitemap-job-pages-2.xml"}
         assert "<loc>https://yabot.jobs/sitemap-job-pages-2.xml</loc>" in out["sitemap-job-pages.xml"]
         assert "<loc>https://yabot.jobs/job/a</loc><lastmod>2026-10-01</lastmod>" in out["sitemap-job-pages-1.xml"]
 
     def test_lastmod_comes_from_a_versioned_manifest_entry(self):
-        out = sjp.build_job_sitemaps({"a": "3|2026-10-01T12:00:00+00:00"})
+        out = sjp.build_job_sitemaps({"a": "3|2026-10-01T12:00:00+00:00"}).files
         assert "<lastmod>2026-10-01</lastmod>" in out["sitemap-job-pages-1.xml"]
 
     def test_empty_still_writes_a_valid_index(self):
-        out = sjp.build_job_sitemaps({})
+        out = sjp.build_job_sitemaps({}).files
         assert "sitemap-job-pages-1.xml" in out["sitemap-job-pages.xml"]
 
     def test_lastmod_is_the_render_date_not_the_scan_date(self):
-        out = sjp.build_job_sitemaps({"a": "3|2026-10-09T00:00:00+00:00|job/a|2026-10-01T05:00:00+00:00|h"})
+        out = sjp.build_job_sitemaps({"a": "3|2026-10-09T00:00:00+00:00|job/a|2026-10-01T05:00:00+00:00|h"}).files
         assert "<loc>https://yabot.jobs/job/a</loc><lastmod>2026-10-01</lastmod>" in out["sitemap-job-pages-1.xml"]
 
     def test_newest_posting_day_first(self):
         out = sjp.build_job_sitemaps(
             {"a": "3|2026-10-01T00:00:00+00:00", "b": "3|2026-10-01T00:00:00+00:00", "c": "3|2026-10-01T00:00:00+00:00"},
             days={"a": date(2026, 9, 28), "b": date(2026, 10, 1), "c": date(2026, 9, 30)},
-        )
+        ).files
         xml = out["sitemap-job-pages-1.xml"]
         assert xml.index("/job/b<") < xml.index("/job/c<") < xml.index("/job/a<")
 
@@ -286,7 +286,7 @@ class TestSitemaps:
         out = sjp.build_job_sitemaps(
             {"a": "3|2026-10-01T00:00:00+00:00"},
             previous_shards=["sitemap-job-pages-1.xml", "sitemap-job-pages-2.xml"],
-        )
+        ).files
         assert "/job/a<" in out["sitemap-job-pages-1.xml"]
         assert "<url>" not in out["sitemap-job-pages-2.xml"] and "<urlset" in out["sitemap-job-pages-2.xml"]
         assert "sitemap-job-pages-2.xml" not in out["sitemap-job-pages.xml"]
@@ -295,19 +295,39 @@ class TestSitemaps:
     def test_indexed_collection_pages_get_their_own_shard(self):
         out = sjp.build_job_sitemaps(
             {"a": "3|2026-10-01T00:00:00+00:00"},
-            collection_paths=["jobs/us/software-engineer/page/2", "jobs/us/software-engineer"],
-        )
+            collection_urls=[("jobs/us/software-engineer/page/2", None), ("jobs/us/software-engineer", None)],
+        ).files
         xml = out["sitemap-collections-1.xml"]
         assert xml.index("<loc>https://yabot.jobs/jobs/us/software-engineer</loc>") < xml.index("/page/2</loc>")
         assert "<loc>https://yabot.jobs/sitemap-collections-1.xml</loc>" in out["sitemap-job-pages.xml"]
 
-    def test_collection_pages_carry_the_run_date(self):
-        out = sjp.build_job_sitemaps({}, collection_paths=["jobs/us/software-engineer"], collections_lastmod="2026-10-27")
+    def test_collection_pages_carry_their_own_dates(self):
+        out = sjp.build_job_sitemaps({}, collection_urls=[("jobs/us/software-engineer", "2026-10-27")]).files
         assert "<loc>https://yabot.jobs/jobs/us/software-engineer</loc><lastmod>2026-10-27</lastmod>" in out["sitemap-collections-1.xml"]
 
     def test_no_collection_shard_without_collections(self):
-        out = sjp.build_job_sitemaps({"a": "3|2026-10-01T00:00:00+00:00"})
+        out = sjp.build_job_sitemaps({"a": "3|2026-10-01T00:00:00+00:00"}).files
         assert not any(key.startswith("sitemap-collections") for key in out)
+
+    def test_index_dates_each_file_by_when_it_last_changed(self):
+        first = sjp.build_job_sitemaps({"a": "3|2026-10-01T00:00:00+00:00"}, ["jobs/us/companies/acme"], today="2026-10-27")
+        assert "sitemap-job-pages-1.xml</loc><lastmod>2026-10-27</lastmod>" in first.files["sitemap-job-pages.xml"]
+
+        later = sjp.build_job_sitemaps(
+            {"a": "3|2026-10-01T00:00:00+00:00", "b": "3|2026-10-02T00:00:00+00:00"},
+            ["jobs/us/companies/acme"], previous_dates=first.dates, today="2026-10-29",
+        )
+        index = later.files["sitemap-job-pages.xml"]
+        assert "sitemap-job-pages-1.xml</loc><lastmod>2026-10-29</lastmod>" in index  # b was added
+        assert "sitemap-hubs-1.xml</loc><lastmod>2026-10-27</lastmod>" in index  # same hubs
+        assert later.dates["sitemap-hubs-1.xml"] == first.dates["sitemap-hubs-1.xml"]
+
+    def test_index_without_a_date_has_no_lastmod(self):
+        assert "<lastmod>" not in sjp.build_job_sitemaps({}).files["sitemap-job-pages.xml"]
+
+    def test_emptied_shards_get_no_date(self):
+        out = sjp.build_job_sitemaps({}, previous_shards=["sitemap-job-pages-2.xml"], today="2026-10-27")
+        assert "sitemap-job-pages-2.xml" not in out.dates
 
 
 class TestGenerate:
