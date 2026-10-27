@@ -14,6 +14,7 @@ class AdminCollectionRead(BaseModel):
     status: str
     name: str
     url: str | None  # its page, while it has one
+    path: str | None  # where its page is or would be, for kinds that have pages
     indexable: bool
     qualification_score: float | None
     recommendation: str | None
@@ -21,7 +22,7 @@ class AdminCollectionRead(BaseModel):
     # From its last scoring: open jobs and companies hiring then.
     open_jobs: int | None
     companies: int | None
-    freshness_score: float | None  # out of 1, from its last scoring
+    freshness_score: float | None  # points of its score's 20 for freshness, from its last scoring
     # From the nightly re-scoring (collection_lifecycle): other collections
     # with nearly the same jobs, and since when it's scored below the bar
     # or had no open jobs (Eastern dates) — the rules act on those.

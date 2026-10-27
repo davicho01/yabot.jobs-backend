@@ -166,14 +166,15 @@ def test_names(db):
 def test_list_shows_duplicates_and_dates(db, admin):
     c = collection(db, S.INDEXABLE, score=70)
     c.qualification = c.qualification | {
-        "freshness_score": 0.8, "duplicates": ["role=backend-engineer"], "below_bar_since": "2026-10-25",
+        "freshness_score": 16.0, "duplicates": ["role=backend-engineer"], "below_bar_since": "2026-10-25",
         "empty_since": None,
     }
     db.commit()
     [item] = routes.list_collections(view="live", collection_type=None, q=None, page=1, page_size=50, db=db).items
     assert item.duplicates == ["role=backend-engineer"]
-    assert (item.freshness_score, item.below_bar_since, item.empty_since) == (0.8, "2026-10-25", None)
+    assert (item.freshness_score, item.below_bar_since, item.empty_since) == (16.0, "2026-10-25", None)
     assert item.can_reevaluate is True
+    assert item.path == "/jobs/us/software-engineer"
 
 
 def test_reevaluate_rescores_and_returns_the_detail(db, admin, monkeypatch):

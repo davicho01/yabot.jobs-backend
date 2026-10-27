@@ -44,6 +44,7 @@ def _to_read(collection: JobCollection) -> dict:
         status=collection.status,
         name=collection_admin.collection_name(collection),
         url=_url(collection_path(collection)) if has_page else None,
+        path=f"/{collection_path(collection)}" if collection.collection_type in RENDERED_TYPES else None,
         indexable=collection.is_indexable,
         qualification_score=collection.qualification_score,
         recommendation=qualification.get("recommendation"),
