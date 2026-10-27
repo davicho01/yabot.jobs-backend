@@ -53,7 +53,8 @@ Usage:
     python generate_static_job_pages.py                      # today (Eastern), publishes
     python generate_static_job_pages.py --date 2026-09-25    # a specific day
     python generate_static_job_pages.py --dry-run            # report only, no S3/CloudFront calls
-    python generate_static_job_pages.py --full               # also re-render every per-job page (after a template change)
+    python generate_static_job_pages.py --refresh            # also re-render pages of an older PAGE_VERSION or with changed links (nightly)
+    python generate_static_job_pages.py --full               # also re-render every per-job page
     python generate_static_job_pages.py --ids <id>,<id>      # also re-render just these per-job pages
 """
 
@@ -82,6 +83,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--date", type=str, default=None, help="YYYY-MM-DD (Eastern). Defaults to today.")
     parser.add_argument("--dry-run", action="store_true", help="Report what would be written; no S3/CloudFront calls.")
     parser.add_argument("--full", action="store_true", help="Re-render every per-job page, not just new/changed ones.")
+    parser.add_argument(
+        "--refresh", action="store_true",
+        help="Also re-render pages of an older PAGE_VERSION or whose hub/collection links changed (the nightly run).",
+    )
     parser.add_argument("--ids", type=str, default="", help="Comma-separated url_ids: re-render just these per-job pages.")
     return parser.parse_args()
 
@@ -110,7 +115,7 @@ def main() -> None:
         # last saved manifest) and get their CloudFront invalidation below.
         try:
             job_result = generate_job_pages(
-                db, dry_run=args.dry_run, full=args.full, only=[i for i in args.ids.split(",") if i]
+                db, dry_run=args.dry_run, full=args.full, refresh=args.refresh, only=[i for i in args.ids.split(",") if i]
             )
             job_paths, hub_links = job_result.job_paths, job_result.country_links
         except Exception as exc:

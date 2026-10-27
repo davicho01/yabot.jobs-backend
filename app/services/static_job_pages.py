@@ -47,10 +47,13 @@ when — so each run only
     "no longer available" page. Deleting the object instead would fall through
     to CloudFront's SPA fallback: a soft 404 that redirects.
 
-then rebuilds the hubs and the sitemaps. A template or rendering change
-reaches existing pages only through the backfill job (--full), run by hand
-when the change is worth it; PAGE_VERSION records which version rendered a
-page.
+then rebuilds the hubs and the sitemaps. A page is otherwise a snapshot:
+a template or rendering change (with a PAGE_VERSION bump), or a change in
+the hub and collection pages it links to, reaches existing pages through
+the nightly refresh run (--refresh), which re-renders just the pages
+rendered by an older PAGE_VERSION or whose links (nav_links_hash) are no
+longer what they'd be now. The backfill job (--full) re-renders every page
+at once.
 """
 
 from __future__ import annotations
@@ -100,10 +103,11 @@ from app.services.static_pages import (
 
 logger = logging.getLogger("app.static_job_pages")
 
-# Which rendering a page came from. Informational: bumping it re-renders
-# nothing by itself (run the backfill job, --full, for that). 9: the Share
-# button. 10: "Posted" only for the employer's own date.
-PAGE_VERSION = 10
+# Which rendering a page came from. Bumping it re-renders every page on the
+# next nightly refresh run (--refresh). 9: the Share button. 10: "Posted"
+# only for the employer's own date. 11: "Browse more jobs" in a column on
+# the right (after the card on phones).
+PAGE_VERSION = 11
 # The first PAGE_VERSION whose crawled jobs carry no made-up validThrough
 # (JobPage.expires); older pages of open crawled jobs get one re-render
 # within EXPIRY_REFRESH_DAYS of the date they'd otherwise show.
@@ -318,7 +322,7 @@ def is_legacy_path(path: str) -> bool:
 
 # ---------------------------------------------------------------------------
 # Manifest entries:
-# "<PAGE_VERSION>|<scanned_at>|<path>|<rendered_at>|<content_hash>|<closed_at>"
+# "<PAGE_VERSION>|<scanned_at>|<path>|<rendered_at>|<content_hash>|<closed_at>|<links>"
 # ---------------------------------------------------------------------------
 
 
@@ -330,17 +334,22 @@ class ManifestEntry:
     rendered_at: str  # ISO; "" for entries written before it was recorded
     content_hash: str = ""  # content_hash(); "" for entries from before it
     closed: str = ""  # the job's closed_at (ISO) when rendered; "" while open
+    links: str = ""  # nav_links_hash() of the links rendered; "" for entries from before it
 
     def dump(self) -> str:
-        return f"{self.version}|{self.scanned}|{self.path}|{self.rendered_at}|{self.content_hash}|{self.closed}"
+        return (
+            f"{self.version}|{self.scanned}|{self.path}|{self.rendered_at}|{self.content_hash}|{self.closed}"
+            f"|{self.links}"
+        )
 
 
 def parse_entry(url_id: str, raw: str) -> ManifestEntry:
     """Tolerates the older entries: two-part "<version>|<scanned_at>" ones,
     whose pages all live at /job/<url_id>, and four-part ones without a
     content hash, whose scanned_at may carry a "~<logo hash>" suffix from
-    when a new logo meant a re-render, and five-part ones from before closed
-    jobs kept their pages (all open when rendered)."""
+    when a new logo meant a re-render, five-part ones from before closed
+    jobs kept their pages (all open when rendered), and six-part ones from
+    before the links were recorded (refreshed on the next --refresh run)."""
     parts = raw.split("|")
     return ManifestEntry(
         version=parts[0],
@@ -349,6 +358,7 @@ def parse_entry(url_id: str, raw: str) -> ManifestEntry:
         rendered_at=parts[3] if len(parts) > 3 else "",
         content_hash=parts[4] if len(parts) > 4 else "",
         closed=parts[5] if len(parts) > 5 else "",
+        links=parts[6] if len(parts) > 6 else "",
     )
 
 
@@ -967,6 +977,14 @@ class PageLinks:
     collections: list[tuple[str, str]] = field(default_factory=list)  # (label, path)
 
 
+def nav_links_hash(links: PageLinks) -> str:
+    """A hash of a page's links to other pages that only change when those
+    pages come or go: the company and location hubs and the collections.
+    Leaves out the related-job lists, which change with every new job."""
+    fields = [links.company_hub, links.location_hubs, links.collections]
+    return hashlib.sha256(json.dumps(fields).encode()).hexdigest()[:12]
+
+
 def render_job_page(job: JobPage, path: str | None = None, links: PageLinks | None = None) -> str:
     path = path or legacy_job_path(job.url_id)
     links = links or PageLinks()
@@ -1112,6 +1130,7 @@ class JobPagesResult:
     legacy_left: int = 0  # legacy pages still waiting to move after this run
     unchanged: int = 0
     deferred: int = 0  # over this run's render cap; picked up next run
+    refreshed: int = 0  # --refresh: pages of an older PAGE_VERSION, or with outdated links
     hubs: int = 0  # hub pages published (static_hub_pages)
     collections: int = 0  # collections with a page (static_collection_pages)
     # CloudFront paths whose cached copy is now stale (new keys need none).
@@ -1127,6 +1146,7 @@ def generate_job_pages(
     *,
     dry_run: bool = False,
     full: bool = False,
+    refresh: bool = False,
     only: Iterable[str] = (),
     now: datetime | None = None,
     max_renders: int | None = MAX_RENDERS_PER_RUN,
@@ -1139,7 +1159,7 @@ def generate_job_pages(
     index = load_link_index(db, now)
     for i, job in index.items():
         job.path = previous[i].path if i in previous else new_job_path(job)
-    if full:
+    if full or refresh:
         max_renders = None
 
     # Open crawled jobs whose page (from before NO_FALLBACK_EXPIRY_VERSION)
@@ -1214,12 +1234,32 @@ def generate_job_pages(
     collection_links = static_collection_pages.CollectionLinks(collection_pages)
     if roles := collection_links.top_roles():
         result.country_links["roles"] = roles
+
+    def nav_links(job: LinkJob) -> PageLinks:
+        return PageLinks(
+            company_hub=hub_plan.company_path(job),
+            location_hubs=hub_plan.location_links(job),
+            collections=collection_links.for_job(job),
+        )
+
+    # --refresh (the nightly run): every published page rendered by an
+    # older PAGE_VERSION, or whose hub/collection links have changed since.
+    if refresh:
+        checking = set(check_ids)
+        stale = [
+            i for i in index
+            if i in previous and i not in moved_from
+            and (_version(previous[i]) < PAGE_VERSION or previous[i].links != nav_links_hash(nav_links(index[i])))
+        ]
+        forced.update(stale)  # re-rendered even when their own content is unchanged
+        check_ids.extend(i for i in stale if i not in checking)
+        result.refreshed = len(stale)
     logger.info(
         "Job pages: %d new, %d rescanned to check (%d near a stale validThrough), %d to remove, "
         "%d new deferred to the next run, %d legacy page(s) to move (%d left after); %d hub page(s); "
-        "%d collection(s)%s.",
+        "%d collection(s); %d to refresh%s.",
         len(new_ids), len(check_ids), len(expiry_due), len(removed_ids), deferred, len(moves),
-        result.legacy_left, result.hubs, result.collections, " (dry run)" if dry_run else "",
+        result.legacy_left, result.hubs, result.collections, result.refreshed, " (dry run)" if dry_run else "",
     )
     if dry_run:
         result.deferred = deferred
@@ -1229,13 +1269,7 @@ def generate_job_pages(
 
     def links_for(job: LinkJob) -> PageLinks:
         same_company = related.same_company(job)
-        return PageLinks(
-            same_company=same_company,
-            similar=related.similar(job, exclude=same_company),
-            company_hub=hub_plan.company_path(job),
-            location_hubs=hub_plan.location_links(job),
-            collections=collection_links.for_job(job),
-        )
+        return replace(nav_links(job), same_company=same_company, similar=related.similar(job, exclude=same_company))
 
     # What's live in the bucket, kept current as batches land and saved
     # every CHECKPOINT_EVERY_BATCHES. It starts as the old manifest, gains
@@ -1261,11 +1295,12 @@ def generate_job_pages(
         }
         placeholders.update(missing)
         list(pool.map(lambda key: write_logo_alias(key, None), missing))
-        uploads = [(index[i].path, render_job_page(loaded[i], index[i].path, links_for(index[i]))) for i in ids]
+        links = {i: links_for(index[i]) for i in ids}
+        uploads = [(index[i].path, render_job_page(loaded[i], index[i].path, links[i])) for i in ids]
         list(pool.map(lambda kv: upload_html(kv[0], kv[1], CACHE_CONTROL), uploads))
         pages.update(
             (i, ManifestEntry(str(PAGE_VERSION), index[i].scanned, index[i].path, rendered_at,
-                              content_hash(loaded[i]), index[i].closed).dump())
+                              content_hash(loaded[i]), index[i].closed, nav_links_hash(links[i])).dump())
             for i in ids
         )
 

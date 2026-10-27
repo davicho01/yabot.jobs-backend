@@ -3,6 +3,7 @@ Same in-memory SQLite setup as test_static_pages.py; publishing goes to a
 LocalDirPageStore in tmp_path rather than S3."""
 
 import itertools
+import dataclasses
 import json
 import html as html_module
 import re
@@ -359,6 +360,54 @@ class TestGenerate:
         result = sjp.generate_job_pages(db, now=NOW)
         assert (result.published, result.updated, result.unchanged) == (0, 0, 1)
 
+    @staticmethod
+    def _entry(store, row) -> sjp.ManifestEntry:
+        return sjp.parse_entry(str(row.id), json.loads(store.get(sjp.MANIFEST_KEY))["pages"][str(row.id)])
+
+    @classmethod
+    def _set_entry(cls, store, row, **changes) -> None:
+        entry = dataclasses.replace(cls._entry(store, row), **changes)
+        store.put(sjp.MANIFEST_KEY, json.dumps({"pages": {str(row.id): entry.dump()}}), "application/json")
+
+    def test_pages_record_their_links(self, db, make_job, store):
+        row = make_job()
+        sjp.generate_job_pages(db, now=NOW)
+        assert len(self._entry(store, row).links) == 12
+
+    def test_refresh_re_renders_pages_whose_links_changed(self, db, make_job, store):
+        row = make_job()
+        sjp.generate_job_pages(db, now=NOW)
+        links = self._entry(store, row).links
+        self._set_entry(store, row, links="outdated")
+
+        assert sjp.generate_job_pages(db, now=NOW).updated == 0  # daytime runs leave it
+        result = sjp.generate_job_pages(db, refresh=True, now=NOW)
+        assert (result.refreshed, result.updated) == (1, 1)
+        assert self._entry(store, row).links == links
+        assert f"/{_path(store, row.id)}" in result.touched_paths
+        assert sjp.generate_job_pages(db, refresh=True, now=NOW).refreshed == 0  # nothing left to do
+
+    def test_refresh_re_renders_pages_of_an_older_version(self, db, make_job, store):
+        row = make_job()
+        sjp.generate_job_pages(db, now=NOW)
+        self._set_entry(store, row, version=str(sjp.PAGE_VERSION - 1))
+
+        result = sjp.generate_job_pages(db, refresh=True, now=NOW)
+        assert (result.refreshed, result.updated) == (1, 1)
+        assert self._entry(store, row).version == str(sjp.PAGE_VERSION)
+
+    def test_refresh_re_renders_a_rescanned_page_with_changed_links_even_if_its_content_is_the_same(
+        self, db, make_job, store
+    ):
+        row = make_job()
+        sjp.generate_job_pages(db, now=NOW)
+        self._set_entry(store, row, links="outdated", scanned="2026-01-01T00:00:00+00:00")
+        result = sjp.generate_job_pages(db, refresh=True, now=NOW)
+        assert (result.refreshed, result.updated, result.rescanned_unchanged) == (1, 1, 0)
+
+    def test_entries_from_before_links_were_recorded_have_none(self):
+        assert sjp.parse_entry("a", "10|s|jobs/us/x|r|h|").links == ""
+
     def test_a_rescan_re_renders_and_invalidates(self, db, make_job, store):
         row = make_job()
         sjp.generate_job_pages(db, now=NOW)
@@ -541,7 +590,7 @@ class TestGeneratorScript:
         monkeypatch.setattr(script, "SessionLocal", lambda: type("S", (), {"rollback": lambda s: None, "close": lambda s: None})())
         monkeypatch.setattr(script, "generate_for_date", lambda db, d, **kw: day)
         monkeypatch.setattr(script, "read_job_paths", lambda: {})
-        monkeypatch.setattr(script, "generate_job_pages", lambda db, dry_run, full, only: (_ for _ in ()).throw(RuntimeError("boom")))
+        monkeypatch.setattr(script, "generate_job_pages", lambda db, dry_run, full, refresh, only: (_ for _ in ()).throw(RuntimeError("boom")))
         monkeypatch.setattr(script, "invalidate_paths", lambda paths: invalidated.append(paths))
         monkeypatch.setattr(script, "publish_assets", lambda: ["/jobs/_assets/analytics.js"])
         monkeypatch.setattr("sys.argv", ["generate_static_job_pages.py"])
