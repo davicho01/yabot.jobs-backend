@@ -1,6 +1,8 @@
 """Nightly upkeep of the job-collection registry (app.models.job_collection),
 before the nightly page refresh: stores the latest Google search results
-per page (app.services.search_console), re-scores every collection and applies
+per page (app.services.search_console) and the searches behind them,
+grouped by what they were after (app.services.search_opportunities),
+re-scores every collection and applies
 the lifecycle rules (app.services.collection_lifecycle: below the bar for
 days -> noindex, no jobs for weeks -> archived), then finds new collections
 worth a page (app.services.collection_discovery) and records them for
@@ -24,7 +26,7 @@ import logging
 from datetime import datetime, timezone
 
 from app.db.session import SessionLocal
-from app.services import collection_discovery, collection_lifecycle, search_console
+from app.services import collection_discovery, collection_lifecycle, search_console, search_opportunities
 from app.services.static_job_pages import load_link_index
 
 logging.basicConfig(level=logging.INFO)
@@ -45,16 +47,33 @@ def main() -> None:
                 db.rollback()
                 logger.exception("Search Console import failed; continuing without new search data.")
         live = [job for job in load_link_index(db, now).values() if not job.closed]
+        demand: dict[str, int] = {}
+        searched = (0, 0)
+        try:  # report-only too
+            opportunities = search_opportunities.build(search_console.fetch_queries(now), live, now)
+            demand = search_opportunities.demand(opportunities)
+            searched = (len(opportunities), sum(o.kind == "role" for o in opportunities))
+            for o in opportunities[:20]:  # read before storing: the commit expires them
+                logger.info(
+                    "searched\t%s\t%s\t%d shown\t%d clicks\t%s open jobs",
+                    o.kind, o.label, o.impressions, o.clicks, o.open_jobs,
+                )
+            if args.apply:
+                search_opportunities.store(db, opportunities)
+        except Exception:
+            db.rollback()
+            logger.exception("Search opportunities failed; discovery goes by score alone.")
         changes = collection_lifecycle.reevaluate_all(db, live, now, apply=args.apply)
-        found = collection_discovery.discover(db, live, now, apply=args.apply)
+        found = collection_discovery.discover(db, live, now, apply=args.apply, demand=demand)
     for change in changes:
         logger.info("%s: %s -> %s (%s)", change.key, change.previous, change.new, change.reason)
     for proposal in found:
         e = proposal.evaluation
         logger.info("%s\t%d\t%s\t%d open jobs", proposal.key, e.total, e.recommendation.value, e.stats.open_jobs)
     logger.info(
-        "Lifecycle: %d status change(s); discovery: %d new collection(s) for approval.%s",
-        len(changes), len(found), "" if args.apply else " Dry run: nothing written.",
+        "Searches: %d group(s), %d by role; lifecycle: %d status change(s); discovery: %d new collection(s) for approval.%s",
+        *searched, len(changes), len(found),
+        "" if args.apply else " Dry run: nothing written.",
     )
 
 

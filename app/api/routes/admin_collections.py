@@ -2,10 +2,12 @@
 reasons and likely duplicates, one collection's history, approving,
 no-indexing, archiving or restoring one or a batch
 (app.services.collection_admin), re-scoring one now
-(app.services.collection_lifecycle), and previewing one's page."""
+(app.services.collection_lifecycle), and previewing one's page; and what
+people search on Google, grouped (PR-17a, app.services.search_opportunities)."""
 
 import uuid
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import HTMLResponse
@@ -15,6 +17,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.api.deps import get_current_admin_user, get_db
 from app.models.enums import CollectionStatus, CollectionType
 from app.models.job_collection import JobCollection
+from app.models.search_opportunity import SearchOpportunity
 from app.models.user import User
 from app.schemas.collection import (
     AdminCollectionAction,
@@ -25,6 +28,8 @@ from app.schemas.collection import (
     AdminCollectionEventRead,
     AdminCollectionListRead,
     AdminCollectionRead,
+    AdminSearchOpportunityListRead,
+    AdminSearchOpportunityRead,
 )
 from app.services import collection_admin, collection_dimensions, collection_lifecycle, static_collection_pages
 from app.services.job_collections import CollectionError
@@ -114,6 +119,43 @@ def list_collections(
     ).all()
     counts = dict(db.execute(select(JobCollection.status, func.count()).group_by(JobCollection.status)).all())
     return AdminCollectionListRead(items=[_to_read(c) for c in rows], total=total, counts=counts)
+
+
+@router.get("/searches", response_model=AdminSearchOpportunityListRead)
+def list_searches(
+    kind: Literal["role", "location", "company", "other"] | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> AdminSearchOpportunityListRead:
+    """Google searches over the last 28 days, grouped by what they were
+    after, most shown first; a role's with the collection that would answer
+    it, if there is one."""
+    stmt = select(SearchOpportunity)
+    if kind is not None:
+        stmt = stmt.where(SearchOpportunity.kind == kind)
+    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    rows = db.scalars(
+        stmt.order_by(SearchOpportunity.impressions.desc(), SearchOpportunity.clicks.desc(), SearchOpportunity.key)
+        .limit(page_size)
+        .offset((page - 1) * page_size)
+    ).all()
+    keys = {o.collection_key for o in rows if o.collection_key}
+    collections = {
+        c.key: c for c in db.scalars(select(JobCollection).where(JobCollection.key.in_(keys)))
+    } if keys else {}
+    items = []
+    for o in rows:
+        c = collections.get(o.collection_key) if o.collection_key else None
+        items.append(AdminSearchOpportunityRead(
+            key=o.key, kind=o.kind, label=o.label, clicks=o.clicks, impressions=o.impressions, position=o.position,
+            open_jobs=o.open_jobs, queries=o.queries, pages=o.pages, collection_key=o.collection_key,
+            collection_id=c.id if c else None, collection_status=c.status if c else None,
+        ))
+    counts = dict(db.execute(select(SearchOpportunity.kind, func.count()).group_by(SearchOpportunity.kind)).all())
+    return AdminSearchOpportunityListRead(
+        items=items, total=total, counts=counts, updated_on=db.scalar(select(func.max(SearchOpportunity.updated_on))),
+    )
 
 
 @router.get("/{collection_id}", response_model=AdminCollectionDetailRead)
