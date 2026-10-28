@@ -12,6 +12,7 @@ from app.models.job_url import JobPostingUrl
 from app.models.oauth import OAuthAuthorizationRequest, OAuthClient, OAuthRefreshToken
 from app.models.resume import Resume, ResumeReview, ResumeScore, ResumeSkillAddition, TailoredResume
 from app.models.saved_search import SavedSearch
+from app.models.search_performance import SearchPerformanceDay
 from app.models.subscription_evaluation_job import SubscriptionEvaluationJob
 from app.models.user import User
 from app.models.user_activity import UserActiveHour
@@ -36,6 +37,7 @@ __all__ = [
     "ResumeSkillAddition",
     "TailoredResume",
     "SavedSearch",
+    "SearchPerformanceDay",
     "OAuthClient",
     "OAuthAuthorizationRequest",
     "OAuthRefreshToken",

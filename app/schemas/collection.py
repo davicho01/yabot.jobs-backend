@@ -27,6 +27,10 @@ class AdminCollectionRead(BaseModel):
     # with nearly the same jobs, and since when it's scored below the bar
     # or had no open jobs (Eastern dates) — the rules act on those.
     duplicates: list[str]
+    # Its pages' Google results over the last 28 days (search_console);
+    # None until the nightly re-scoring has search data.
+    search_clicks: int | None
+    search_impressions: int | None
     below_bar_since: str | None
     empty_since: str | None
     last_evaluated_at: datetime | None

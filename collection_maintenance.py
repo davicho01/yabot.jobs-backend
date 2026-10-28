@@ -1,5 +1,6 @@
 """Nightly upkeep of the job-collection registry (app.models.job_collection),
-before the nightly page refresh: re-scores every collection and applies
+before the nightly page refresh: stores the latest Google search results
+per page (app.services.search_console), re-scores every collection and applies
 the lifecycle rules (app.services.collection_lifecycle: below the bar for
 days -> noindex, no jobs for weeks -> archived), then finds new collections
 worth a page (app.services.collection_discovery) and records them for
@@ -23,7 +24,7 @@ import logging
 from datetime import datetime, timezone
 
 from app.db.session import SessionLocal
-from app.services import collection_discovery, collection_lifecycle
+from app.services import collection_discovery, collection_lifecycle, search_console
 from app.services.static_job_pages import load_link_index
 
 logging.basicConfig(level=logging.INFO)
@@ -37,6 +38,12 @@ def main() -> None:
 
     now = datetime.now(timezone.utc)
     with SessionLocal() as db:
+        if args.apply:
+            try:  # search data is report-only: its failure mustn't stop the rest
+                search_console.ingest(db, now)
+            except Exception:
+                db.rollback()
+                logger.exception("Search Console import failed; continuing without new search data.")
         live = [job for job in load_link_index(db, now).values() if not job.closed]
         changes = collection_lifecycle.reevaluate_all(db, live, now, apply=args.apply)
         found = collection_discovery.discover(db, live, now, apply=args.apply)

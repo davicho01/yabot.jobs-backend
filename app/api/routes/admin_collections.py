@@ -54,6 +54,8 @@ def _to_read(collection: JobCollection) -> dict:
         companies=stats.get("companies_hiring"),
         freshness_score=qualification.get("freshness_score"),
         duplicates=list(qualification.get("duplicates") or []),
+        search_clicks=(qualification.get("search") or {}).get("clicks"),
+        search_impressions=(qualification.get("search") or {}).get("impressions"),
         below_bar_since=qualification.get("below_bar_since"),
         empty_since=qualification.get("empty_since"),
         last_evaluated_at=collection.last_evaluated_at,
