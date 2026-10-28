@@ -10,6 +10,8 @@ Recorded in its qualification, beside the score:
   duplicates       keys of other collections listing nearly the same jobs
                    (at least THRESHOLDS.near_duplicate_share of the longer
                    list), for the admin to pick one
+  search           its pages' Google clicks and impressions over the last
+                   search_console.TOTALS_DAYS (report-only, not scored)
 
 Rules, each recorded as an event with its reason:
   indexed, scoring NOINDEX for GRACE_DAYS     -> NOINDEX   (lifecycle),
@@ -36,9 +38,10 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.enums import CollectionStatus as S
 from app.models.enums import CollectionTrigger as T
 from app.models.job_collection import JobCollection
-from app.services import collection_dimensions, job_collections
+from app.services import collection_dimensions, job_collections, search_console
 from app.services.collection_dimensions import clause_all, matches_all
 from app.services.collection_qualification import THRESHOLDS, Evaluation, Recommendation, evaluate_jobs
+from app.services.static_collection_pages import collection_path
 from app.services.static_job_pages import LinkJob, eastern, load_link_index
 
 GRACE_DAYS = 3
@@ -84,9 +87,10 @@ def reevaluate_all(db: Session, live: list[LinkJob], now: datetime, *, apply: bo
         scored[collection.key] = (collection, *evaluate(collection, by_title.get(role.name, []), now))
 
     duplicates = _duplicates({key: ids for key, (_, _, ids) in scored.items()})
+    search = search_console.page_totals(db, now)
     changes = []
     for key, (collection, evaluation, _) in scored.items():
-        changes += _record(db, collection, evaluation, duplicates.get(key, []), now, apply=apply)
+        changes += _record(db, collection, evaluation, duplicates.get(key, []), search, now, apply=apply)
     if apply:
         db.commit()
     return changes
@@ -102,7 +106,7 @@ def reevaluate_one(db: Session, collection: JobCollection, now: datetime) -> lis
     role_jobs = list(load_link_index(db, now, where=clause_all([role], now)).values())
     evaluation, _ = evaluate(collection, role_jobs, now)
     previous = (collection.qualification or {}).get("duplicates", [])
-    changes = _record(db, collection, evaluation, previous, now, apply=True)
+    changes = _record(db, collection, evaluation, previous, search_console.page_totals(db, now), now, apply=True)
     db.flush()
     return changes
 
@@ -124,7 +128,14 @@ def _duplicates(jobs: dict[str, set[str]]) -> dict[str, list[str]]:
 
 
 def _record(
-    db: Session, collection: JobCollection, evaluation: Evaluation, duplicates: list[str], now: datetime, *, apply: bool
+    db: Session,
+    collection: JobCollection,
+    evaluation: Evaluation,
+    duplicates: list[str],
+    search: dict[str, search_console.PageTotals],
+    now: datetime,
+    *,
+    apply: bool,
 ) -> list[Change]:
     today = eastern(now).date()
     previous = collection.qualification or {}
@@ -149,7 +160,11 @@ def _record(
 
     if not apply:
         return [Change(collection.key, status, change[0], change[2])] if change else []
-    details = evaluation.as_dict() | {"below_bar_since": below_since, "empty_since": empty_since, "duplicates": duplicates}
+    totals = search_console.collection_totals(collection_path(collection), search)
+    details = evaluation.as_dict() | {
+        "below_bar_since": below_since, "empty_since": empty_since, "duplicates": duplicates,
+        "search": {"clicks": totals.clicks, "impressions": totals.impressions, "days": search_console.TOTALS_DAYS},
+    }
     collection.qualification = details
     collection.qualification_score = evaluation.total
     collection.last_evaluated_at = now
