@@ -8,6 +8,7 @@ from app.models.free_trial_job import FreeTrialJob
 from app.models.job_application import UserJobApplication
 from app.models.job_collection import JobCollection, JobCollectionEvent
 from app.models.job_posting import JobPosting
+from app.models.job_share import JobShare
 from app.models.job_url import JobPostingUrl
 from app.models.oauth import OAuthAuthorizationRequest, OAuthClient, OAuthRefreshToken
 from app.models.resume import Resume, ResumeReview, ResumeScore, ResumeSkillAddition, TailoredResume
@@ -27,6 +28,7 @@ __all__ = [
     "UserApiKey",
     "JobPostingUrl",
     "JobPosting",
+    "JobShare",
     "UserJobApplication",
     "JobCollection",
     "JobCollectionEvent",

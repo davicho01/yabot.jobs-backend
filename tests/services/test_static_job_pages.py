@@ -1168,6 +1168,14 @@ class TestSharedChrome:
         assert 'track="collection_job"' in template and 'data-track="collection_link"' in template
         assert '<nav class="pager"' in template and 'rel="next"' in template
 
+    def test_the_shared_script_puts_a_share_id_on_the_share_link(self):
+        from app.services.static_pages import _TEMPLATES_DIR
+
+        script = (_TEMPLATES_DIR / "assets" / "analytics.js").read_text()
+        assert '"?ref=share&sid=" + sid' in script and "}, true);" in script  # capture phase: before the page's own
+        template = (_TEMPLATES_DIR / "job.html.jinja").read_text()
+        assert 'class="job-share" data-share-url=' in template and "button.dataset.shareUrl" in template
+
     def test_publish_assets_uploads_the_script(self, store):
         from app.services import static_pages
 
