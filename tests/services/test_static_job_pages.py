@@ -1156,6 +1156,18 @@ class TestSharedChrome:
         assert "navigator.globalPrivacyControl" in script
         assert "allow_google_signals: false" in script and "allow_ad_personalization_signals: false" in script
 
+    def test_the_shared_script_sends_collection_events_and_keeps_seo_click(self):
+        from app.services.static_pages import _TEMPLATES_DIR
+
+        script = (_TEMPLATES_DIR / "assets" / "analytics.js").read_text()
+        assert '"seo_click", { link_type: kind, page_type: pageType }' in script  # history carries on
+        for event in ("collection_view", "collection_job_click", "collection_related_click", "collection_pagination"):
+            assert f'"{event}"' in script
+        # What the collection template marks the links with.
+        template = (_TEMPLATES_DIR / "collection.html.jinja").read_text()
+        assert 'track="collection_job"' in template and 'data-track="collection_link"' in template
+        assert '<nav class="pager"' in template and 'rel="next"' in template
+
     def test_publish_assets_uploads_the_script(self, store):
         from app.services import static_pages
 

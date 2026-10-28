@@ -37,9 +37,35 @@
   tag.src = "https://www.googletagmanager.com/gtag/js?id=" + MEASUREMENT_ID;
   document.head.appendChild(tag);
 
+  // A collection page (/jobs/us/<role>[/<place>|/remote][/page/<n>]): which
+  // one, from its path, so these events need no re-render to carry it.
+  var collection = null;
+  if (pageType === "collection") {
+    var match = location.pathname.match(/^\/jobs\/us\/(.+?)(?:\/page\/(\d+))?\/?$/);
+    if (match) {
+      collection = { collection_slug: match[1], page_number: match[2] ? Number(match[2]) : 1 };
+      gtag("event", "collection_view", collection);
+    }
+  }
+  // The spec's collection events (implementation-spec §28), by what was clicked.
+  var COLLECTION_CLICKS = { collection_job: "collection_job_click", collection_link: "collection_related_click" };
+
   // Which links and buttons people use: only the kind (data-track), never a URL.
+  // seo_click stays as it was, so its history carries on; a collection page
+  // also sends its own event.
   document.addEventListener("click", function (event) {
-    var link = event.target.closest ? event.target.closest("a[data-track], button[data-track]") : null;
-    if (link) gtag("event", "seo_click", { link_type: link.getAttribute("data-track"), page_type: pageType });
+    if (!event.target.closest) return;
+    var link = event.target.closest("a[data-track], button[data-track]");
+    var kind = link && link.getAttribute("data-track");
+    if (link) gtag("event", "seo_click", { link_type: kind, page_type: pageType });
+    if (!collection) return;
+    if (link && COLLECTION_CLICKS[kind]) {
+      gtag("event", COLLECTION_CLICKS[kind], collection);
+      return;
+    }
+    var pager = event.target.closest(".pager a[rel]");
+    if (pager) {
+      gtag("event", "collection_pagination", Object.assign({ direction: pager.getAttribute("rel") }, collection));
+    }
   });
 })();
