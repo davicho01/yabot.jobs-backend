@@ -78,12 +78,18 @@ def collection_name(collection: JobCollection) -> str:
     page yet."""
     if collection.h1:
         return collection.h1
-    role = collection_dimensions.get("role", collection.role) if collection.role else None
+    return role_name(collection.role, collection.location) if collection.role else collection.key
+
+
+def role_name(role_slug: str, location: str | None = None) -> str:
+    """"Remote Software Engineer jobs", "Software Engineer jobs in Raleigh,
+    NC", "Software Engineer jobs"; the slugs for an unknown role."""
+    role = collection_dimensions.get("role", role_slug)
     if role is None:
-        return collection.key
-    if collection.location == REMOTE_SLUG:
+        return job_collections.collection_key({"role": role_slug, "location": location} if location else {"role": role_slug})
+    if location == REMOTE_SLUG:
         return f"Remote {role.name} jobs"
-    if collection.location:
-        area = collection_dimensions.get("location", collection.location)
-        return f"{role.name} jobs in {area.name if area else collection.location}"
+    if location:
+        area = collection_dimensions.get("location", location)
+        return f"{role.name} jobs in {area.name if area else location}"
     return f"{role.name} jobs"

@@ -60,7 +60,7 @@ def db():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine, tables=[
         m.User.__table__, m.JobCollection.__table__, m.JobCollectionEvent.__table__,
-        m.JobPostingUrl.__table__, m.JobPosting.__table__, m.SearchPerformanceDay.__table__,
+        m.JobPostingUrl.__table__, m.JobPosting.__table__, m.SearchPerformanceDay.__table__, m.SearchOpportunity.__table__,
     ])
     session = sessionmaker(bind=engine, autoflush=False)()
     yield session

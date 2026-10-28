@@ -12,7 +12,9 @@ Each group is scored (collection_qualification). One that would score INDEX
 or REVIEW and isn't in the registry yet is recorded with its score — as
 QUALIFIED when it scores INDEX, else as a CANDIDATE, as the approval
 batches do — so it shows under "Waiting" on the admin page; at most
-MAX_NEW_PER_RUN a run, best first. Nothing is published:
+MAX_NEW_PER_RUN a run: the ones people searched Google for first (most
+searched first, app.services.search_opportunities), then best score
+first. Nothing is published:
 only a person does that (job_collections.MANUAL_ONLY). A collection already
 in the registry, archived ones included, is never proposed again.
 """
@@ -85,16 +87,25 @@ def propose(live: list[LinkJob], now: datetime) -> list[Proposal]:
 
 
 def discover(
-    db: Session, live: list[LinkJob], now: datetime, *, apply: bool, limit: int = MAX_NEW_PER_RUN
+    db: Session,
+    live: list[LinkJob],
+    now: datetime,
+    *,
+    apply: bool,
+    limit: int = MAX_NEW_PER_RUN,
+    demand: dict[str, int] | None = None,
 ) -> list[Proposal]:
     """The new collections proposed this run (at most `limit`), recorded
-    when `apply`."""
+    when `apply`. `demand`: {collection key: Google impressions} of what
+    people searched for (search_opportunities.demand)."""
+    demand = demand or {}
     registry = {c.key: c for c in db.scalars(select(JobCollection).options(selectinload(JobCollection.events)))}
     returning = {key for key, c in registry.items() if _archived_by_lifecycle(c)}
     new = [
         p for p in propose(live, now)
         if p.evaluation.recommendation in PROPOSED and (p.key not in registry or p.key in returning)
     ]
+    new.sort(key=lambda p: -demand.get(p.key, 0))  # stable: best score first within
     new = new[:limit]
     if not apply:
         return new
@@ -106,9 +117,9 @@ def discover(
                 db, collection, S.CANDIDATE, reason="found by discovery again", trigger=T.LIFECYCLE
             )
         else:
-            collection = job_collections.create_collection(
-                db, reason="found by discovery", trigger=T.SYSTEM, **proposal.values
-            )
+            searched = demand.get(proposal.key)
+            reason = f"found by discovery; shown {searched} times in Google searches" if searched else "found by discovery"
+            collection = job_collections.create_collection(db, reason=reason, trigger=T.SYSTEM, **proposal.values)
         if e.recommendation == Recommendation.INDEX:
             job_collections.transition(
                 db, collection, S.QUALIFIED, reason=f"scored {e.total}", trigger=T.QUALIFICATION, details=e.as_dict()

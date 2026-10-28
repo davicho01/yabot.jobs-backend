@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -76,3 +76,37 @@ class AdminCollectionBulkError(BaseModel):
 class AdminCollectionBulkResult(BaseModel):
     updated: list[AdminCollectionRead]
     errors: list[AdminCollectionBulkError]
+
+
+class AdminSearchQueryRead(BaseModel):
+    query: str
+    clicks: int
+    impressions: int
+
+
+class AdminSearchPageRead(BaseModel):
+    page: str
+    impressions: int
+
+
+class AdminSearchOpportunityRead(BaseModel):
+    key: str
+    kind: str  # role | location | company | other
+    label: str
+    clicks: int
+    impressions: int
+    position: float
+    open_jobs: int | None
+    queries: list[AdminSearchQueryRead]
+    pages: list[AdminSearchPageRead]
+    # For a role: the collection that would answer it, if it's in the registry
+    collection_key: str | None
+    collection_id: uuid.UUID | None
+    collection_status: str | None
+
+
+class AdminSearchOpportunityListRead(BaseModel):
+    items: list[AdminSearchOpportunityRead]
+    total: int
+    counts: dict[str, int]  # by kind, ignoring the filter
+    updated_on: date | None  # when they were last imported
