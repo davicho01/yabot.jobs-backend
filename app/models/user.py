@@ -57,6 +57,16 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # without this the getting-started "Set up AI access" step would be done
     # before they ever saw their options. See app.services.onboarding.
     ai_access_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Where the user first came from, recorded once right after sign-up
+    # (POST /me/attribution, app.services.job_shares): the share link's id
+    # (?sid=, see JobShare) or the campaign tags and the first page seen.
+    # Never names another person: a share id is random.
+    signup_share_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    signup_source: Mapped[str | None] = mapped_column(String(100))
+    signup_medium: Mapped[str | None] = mapped_column(String(100))
+    signup_campaign: Mapped[str | None] = mapped_column(String(200))
+    signup_landing_page: Mapped[str | None] = mapped_column(String(500))
+    attributed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Stripe billing (see app.services.billing, the only writer). Mirrors the
     # user's subscription as Stripe last reported it via webhook, so access

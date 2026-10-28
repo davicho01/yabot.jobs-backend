@@ -22,6 +22,7 @@ from app.api.routes import (
     onboarding,
     resumes,
     saved_searches,
+    shares,
 )
 from app.core.config import settings
 from app.db.session import engine
@@ -70,6 +71,7 @@ app.include_router(onboarding.router)
 app.include_router(billing.router)
 app.include_router(admin.router)
 app.include_router(admin_collections.router)
+app.include_router(shares.router)
 
 
 @app.get("/health")

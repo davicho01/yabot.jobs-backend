@@ -50,6 +50,18 @@
   // The spec's collection events (implementation-spec §28), by what was clicked.
   var COLLECTION_CLICKS = { collection_job: "collection_job_click", collection_link: "collection_related_click" };
 
+  // A job page's Share (job.html.jinja): the link gets a new random share id
+  // each tap, ?ref=share&sid=<id>, so a sign-up it brings is counted
+  // (the app's utils/attribution). In the capture phase, so the page's own
+  // share handler, which reads data-share-url, sees the new link.
+  document.addEventListener("click", function (event) {
+    var share = event.target.closest ? event.target.closest(".job-share[data-share-url]") : null;
+    if (!share || !window.crypto || !crypto.getRandomValues) return;
+    var bytes = crypto.getRandomValues(new Uint8Array(16));
+    var sid = btoa(String.fromCharCode.apply(null, bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    share.setAttribute("data-share-url", share.getAttribute("data-share-url").split("?")[0] + "?ref=share&sid=" + sid);
+  }, true);
+
   // Which links and buttons people use: only the kind (data-track), never a URL.
   // seo_click stays as it was, so its history carries on; a collection page
   // also sends its own event.
