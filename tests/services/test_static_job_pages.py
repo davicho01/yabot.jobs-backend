@@ -9,6 +9,7 @@ import html as html_module
 import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine
@@ -253,6 +254,15 @@ class TestRendering:
 
 
 class TestSitemaps:
+    def test_a_job_closed_over_two_weeks_ago_leaves_the_sitemap(self):
+        def job(closed):
+            return SimpleNamespace(closed=closed)
+
+        assert not sjp.closed_out_of_sitemap(job(""), NOW)  # open
+        assert not sjp.closed_out_of_sitemap(job("2026-09-25T00:00:00+00:00"), NOW)  # closed 7 days ago
+        assert sjp.closed_out_of_sitemap(job("2026-09-18T18:00:00+00:00"), NOW)  # exactly 14 days
+        assert sjp.closed_out_of_sitemap(job("2026-08-01T00:00:00"), NOW)  # naive timestamps are UTC
+
     def test_shards_and_index(self, monkeypatch):
         monkeypatch.setattr(sjp, "SITEMAP_SHARD_SIZE", 2)
         out = sjp.build_job_sitemaps(
