@@ -127,6 +127,10 @@ MAX_AGE_DAYS = 60
 # crawl interval (3 days) plus a weekend. A board that's no longer crawled
 # lets its jobs fall back to MAX_AGE_DAYS.
 LIVE_SEEN_DAYS = 14
+# A closed job's page stays up, but leaves the sitemap this many days after
+# it closed: nobody can apply, and Search Console showed no clicks on them,
+# while Google's crawl (a few thousand a day) is the scarce thing.
+CLOSED_SITEMAP_DAYS = 14
 # Legacy /job/<url_id> pages moved to their descriptive path per run, out
 # of whatever MAX_RENDERS_PER_RUN leaves after new pages; the rest of the
 # budget stays for rescanned and closed jobs. --full moves them all.
@@ -1080,6 +1084,16 @@ class JobSitemaps:
     dates: dict[str, list[str]]  # SITEMAP_DATES_KEY's content, for the next run
 
 
+def closed_out_of_sitemap(job: LinkJob, now: datetime) -> bool:
+    """True for a job that closed more than CLOSED_SITEMAP_DAYS ago."""
+    if not job.closed:
+        return False
+    closed = datetime.fromisoformat(job.closed)
+    if closed.tzinfo is None:
+        closed = closed.replace(tzinfo=timezone.utc)
+    return closed <= now - timedelta(days=CLOSED_SITEMAP_DAYS)
+
+
 def build_job_sitemaps(
     pages: dict[str, str],
     hub_paths: Iterable[str] = (),
@@ -1395,7 +1409,11 @@ def generate_job_pages(
     # Every live page, newest posting day first so Google reaches new jobs
     # first — except legacy /job/<url_id> ones not moved yet: the sitemap
     # only lists descriptive URLs.
-    listed = {i: raw for i, raw in pages.items() if i in index and not is_legacy_path(parse_entry(i, raw).path)}
+    listed = {
+        i: raw
+        for i, raw in pages.items()
+        if i in index and not is_legacy_path(parse_entry(i, raw).path) and not closed_out_of_sitemap(index[i], now)
+    }
     previous_index = get_page_store().get(SITEMAP_INDEX_KEY) or b""
     previous_shards = _SITEMAP_SHARD_RE.findall(previous_index.decode())
     # Collection pages are listed only while indexed (a NOINDEX one keeps
