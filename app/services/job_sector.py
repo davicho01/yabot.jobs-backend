@@ -25,13 +25,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models.enums import JobSector
+from app.models.enums import JobSector, WorkplaceType
 from app.models.job_posting import JobPosting
 from app.services.sector_api import SectorPrediction, classify_remote
 
 logger = logging.getLogger("app.job_sector")
 
 _VALID_SECTORS = {s.value for s in JobSector}
+
+# sector_model of a posting deliberately not classified (see sector_wanted).
+SKIPPED_MODEL = "skipped-non-us"
 
 
 def input_hash(title: str | None, description: str | None) -> str:
@@ -67,11 +70,33 @@ def store_prediction(posting: JobPosting, prediction: SectorPrediction | None, t
     return True
 
 
+def sector_wanted(posting: JobPosting) -> bool:
+    """Whether the sector service should classify this posting. The site is US
+    only, so a posting resolved to another country isn't, unless it's remote
+    (open to US applicants whatever country its listing names). An unresolved
+    country still counts: many of those are US."""
+    return posting.country in (None, "US") or posting.workplace_type == WorkplaceType.REMOTE
+
+
+def mark_sector_skipped(posting: JobPosting) -> None:
+    """Record that no sector was computed on purpose. A sector_model (not NULL)
+    keeps the pending sweep from picking the posting up; no input hash makes
+    a rescan that becomes wanted (now US or remote) classify it."""
+    posting.sector = JobSector.UNKNOWN
+    posting.sector_model = SKIPPED_MODEL
+    posting.sector_confidence = posting.sector_input_hash = None
+    posting.standard_titles = posting.standard_title_model = None
+
+
 def apply_sector(posting: JobPosting, title: str | None, description: str | None) -> None:
     """Set the posting's sector (and standard titles) during a scan. Unchanged
     text keeps what it already has, unless it's a Tech posting still without
     titles (classified before the service returned them); otherwise the
-    service is called, and a failed call leaves the posting pending."""
+    service is called, and a failed call leaves the posting pending. A
+    posting that isn't wanted (see sector_wanted) skips the service."""
+    if not sector_wanted(posting):
+        mark_sector_skipped(posting)
+        return
     text_hash = input_hash(title, description)
     if posting.sector_model is not None and posting.sector_input_hash == text_hash:
         if posting.sector != JobSector.ENGINEERING_TECH or posting.standard_title_model is not None:

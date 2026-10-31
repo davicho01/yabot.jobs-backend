@@ -412,21 +412,33 @@ gcloud run jobs add-iam-policy-binding crawl-dispatcher \
   --member="serviceAccount:${PROJECT_ID}@appspot.gserviceaccount.com" \
   --role="roles/run.invoker"
 
-# Every 30 minutes, 8am-8:30pm America/New_York, weekdays only (no collection
-# runs on weekends; was 7am-10:30pm until 2026-10-14). Each run only crawls the sources that are due: every
+# 8am, noon, 4pm and 8pm America/New_York on weekdays, and 10am and 4pm on
+# weekends (was every 30 minutes, 8am-8:30pm, weekdays only, until 2026-10-31;
+# 7am-10:30pm before 2026-10-14) — fewer, larger runs to cut crawl-worker cold
+# starts. Each run only crawls the sources that are due: every
 # source has its own adaptive interval (2h-3d by default, see
 # app.services.crawl_schedule and settings.crawl_min/max_interval_minutes),
 # short for boards that keep posting and long for quiet ones, and a run
-# dispatches at most settings.crawl_dispatch_batch_size of them. This replaced
-# crawling every source at 1pm and 9pm (2026-10-12): those bursts ran Cloud SQL
-# out of connections, and the busiest boards overflowed their 500-URL listing
-# between crawls. Run at least as often as the minimum interval.
+# dispatches at most settings.crawl_dispatch_batch_size of them — with runs
+# this far apart that has to cover every due source (set on the job with
+# CRAWL_DISPATCH_BATCH_SIZE, not in this script), or the rest wait a whole gap.
+# This replaced crawling every source at 1pm and 9pm (2026-10-12): those bursts
+# ran Cloud SQL out of connections, and the busiest boards overflowed their
+# 500-URL listing between crawls.
 # --oauth-service-account-email (not --oidc-...) because the target is the
 # Run Admin REST API, not the job's own service URL.
 
 gcloud scheduler jobs create http crawl-dispatch-hourly \
   --location="$REGION" \
-  --schedule="*/30 8-20 * * 1-5" \
+  --schedule="0 8,12,16,20 * * 1-5" \
+  --time-zone="America/New_York" \
+  --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/crawl-dispatcher:run" \
+  --http-method=POST \
+  --oauth-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com"
+
+gcloud scheduler jobs create http crawl-dispatch-weekend \
+  --location="$REGION" \
+  --schedule="0 10,16 * * 6,0" \
   --time-zone="America/New_York" \
   --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/crawl-dispatcher:run" \
   --http-method=POST \
@@ -564,6 +576,17 @@ gcloud functions add-invoker-policy-binding saved-search-alerts \
 gcloud scheduler jobs create http saved-search-alerts-hourly \
   --location="$REGION" \
   --schedule="0 8-21 * * 1-5" \
+  --time-zone="America/New_York" \
+  --uri="$SAVED_SEARCH_ALERTS_FUNCTION_URL" \
+  --http-method=POST \
+  --oidc-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com" \
+  --oidc-token-audience="$SAVED_SEARCH_ALERTS_FUNCTION_URL"
+
+# Weekends: the same alerts at 2pm and 8pm ET, matching the weekend pages
+# (generate-static-job-pages-weekend) after the 10am and 4pm crawls.
+gcloud scheduler jobs create http saved-search-alerts-weekend \
+  --location="$REGION" \
+  --schedule="0 14,20 * * 6,0" \
   --time-zone="America/New_York" \
   --uri="$SAVED_SEARCH_ALERTS_FUNCTION_URL" \
   --http-method=POST \
@@ -731,6 +754,16 @@ gcloud run jobs add-iam-policy-binding generate-static-job-pages \
 gcloud scheduler jobs create http generate-static-job-pages-30min \
   --location="$REGION" \
   --schedule="0 9-21/2 * * 1-5" \
+  --time-zone="America/New_York" \
+  --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/generate-static-job-pages:run" \
+  --http-method=POST \
+  --oauth-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com"
+
+# Weekends: crawls run at 10am and 4pm (crawl-dispatch-weekend), so publish
+# what they found at 2pm and 8pm, once their scans have had hours to drain.
+gcloud scheduler jobs create http generate-static-job-pages-weekend \
+  --location="$REGION" \
+  --schedule="0 14,20 * * 6,0" \
   --time-zone="America/New_York" \
   --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/generate-static-job-pages:run" \
   --http-method=POST \

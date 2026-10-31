@@ -8,7 +8,7 @@ import pytest
 
 import app.models as m
 from app.core.config import settings
-from app.models.enums import JobSector, ScanStatus
+from app.models.enums import JobSector, ScanStatus, WorkplaceType
 from app.services import job_sector, sector_api
 from app.services.sector_api import SectorPrediction
 
@@ -147,6 +147,49 @@ class TestStandardTitles:
         job_sector.apply_sector(posting, posting.title, posting.description)
         assert api["calls"] == 2
         assert posting.standard_titles == ["Backend Engineer"]
+
+
+class TestNonUsPostings:
+    def test_a_non_us_posting_skips_the_api(self, scan_db, api):
+        posting = _posting(scan_db, country="IN", workplace_type=WorkplaceType.ONSITE)
+        job_sector.apply_sector(posting, posting.title, posting.description)
+        assert api["calls"] == 0
+        assert posting.sector == JobSector.UNKNOWN
+        assert posting.sector_model == job_sector.SKIPPED_MODEL
+        assert posting.sector_input_hash is None and posting.standard_titles is None
+
+    @pytest.mark.parametrize("country", ["US", None])
+    def test_us_and_unresolved_country_are_classified(self, scan_db, api, country):
+        posting = _posting(scan_db, country=country, workplace_type=WorkplaceType.ONSITE)
+        job_sector.apply_sector(posting, posting.title, posting.description)
+        assert api["calls"] == 1 and posting.sector_model == MODEL
+
+    def test_a_remote_posting_is_classified_whatever_its_country(self, scan_db, api):
+        posting = _posting(scan_db, country="DE", workplace_type=WorkplaceType.REMOTE)
+        job_sector.apply_sector(posting, posting.title, posting.description)
+        assert api["calls"] == 1 and posting.sector_model == MODEL
+
+    def test_a_rescan_that_becomes_us_is_classified(self, scan_db, api):
+        posting = _posting(scan_db, country="CA", workplace_type=WorkplaceType.ONSITE)
+        job_sector.apply_sector(posting, posting.title, posting.description)
+        posting.country = "US"
+        job_sector.apply_sector(posting, posting.title, posting.description)
+        assert api["calls"] == 1 and posting.sector_model == MODEL
+
+    def test_a_rescan_that_leaves_the_us_drops_the_sector(self, scan_db, api):
+        posting = _posting(scan_db, country="US", workplace_type=WorkplaceType.ONSITE)
+        job_sector.apply_sector(posting, posting.title, posting.description)
+        posting.country = "GB"
+        job_sector.apply_sector(posting, posting.title, posting.description)
+        assert api["calls"] == 1
+        assert posting.sector == JobSector.UNKNOWN and posting.sector_model == job_sector.SKIPPED_MODEL
+
+    def test_the_pending_sweep_leaves_a_skipped_posting_alone(self, scan_db, api):
+        posting = _posting(scan_db, country="IN", workplace_type=WorkplaceType.ONSITE)
+        job_sector.apply_sector(posting, posting.title, posting.description)
+        scan_db.commit()
+        assert job_sector.classify_pending_sectors(scan_db, workers=1) == (0, 0)
+        assert api["calls"] == 0 and posting.sector_model == job_sector.SKIPPED_MODEL
 
 
 class TestClassifyPendingSectors:
