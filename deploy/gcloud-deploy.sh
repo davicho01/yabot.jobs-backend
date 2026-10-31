@@ -24,7 +24,7 @@
 #   - retry-failed-scans  Cloud Function 2nd gen (retry_failed_scans.py:dispatch)
 #                       + Cloud Scheduler cron trigger
 #   - generate-static-job-pages  Cloud Run Job (generate_static_job_pages.py)
-#                       + Cloud Scheduler cron trigger, every 2 hours — publishes
+#                       + Cloud Scheduler cron triggers, 3 hours after each crawl run — publishes
 #                       the crawlable "jobs by sector, by day" pages straight into the
 #                       *frontend's* S3 bucket/CloudFront (SEO_PAGES_BUCKET below), not
 #                       this backend's own storage.
@@ -428,7 +428,7 @@ gcloud run jobs add-iam-policy-binding crawl-dispatcher \
 # --oauth-service-account-email (not --oidc-...) because the target is the
 # Run Admin REST API, not the job's own service URL.
 
-gcloud scheduler jobs create http crawl-dispatch-hourly \
+gcloud scheduler jobs create http crawl-dispatch-weekday \
   --location="$REGION" \
   --schedule="0 8,12,16,20 * * 1-5" \
   --time-zone="America/New_York" \
@@ -495,6 +495,7 @@ gcloud functions add-invoker-policy-binding browser-scaler \
 gcloud scheduler jobs create http browser-scaler-tick \
   --location="$REGION" \
   --schedule="*/2 * * * *" \
+  --time-zone="America/New_York" \
   --uri="$BROWSER_SCALER_FUNCTION_URL" \
   --http-method=POST \
   --oidc-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com" \
@@ -582,11 +583,11 @@ gcloud scheduler jobs create http saved-search-alerts-hourly \
   --oidc-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com" \
   --oidc-token-audience="$SAVED_SEARCH_ALERTS_FUNCTION_URL"
 
-# Weekends: the same alerts at 2pm and 8pm ET, matching the weekend pages
+# Weekends: the same alerts at noon and 6pm ET, matching the weekend pages
 # (generate-static-job-pages-weekend) after the 10am and 4pm crawls.
 gcloud scheduler jobs create http saved-search-alerts-weekend \
   --location="$REGION" \
-  --schedule="0 14,20 * * 6,0" \
+  --schedule="0 12,18 * * 6,0" \
   --time-zone="America/New_York" \
   --uri="$SAVED_SEARCH_ALERTS_FUNCTION_URL" \
   --http-method=POST \
@@ -600,7 +601,7 @@ gcloud scheduler jobs create http saved-search-alerts-weekend \
 #    every respect except cadence: daily, not hourly, since a follow-up
 #    date is a day, not a moment (see follow_up_reminders.py's own
 #    docstring) — checking more often than once a day couldn't send
-#    anything sooner. 13:00 UTC ≈ 8am ET / 5am PT, a US-morning send time
+#    anything sooner. 8am ET (5am PT), a US-morning send time
 #    for this product's currently US-centric user base.
 # ---------------------------------------------------------------------------
 
@@ -632,7 +633,8 @@ gcloud functions add-invoker-policy-binding follow-up-reminders \
 
 gcloud scheduler jobs create http follow-up-reminders-daily \
   --location="$REGION" \
-  --schedule="0 13 * * *" \
+  --schedule="0 8 * * *" \
+  --time-zone="America/New_York" \
   --uri="$FOLLOW_UP_REMINDERS_FUNCTION_URL" \
   --http-method=POST \
   --oidc-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com" \
@@ -680,6 +682,7 @@ gcloud functions add-invoker-policy-binding retry-failed-scans \
 gcloud scheduler jobs create http retry-failed-scans-hourly \
   --location="$REGION" \
   --schedule="0 * * * *" \
+  --time-zone="America/New_York" \
   --uri="$RETRY_FAILED_SCANS_FUNCTION_URL" \
   --http-method=POST \
   --oidc-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com" \
@@ -691,15 +694,14 @@ gcloud scheduler jobs create http retry-failed-scans-hourly \
 #     (§6). Runs generate_static_job_pages.py from the shared image. It
 #     writes straight into the *frontend's* S3 bucket/CloudFront
 #     distribution (SEO_PAGES_BUCKET/SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID
-#     above), not Postgres/Pub/Sub. Every 2 hours, 9am-9pm America/New_York,
-#     weekdays (since 2026-10-14; 9am-11pm from 2026-10-12): crawl-dispatch
-#     runs every 30 minutes and each source is crawled on its own adaptive
-#     interval (2h minimum), so new postings land throughout the day
-#     instead of in two bursts. Every 2 hours matches that minimum, and the
-#     9pm run picks up the last crawls of the day (dispatch stops at
-#     8:30pm). Was 2x/day (2pm/10pm,
-#     an hour after the old 1pm/9pm dispatch) and every 30 minutes before
-#     that; each run regenerates today's pages and re-renders only job
+#     above), not Postgres/Pub/Sub. At 11am, 3pm and 7pm America/New_York on
+#     weekdays (since 2026-10-31; every 2 hours 9am-9pm before that):
+#     crawl-dispatch runs at 8am, noon, 4pm and 8pm and a run's scans take
+#     about 3 hours to drain, so each pages run follows a crawl by 3 hours,
+#     and the nightly refresh below (11:30pm) publishes what the 8pm crawl
+#     found. Earlier: every 2 hours when dispatch ran every 30 minutes,
+#     2x/day (2pm/10pm, an hour after the old 1pm/9pm dispatch) and every
+#     30 minutes before that; each run regenerates today's pages and re-renders only job
 #     pages whose content changed, and invalidations are collapsed to a few
 #     wildcards per run (static_pages.collapse_invalidation_paths).
 #
@@ -751,19 +753,19 @@ gcloud run jobs add-iam-policy-binding generate-static-job-pages \
 
 # --oauth-service-account-email (not --oidc-...) because the target is the
 # Run Admin REST API, not the job's own service URL.
-gcloud scheduler jobs create http generate-static-job-pages-30min \
+gcloud scheduler jobs create http generate-static-job-pages-weekday \
   --location="$REGION" \
-  --schedule="0 9-21/2 * * 1-5" \
+  --schedule="0 11,15,19 * * 1-5" \
   --time-zone="America/New_York" \
   --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/generate-static-job-pages:run" \
   --http-method=POST \
   --oauth-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com"
 
 # Weekends: crawls run at 10am and 4pm (crawl-dispatch-weekend), so publish
-# what they found at 2pm and 8pm, once their scans have had hours to drain.
+# what they found at noon and 6pm, once their scans have had hours to drain.
 gcloud scheduler jobs create http generate-static-job-pages-weekend \
   --location="$REGION" \
-  --schedule="0 14,20 * * 6,0" \
+  --schedule="0 12,18 * * 6,0" \
   --time-zone="America/New_York" \
   --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/generate-static-job-pages:run" \
   --http-method=POST \
