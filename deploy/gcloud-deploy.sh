@@ -428,7 +428,7 @@ gcloud run jobs add-iam-policy-binding crawl-dispatcher \
 # --oauth-service-account-email (not --oidc-...) because the target is the
 # Run Admin REST API, not the job's own service URL.
 
-gcloud scheduler jobs create http crawl-dispatch-hourly \
+gcloud scheduler jobs create http crawl-dispatch-weekday \
   --location="$REGION" \
   --schedule="0 8,12,16,20 * * 1-5" \
   --time-zone="America/New_York" \
@@ -495,6 +495,7 @@ gcloud functions add-invoker-policy-binding browser-scaler \
 gcloud scheduler jobs create http browser-scaler-tick \
   --location="$REGION" \
   --schedule="*/2 * * * *" \
+  --time-zone="America/New_York" \
   --uri="$BROWSER_SCALER_FUNCTION_URL" \
   --http-method=POST \
   --oidc-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com" \
@@ -600,7 +601,7 @@ gcloud scheduler jobs create http saved-search-alerts-weekend \
 #    every respect except cadence: daily, not hourly, since a follow-up
 #    date is a day, not a moment (see follow_up_reminders.py's own
 #    docstring) — checking more often than once a day couldn't send
-#    anything sooner. 13:00 UTC ≈ 8am ET / 5am PT, a US-morning send time
+#    anything sooner. 8am ET (5am PT), a US-morning send time
 #    for this product's currently US-centric user base.
 # ---------------------------------------------------------------------------
 
@@ -632,7 +633,8 @@ gcloud functions add-invoker-policy-binding follow-up-reminders \
 
 gcloud scheduler jobs create http follow-up-reminders-daily \
   --location="$REGION" \
-  --schedule="0 13 * * *" \
+  --schedule="0 8 * * *" \
+  --time-zone="America/New_York" \
   --uri="$FOLLOW_UP_REMINDERS_FUNCTION_URL" \
   --http-method=POST \
   --oidc-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com" \
@@ -680,6 +682,7 @@ gcloud functions add-invoker-policy-binding retry-failed-scans \
 gcloud scheduler jobs create http retry-failed-scans-hourly \
   --location="$REGION" \
   --schedule="0 * * * *" \
+  --time-zone="America/New_York" \
   --uri="$RETRY_FAILED_SCANS_FUNCTION_URL" \
   --http-method=POST \
   --oidc-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com" \
@@ -750,7 +753,7 @@ gcloud run jobs add-iam-policy-binding generate-static-job-pages \
 
 # --oauth-service-account-email (not --oidc-...) because the target is the
 # Run Admin REST API, not the job's own service URL.
-gcloud scheduler jobs create http generate-static-job-pages-30min \
+gcloud scheduler jobs create http generate-static-job-pages-weekday \
   --location="$REGION" \
   --schedule="0 11,15,19 * * 1-5" \
   --time-zone="America/New_York" \
