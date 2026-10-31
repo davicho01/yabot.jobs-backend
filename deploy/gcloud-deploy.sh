@@ -582,11 +582,11 @@ gcloud scheduler jobs create http saved-search-alerts-hourly \
   --oidc-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com" \
   --oidc-token-audience="$SAVED_SEARCH_ALERTS_FUNCTION_URL"
 
-# Weekends: the same alerts at 2pm and 8pm ET, matching the weekend pages
+# Weekends: the same alerts at noon and 6pm ET, matching the weekend pages
 # (generate-static-job-pages-weekend) after the 10am and 4pm crawls.
 gcloud scheduler jobs create http saved-search-alerts-weekend \
   --location="$REGION" \
-  --schedule="0 14,20 * * 6,0" \
+  --schedule="0 12,18 * * 6,0" \
   --time-zone="America/New_York" \
   --uri="$SAVED_SEARCH_ALERTS_FUNCTION_URL" \
   --http-method=POST \
@@ -760,10 +760,10 @@ gcloud scheduler jobs create http generate-static-job-pages-30min \
   --oauth-service-account-email="${PROJECT_ID}@appspot.gserviceaccount.com"
 
 # Weekends: crawls run at 10am and 4pm (crawl-dispatch-weekend), so publish
-# what they found at 2pm and 8pm, once their scans have had hours to drain.
+# what they found at noon and 6pm, once their scans have had hours to drain.
 gcloud scheduler jobs create http generate-static-job-pages-weekend \
   --location="$REGION" \
-  --schedule="0 14,20 * * 6,0" \
+  --schedule="0 12,18 * * 6,0" \
   --time-zone="America/New_York" \
   --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/generate-static-job-pages:run" \
   --http-method=POST \
