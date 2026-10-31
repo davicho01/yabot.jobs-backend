@@ -24,7 +24,7 @@
 #   - retry-failed-scans  Cloud Function 2nd gen (retry_failed_scans.py:dispatch)
 #                       + Cloud Scheduler cron trigger
 #   - generate-static-job-pages  Cloud Run Job (generate_static_job_pages.py)
-#                       + Cloud Scheduler cron trigger, every 2 hours — publishes
+#                       + Cloud Scheduler cron triggers, 3 hours after each crawl run — publishes
 #                       the crawlable "jobs by sector, by day" pages straight into the
 #                       *frontend's* S3 bucket/CloudFront (SEO_PAGES_BUCKET below), not
 #                       this backend's own storage.
@@ -691,15 +691,14 @@ gcloud scheduler jobs create http retry-failed-scans-hourly \
 #     (§6). Runs generate_static_job_pages.py from the shared image. It
 #     writes straight into the *frontend's* S3 bucket/CloudFront
 #     distribution (SEO_PAGES_BUCKET/SEO_PAGES_CLOUDFRONT_DISTRIBUTION_ID
-#     above), not Postgres/Pub/Sub. Every 2 hours, 9am-9pm America/New_York,
-#     weekdays (since 2026-10-14; 9am-11pm from 2026-10-12): crawl-dispatch
-#     runs every 30 minutes and each source is crawled on its own adaptive
-#     interval (2h minimum), so new postings land throughout the day
-#     instead of in two bursts. Every 2 hours matches that minimum, and the
-#     9pm run picks up the last crawls of the day (dispatch stops at
-#     8:30pm). Was 2x/day (2pm/10pm,
-#     an hour after the old 1pm/9pm dispatch) and every 30 minutes before
-#     that; each run regenerates today's pages and re-renders only job
+#     above), not Postgres/Pub/Sub. At 11am, 3pm and 7pm America/New_York on
+#     weekdays (since 2026-10-31; every 2 hours 9am-9pm before that):
+#     crawl-dispatch runs at 8am, noon, 4pm and 8pm and a run's scans take
+#     about 3 hours to drain, so each pages run follows a crawl by 3 hours,
+#     and the nightly refresh below (11:30pm) publishes what the 8pm crawl
+#     found. Earlier: every 2 hours when dispatch ran every 30 minutes,
+#     2x/day (2pm/10pm, an hour after the old 1pm/9pm dispatch) and every
+#     30 minutes before that; each run regenerates today's pages and re-renders only job
 #     pages whose content changed, and invalidations are collapsed to a few
 #     wildcards per run (static_pages.collapse_invalidation_paths).
 #
@@ -753,7 +752,7 @@ gcloud run jobs add-iam-policy-binding generate-static-job-pages \
 # Run Admin REST API, not the job's own service URL.
 gcloud scheduler jobs create http generate-static-job-pages-30min \
   --location="$REGION" \
-  --schedule="0 9-21/2 * * 1-5" \
+  --schedule="0 11,15,19 * * 1-5" \
   --time-zone="America/New_York" \
   --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/generate-static-job-pages:run" \
   --http-method=POST \
