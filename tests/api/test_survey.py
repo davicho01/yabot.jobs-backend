@@ -55,6 +55,14 @@ def test_page_two_updates_same_row_and_keeps_page_one(db):
     assert row.work_arrangement == ["remote"]
     assert row.dedup_rating == "very_useful"
     assert row.contact_email == "a@b.co"
+    # Leaving an email is the consent for a signed-out visitor.
+    assert row.contact_ok is True
+
+
+def test_signed_out_without_email_is_not_contactable(db):
+    _submit(db, completed=True, contact_ok=True)
+
+    assert db.query(m.SurveyResponse).one().contact_ok is False
 
 
 def test_signed_in_user_is_linked_and_typed_email_is_dropped(db):
@@ -65,6 +73,15 @@ def test_signed_in_user_is_linked_and_typed_email_is_dropped(db):
     row = db.query(m.SurveyResponse).one()
     assert row.user_id == user.id
     assert row.contact_email is None
+    assert row.contact_ok is False
+
+
+def test_signed_in_user_can_agree_to_be_contacted(db):
+    user = _make_user(db)
+
+    _submit(db, user=user, completed=True, contact_ok=True)
+
+    assert db.query(m.SurveyResponse).one().contact_ok is True
 
 
 def test_finished_response_stays_finished(db):

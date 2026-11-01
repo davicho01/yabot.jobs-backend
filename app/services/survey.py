@@ -44,7 +44,11 @@ def save_survey_answers(
     if user is not None:
         response.user_id = user.id
         # The account email is already known; a typed one would just be stale.
+        # Whether they're happy to be contacted is the checkbox on page 2.
         response.contact_email = None
+    else:
+        # Signed out: leaving an email is the consent, there is no checkbox.
+        response.contact_ok = response.contact_email is not None
     # Once finished, a stray late page-1 post can't un-finish it.
     response.completed = response.completed or payload.completed
     db.flush()

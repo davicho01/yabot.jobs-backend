@@ -47,6 +47,10 @@ class SurveyResponse(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     comments: Mapped[str | None] = mapped_column(Text)
     # Only asked of signed-out visitors; signed-in ones are reachable via user_id.
     contact_email: Mapped[str | None] = mapped_column(String(320))
+    # Whether they agreed to be contacted for a short follow-up chat: the
+    # checkbox for signed-in visitors (we already have their email), or true
+    # when a signed-out visitor left a contact_email.
+    contact_ok: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 

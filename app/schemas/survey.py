@@ -37,6 +37,8 @@ class SurveySubmit(BaseModel):
     wanted: list[Wanted] | None = Field(default=None, max_length=6)
     comments: str | None = Field(default=None, max_length=5000)
     contact_email: str | None = Field(default=None, max_length=320, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    # Signed-in visitors' "OK to contact me" checkbox; ignored when signed out.
+    contact_ok: bool | None = None
 
 
 class SurveyRead(BaseModel):
@@ -55,6 +57,7 @@ class AdminSurveyRead(BaseModel):
     user_id: uuid.UUID | None
     user_email: str | None
     contact_email: str | None
+    contact_ok: bool
     source: str | None
     search_duration: str | None
     industries: list[str] | None

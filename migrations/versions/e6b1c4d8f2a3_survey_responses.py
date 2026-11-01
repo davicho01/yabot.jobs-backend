@@ -35,6 +35,7 @@ def upgrade() -> None:
         sa.Column('wanted', sa.JSON(), nullable=True),
         sa.Column('comments', sa.Text(), nullable=True),
         sa.Column('contact_email', sa.String(length=320), nullable=True),
+        sa.Column('contact_ok', sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column('completed', sa.Boolean(), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
