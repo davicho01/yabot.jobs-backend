@@ -44,7 +44,10 @@ _SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE 
 _LI_TRAILING_BR_RE = re.compile(r"<br\s*/?>\s*</li>", re.IGNORECASE)
 _LI_OPEN_RE = re.compile(r"<li[^>]*>\s*", re.IGNORECASE)
 _LI_CLOSE_RE = re.compile(r"</li\s*>", re.IGNORECASE)
-_BR_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
+# Also matches the invalid "</br>" some sites emit as a line break (verified
+# live: Maximus's Avature JSON-LD) - without it the tag is stripped to nothing
+# and the whole description collapses into one run-on paragraph.
+_BR_RE = re.compile(r"</?br\s*/?>", re.IGNORECASE)
 _HEADER_OPEN_RE = re.compile(r"<h([1-6])[^>]*>", re.IGNORECASE)
 _BLOCK_CLOSE_RE = re.compile(r"</(?:p|div|ul|ol|h[1-6])\s*>", re.IGNORECASE)
 # Converted to Markdown equivalents (**bold**, *italic*, [text](url), #
