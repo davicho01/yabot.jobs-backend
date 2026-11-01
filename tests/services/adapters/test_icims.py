@@ -1,5 +1,34 @@
+import pytest
+
 from app.services.adapters import icims
 from tests.conftest import FakeResponse
+
+
+def _probe(monkeypatch, *, jibe, classic):
+    monkeypatch.setattr(icims, "_fetch_jibe_jobs", lambda host: jibe)
+    monkeypatch.setattr(icims, "_classic_or_redirect_host", lambda host: classic)
+
+
+def test_a_board_neither_product_answers_is_an_error_not_an_empty_board(monkeypatch):
+    # Every HTTP error on the classic page used to end in [], recorded as a
+    # clean zero-job crawl.
+    _probe(monkeypatch, jibe=None, classic=(None, None))
+
+    with pytest.raises(ValueError):
+        icims._fetch_jobs("x.icims.com")
+
+
+def test_a_jibe_stub_whose_vanity_api_is_down_is_an_error(monkeypatch):
+    _probe(monkeypatch, jibe=None, classic=(None, "careers.x.com"))
+
+    with pytest.raises(ValueError):
+        icims._fetch_jobs("x.icims.com")
+
+
+def test_a_readable_classic_board_with_no_jobs_is_still_empty(monkeypatch):
+    _probe(monkeypatch, jibe=None, classic=([], None))
+
+    assert icims._fetch_jobs("x.icims.com") == []
 
 
 def _serve(monkeypatch, pages):

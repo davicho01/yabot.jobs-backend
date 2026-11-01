@@ -145,6 +145,11 @@ def _fetch_jobs(host: str) -> list[str] | BoardListing:
         jibe = _fetch_jibe_jobs(redirect_host)
         if jibe is not None:
             return jibe
+    if classic_urls is None:
+        # Neither product answered (an error status, or a Jibe stub whose
+        # vanity domain has no API): an unreadable board, not an empty one.
+        # Returning [] here recorded such boards as clean zero-job crawls.
+        raise ValueError(f"Couldn't read the iCIMS board at host={host!r}: neither Jibe nor the classic search answered.")
     if classic_urls:
         return _fetch_classic_jobs(host)
     return []

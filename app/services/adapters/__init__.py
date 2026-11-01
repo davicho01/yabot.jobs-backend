@@ -78,6 +78,7 @@ from app.services.adapters import (
     workday,
     workforce_ready,
     zenats,
+    zoho_recruit,
 )
 from app.services.adapters.base import AtsAdapter
 
@@ -97,6 +98,7 @@ ADAPTERS: list[AtsAdapter] = [
     workday.ADAPTER,
     smartrecruiters.ADAPTER,
     jazzhr.ADAPTER,
+    zoho_recruit.ADAPTER,
     applicantpro.ADAPTER,
     jobvite.ADAPTER,
     join.ADAPTER,

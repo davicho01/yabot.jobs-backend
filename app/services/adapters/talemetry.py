@@ -41,6 +41,11 @@ def _fetch_jobs(host: str) -> list[str]:
     while len(urls) < max_jobs_per_crawl():
         html = _fetch_page_html(f"https://{host}/search/jobs/?page={page}&q=")
         if html is None:
+            if page == 1:
+                # Direct fetch and browser render both failed: an unreadable
+                # board (Progressive's WAF 403s plain requests), which used
+                # to be recorded as a clean zero-job crawl.
+                raise ValueError(f"Couldn't read the Talemetry board at host={host!r}.")
             break
         links = dict.fromkeys(_JOB_LINK_RE.findall(html))
         if not links:
