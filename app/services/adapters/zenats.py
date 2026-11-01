@@ -4,7 +4,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.models.enums import AtsType
-from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry, max_jobs_per_crawl
+from app.services.adapters.base import TIMEOUT, AtsAdapter, get_with_retry, max_jobs_per_crawl, require_listing_page
 
 _ZENATS_SIGNATURE = "zenats"
 # The board root server-renders every open posting as a plain
@@ -28,6 +28,8 @@ def _fetch_jobs(host: str) -> list[str]:
     response = get_with_retry(f"https://{host}", timeout=TIMEOUT, follow_redirects=True)
     response.raise_for_status()
     urls = dict.fromkeys(_JOB_HREF_RE.findall(response.text))
+    if not urls:
+        require_listing_page(response.text, "zenats", f"ZenATS board {host!r}")
     return list(urls)[:max_jobs_per_crawl()]
 
 
