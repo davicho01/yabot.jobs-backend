@@ -316,6 +316,10 @@ class AtsType(StrEnum):
     # server-rendered as plain ?job_id= links, no ATS platform involved
     # (see adapters/valve.py).
     VALVE = "valve"
+    # Zoho Recruit — a multi-tenant ATS at {tenant}.zohorecruit.com (also
+    # .eu/.in/.com.au...), listing and posting both server-rendered with the
+    # job records inlined as JSON (see adapters/zoho_recruit.py).
+    ZOHO_RECRUIT = "zoho_recruit"
 
 
 class CrawlSourceStatus(StrEnum):
