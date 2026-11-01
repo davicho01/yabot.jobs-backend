@@ -19,9 +19,9 @@ class SurveyResponse(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     Open to signed-out visitors, so the row is keyed on `visitor_id`, a random
     id the browser generates and keeps in localStorage; `user_id` is filled in
-    when they were signed in. The form is two pages and page 1 is saved on
+    when they were signed in. The form is three pages and each is saved on
     "Next", so a row can be partial: every answer column is nullable and
-    `completed` says whether page 2 was submitted. Answers are stored as the
+    `completed` says whether the last page was submitted. Answers are stored as the
     slugs in app.schemas.survey (JSON lists for the multi-selects).
     """
 
@@ -36,11 +36,19 @@ class SurveyResponse(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     source: Mapped[str | None] = mapped_column(String(20))
     search_duration: Mapped[str | None] = mapped_column(String(20))
     industries: Mapped[list[str] | None] = mapped_column(JSON)
+    # What they typed when they ticked the "Other" industry.
+    industry_other: Mapped[str | None] = mapped_column(String(120))
     role_name: Mapped[str | None] = mapped_column(String(120))
     work_arrangement: Mapped[list[str] | None] = mapped_column(JSON)
 
-    # Page 2: about yabot.jobs.
-    verification_dates_rating: Mapped[str | None] = mapped_column(String(20))
+    # Page 2: their job search today.
+    current_tools: Mapped[list[str] | None] = mapped_column(JSON)
+    frustration: Mapped[str | None] = mapped_column(Text)
+
+    # Page 3: about yabot.jobs. One rating per date shown on a job.
+    posted_date_rating: Mapped[str | None] = mapped_column(String(20))
+    first_found_date_rating: Mapped[str | None] = mapped_column(String(20))
+    verified_date_rating: Mapped[str | None] = mapped_column(String(20))
     dedup_rating: Mapped[str | None] = mapped_column(String(20))
     liked: Mapped[list[str] | None] = mapped_column(JSON)
     wanted: Mapped[list[str] | None] = mapped_column(JSON)

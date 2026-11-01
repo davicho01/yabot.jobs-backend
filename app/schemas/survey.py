@@ -14,6 +14,8 @@ Industry = Literal[
 ]
 WorkArrangement = Literal["remote", "hybrid", "on_site"]
 Rating = Literal["very_useful", "somewhat_useful", "dont_care", "confusing", "didnt_notice"]
+DateRating = Literal["useful", "not_useful", "didnt_notice"]
+CurrentTool = Literal["linkedin", "indeed", "google_jobs", "glassdoor", "ziprecruiter", "company_sites", "other"]
 Liked = Literal["fresh_jobs", "company_sites", "search_filters", "alerts", "clean_site", "no_ads"]
 Wanted = Literal["better_search", "salary_info", "resume_tools", "app_tracking", "more_companies", "mobile_app"]
 
@@ -28,10 +30,16 @@ class SurveySubmit(BaseModel):
     source: Source | None = None
     search_duration: SearchDuration | None = None
     industries: list[Industry] | None = Field(default=None, max_length=3)
+    industry_other: str | None = Field(default=None, max_length=120)
     role_name: str | None = Field(default=None, max_length=120)
     work_arrangement: list[WorkArrangement] | None = Field(default=None, max_length=3)
 
-    verification_dates_rating: Rating | None = None
+    current_tools: list[CurrentTool] | None = Field(default=None, max_length=7)
+    frustration: str | None = Field(default=None, max_length=5000)
+
+    posted_date_rating: DateRating | None = None
+    first_found_date_rating: DateRating | None = None
+    verified_date_rating: DateRating | None = None
     dedup_rating: Rating | None = None
     liked: list[Liked] | None = Field(default=None, max_length=6)
     wanted: list[Wanted] | None = Field(default=None, max_length=6)
@@ -61,9 +69,14 @@ class AdminSurveyRead(BaseModel):
     source: str | None
     search_duration: str | None
     industries: list[str] | None
+    industry_other: str | None
     role_name: str | None
     work_arrangement: list[str] | None
-    verification_dates_rating: str | None
+    current_tools: list[str] | None
+    frustration: str | None
+    posted_date_rating: str | None
+    first_found_date_rating: str | None
+    verified_date_rating: str | None
     dedup_rating: str | None
     liked: list[str] | None
     wanted: list[str] | None

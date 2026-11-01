@@ -10,8 +10,15 @@ from app.models.survey_response import SurveyResponse
 from app.models.user import User
 from app.schemas.survey import SurveySubmit
 
-_SINGLE_ANSWERS = ("source", "search_duration", "verification_dates_rating", "dedup_rating")
-_MULTI_ANSWERS = ("industries", "work_arrangement", "liked", "wanted")
+_SINGLE_ANSWERS = (
+    "source",
+    "search_duration",
+    "posted_date_rating",
+    "first_found_date_rating",
+    "verified_date_rating",
+    "dedup_rating",
+)
+_MULTI_ANSWERS = ("industries", "work_arrangement", "current_tools", "liked", "wanted")
 
 
 def save_survey_answers(

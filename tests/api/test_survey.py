@@ -59,6 +59,38 @@ def test_page_two_updates_same_row_and_keeps_page_one(db):
     assert row.contact_ok is True
 
 
+def test_new_questions_are_saved_and_counted(db):
+    _submit(
+        db,
+        industries=["other"],
+        industry_other="  Aerospace ",
+        current_tools=["linkedin", "indeed"],
+        frustration="Ghost jobs",
+    )
+    _submit(
+        db,
+        visitor_id="visitor-00000002",
+        completed=True,
+        posted_date_rating="not_useful",
+        first_found_date_rating="didnt_notice",
+        verified_date_rating="useful",
+    )
+
+    row = db.query(m.SurveyResponse).filter_by(visitor_id="visitor-abc12345").one()
+    assert row.industry_other == "Aerospace"
+    assert row.current_tools == ["linkedin", "indeed"]
+    assert row.frustration == "Ghost jobs"
+    counts = survey_routes.list_survey_responses(completed_only=False, page=1, page_size=20, db=db).counts
+    assert counts["current_tools"] == {"linkedin": 1, "indeed": 1}
+    assert counts["verified_date_rating"] == {"useful": 1}
+    assert counts["posted_date_rating"] == {"not_useful": 1}
+
+
+def test_unknown_date_rating_is_rejected():
+    with pytest.raises(ValidationError):
+        SurveySubmit(visitor_id="visitor-abc12345", posted_date_rating="very_useful")
+
+
 def test_signed_out_without_email_is_not_contactable(db):
     _submit(db, completed=True, contact_ok=True)
 
