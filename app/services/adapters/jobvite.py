@@ -37,6 +37,8 @@ def _fetch_jobs(board_key: str) -> list[str]:
     response.raise_for_status()
     job_id_re = re.compile(rf'href="/{re.escape(board_key)}/job/([a-zA-Z0-9]+)"')
     job_ids = dict.fromkeys(job_id_re.findall(response.text))
+    if not job_ids:
+        base.require_listing_page(response.text, "jv-job-list", f"Jobvite board {board_key!r}")
     return limit_job_urls(_JOBVITE_JOB_URL.format(board_key=board_key, job_id=job_id) for job_id in job_ids)
 
 

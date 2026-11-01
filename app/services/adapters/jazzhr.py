@@ -34,6 +34,8 @@ def _fetch_jobs(board_key: str) -> list[str]:
     response = get_with_retry(_JAZZHR_JOBS_URL.format(board_key=board_key), timeout=TIMEOUT)
     response.raise_for_status()
     job_ids = dict.fromkeys(_JAZZHR_JOB_ID_RE.findall(response.text))  # dedupe, keep order
+    if not job_ids:
+        base.require_listing_page(response.text, "resumator", f"JazzHR board {board_key!r}")
     return limit_job_urls(_JAZZHR_JOB_URL.format(board_key=board_key, job_id=job_id) for job_id in job_ids)
 
 

@@ -28,6 +28,8 @@ def _fetch_jobs(host: str) -> list[str]:
         response = get_with_retry(f"https://{host}/postings/search", params={"page": page}, timeout=TIMEOUT)
         response.raise_for_status()
         ids = dict.fromkeys(_JOB_HREF_RE.findall(response.text))
+        if not ids and page == 1:
+            base.require_listing_page(response.text, "peopleadmin", f"PeopleAdmin board {host!r}")
         new_ids = [job_id for job_id in ids if job_id not in seen]
         if not new_ids:
             break

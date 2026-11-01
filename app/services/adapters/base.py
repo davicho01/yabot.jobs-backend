@@ -126,6 +126,20 @@ def limit_job_urls(urls: Iterable[str]) -> list[str]:
                 break
     return result
 
+
+def require_listing_page(page_html: str, marker: str, board: str) -> None:
+    """For a scraper that found no jobs on a page: call the board empty only
+    if the page is recognizably this platform's listing, which is the same
+    page with no rows. A block, login or changed-layout shell answers 200
+    too, and returning [] for it recorded the board as a clean zero-job crawl
+    (prod audit 2026-11-01: 23 boards that had 5+ jobs read zero, no error).
+    `marker` is text every one of the platform's listing pages carries, empty
+    or not.
+    """
+    if marker.lower() not in page_html.lower():
+        raise ValueError(f"{board}: the page found no jobs and isn't a recognizable listing page (no {marker!r}).")
+
+
 logger = logging.getLogger(__name__)
 
 # Two attempts: the first try plus one retry after a 429, then give up — a
