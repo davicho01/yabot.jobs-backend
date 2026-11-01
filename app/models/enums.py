@@ -320,6 +320,15 @@ class AtsType(StrEnum):
     # .eu/.in/.com.au...), listing and posting both server-rendered with the
     # job records inlined as JSON (see adapters/zoho_recruit.py).
     ZOHO_RECRUIT = "zoho_recruit"
+    # Multi-tenant ATS boards read with a plain fetch (see adapters/hireology.py,
+    # jobscore.py, kula.py, pageup.py, careerplug.py, freshteam.py, jobsoid.py).
+    HIREOLOGY = "hireology"
+    JOBSCORE = "jobscore"
+    KULA = "kula"
+    PAGEUP = "pageup"
+    CAREERPLUG = "careerplug"
+    FRESHTEAM = "freshteam"
+    JOBSOID = "jobsoid"
 
 
 class CrawlSourceStatus(StrEnum):

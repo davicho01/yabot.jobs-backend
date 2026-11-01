@@ -79,6 +79,13 @@ from app.services.adapters import (
     workforce_ready,
     zenats,
     zoho_recruit,
+    careerplug,
+    freshteam,
+    hireology,
+    jobscore,
+    jobsoid,
+    kula,
+    pageup,
 )
 from app.services.adapters.base import AtsAdapter
 
@@ -99,6 +106,13 @@ ADAPTERS: list[AtsAdapter] = [
     smartrecruiters.ADAPTER,
     jazzhr.ADAPTER,
     zoho_recruit.ADAPTER,
+    hireology.ADAPTER,
+    jobscore.ADAPTER,
+    kula.ADAPTER,
+    pageup.ADAPTER,
+    careerplug.ADAPTER,
+    freshteam.ADAPTER,
+    jobsoid.ADAPTER,
     applicantpro.ADAPTER,
     jobvite.ADAPTER,
     join.ADAPTER,
