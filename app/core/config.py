@@ -239,6 +239,12 @@ class Settings(BaseSettings):
     feedback_rate_limit_window_minutes: float = 60.0
     feedback_rate_limit_max_per_user: int = 10
 
+    # Overall cap on NEW survey responses per window (app.services.survey) —
+    # the survey is open to signed-out visitors, so there's no user to key a
+    # limit on; this just stops a script from filling the table.
+    survey_rate_limit_window_minutes: float = 60.0
+    survey_rate_limit_max_new: int = 300
+
     # Per-user cap on saved searches (app.api.routes.saved_searches) — each
     # one gets re-run against every posting on every alert sweep
     # (saved_search_alerts.py), so this also bounds that sweep's per-user cost.
