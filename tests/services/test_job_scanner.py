@@ -19,6 +19,14 @@ def test_html_to_formatted_text_strips_normal_html():
     assert result == "Tom & Jerry are **friends**.\n\n- One\n- Two"
 
 
+def test_html_to_formatted_text_treats_invalid_closing_br_as_line_break():
+    # Maximus's Avature JSON-LD separates lines with "</br>" (not valid HTML);
+    # it must break lines like "<br>", not vanish and glue the text together.
+    html = "Intro.</br></br>Duties:</br>- One</br>- Two</br></br></br>"
+    assert _html_to_formatted_text(html) == "Intro.\n\nDuties:\n- One\n- Two"
+    assert _html_to_formatted_text("A<br>B<br/>C<BR />D") == "A\nB\nC\nD"
+
+
 def test_html_to_formatted_text_handles_double_encoded_html():
     # The Freedom Mortgage / Phenom bug: the JSON-LD description is itself
     # HTML-entity-escaped, so the "tags" are literal "&lt;p&gt;" text, not
