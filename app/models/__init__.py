@@ -16,6 +16,7 @@ from app.models.saved_search import SavedSearch
 from app.models.search_opportunity import SearchOpportunity
 from app.models.search_performance import SearchPerformanceDay
 from app.models.subscription_evaluation_job import SubscriptionEvaluationJob
+from app.models.survey_response import SurveyResponse
 from app.models.user import User
 from app.models.user_activity import UserActiveHour
 
@@ -46,6 +47,7 @@ __all__ = [
     "OAuthAuthorizationRequest",
     "OAuthRefreshToken",
     "Feedback",
+    "SurveyResponse",
     "FreeTrialJob",
     "SubscriptionEvaluationJob",
     "AutoScoreRun",

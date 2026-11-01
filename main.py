@@ -23,6 +23,7 @@ from app.api.routes import (
     resumes,
     saved_searches,
     shares,
+    survey,
 )
 from app.core.config import settings
 from app.db.session import engine
@@ -72,6 +73,8 @@ app.include_router(billing.router)
 app.include_router(admin.router)
 app.include_router(admin_collections.router)
 app.include_router(shares.router)
+app.include_router(survey.router)
+app.include_router(survey.admin_router)
 
 
 @app.get("/health")
