@@ -1,7 +1,7 @@
 """Device tokens: Expo push tokens for the mobile app
 
 Revision ID: e8b2f4a6c1d9
-Revises: d5a9e3c7b2f1
+Revises: e6b1c4d8f2a3
 Create Date: 2026-11-01 00:00:00.000000
 
 One new table, nothing else touched (see app.models.device_token).
@@ -13,7 +13,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = 'e8b2f4a6c1d9'
-down_revision: Union[str, Sequence[str], None] = 'd5a9e3c7b2f1'
+down_revision: Union[str, Sequence[str], None] = 'e6b1c4d8f2a3'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
