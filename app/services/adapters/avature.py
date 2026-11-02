@@ -353,7 +353,118 @@ def extract(html: str) -> ExtractedJobFields:
     return ExtractedJobFields(location=location, description="\n\n".join(sections) or None)
 
 
+# Tenants on Avature's redesigned job page (verified live: maximus.avature.net)
+# link jobs as /careers/Job-Description?folderId=N. The page's own HTML holds
+# only the title and the first slice of the description (as JSON-LD); the
+# body - job-specific duties, Minimum Requirements, Preferred Skills, the
+# EEO/pay statements - is loaded by the page itself from
+# /4/_view/job?params=viewId=..&entityId=..&qtvc=.., a JSON endpoint. The
+# params (including a signed qtvc token) are inlined in the page, but the
+# endpoint answers "invalidParams" unless the same cookie session fetched the
+# page, so both requests share one client. No browser needed.
+_VIEW_JOB_URL_RE = re.compile(r"/careers/Job-Description\b[^#]*?[?&]folderId=\d+", re.IGNORECASE)
+_VIEW_PARAMS_RE = re.compile(r'"desktop":\{"params":"([^"]+)"')
+_VIEW_LOCATION_LABELS = ("City", "State/Province", "State", "Country")
+
+
+def _fetch_view_job(url: str) -> tuple[str, list[dict]] | None:
+    """The job page's HTML plus every JSON view it points at, or None when
+    any request fails or the page names no views (e.g. a closed posting)."""
+    try:
+        with httpx.Client(headers=_BROWSER_LIKE_HEADERS, timeout=TIMEOUT, follow_redirects=True) as client:
+            page = client.get(url)
+            page.raise_for_status()
+            origin = f"{page.url.scheme}://{page.url.netloc.decode()}"
+            views = []
+            for params in dict.fromkeys(_VIEW_PARAMS_RE.findall(page.text)):
+                response = client.get(f"{origin}/4/_view/job", params={"params": params})
+                response.raise_for_status()
+                view = response.json()
+                if isinstance(view, dict):
+                    views.append(view)
+            return (page.text, views) if views else None
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
+def _fetch_view_job_with_hard_timeout(url: str) -> tuple[str, list[dict]] | None:
+    # Same reasoning as _get_with_hard_timeout: bound the whole call.
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(_fetch_view_job, url)
+    try:
+        return future.result(timeout=3 * TIMEOUT + _HARD_TIMEOUT_BUFFER)
+    except concurrent.futures.TimeoutError:
+        return None
+    finally:
+        executor.shutdown(wait=False)
+
+
+def extract_view(views: list[dict]) -> ExtractedJobFields:
+    """Location and the full description from the redesigned page's JSON
+    views. Each view has `sections`; the first ("General information") is
+    metadata (date, city, country, ...) and the rest are content: a field with
+    a name becomes a `## name` section, an unnamed one is plain body text.
+    Several views are served (title only, body); the body one is the view with
+    the most content, so fields are collected from all and empties skipped."""
+    location_parts: dict[str, str] = {}
+    sections: list[str] = []
+    for view in views:
+        for index, section in enumerate(view.get("sections") or []):
+            for field in section.get("fields") or []:
+                name = clean_text(field.get("name")) or ""
+                raw_value = field.get("value")
+                if index == 0:
+                    value = clean_text(raw_value)
+                    if value and name in _VIEW_LOCATION_LABELS:
+                        location_parts.setdefault(name, value)
+                    continue
+                body = html_to_formatted_text(raw_value)
+                if not body:
+                    continue
+                sections.append(f"## {name}\n\n{body}" if name else body)
+    parts = list(dict.fromkeys(location_parts[label] for label in _VIEW_LOCATION_LABELS if label in location_parts))
+    return ExtractedJobFields(
+        location=", ".join(parts) or None, description="\n\n".join(dict.fromkeys(sections)) or None
+    )
+
+
+def _scan_view_job(url: str) -> ScanResult | None:
+    fetched = _fetch_view_job_with_hard_timeout(url)
+    if fetched is None:
+        return None
+    html, views = fetched
+    fields = extract_view(views)
+    if not fields.description:
+        return None  # nothing better than what the generic JSON-LD scan reads
+    job_postings = base.extract_json_ld_postings(html)
+    job_ld = job_postings[0] if job_postings else None
+    hiring_org = job_ld.get("hiringOrganization") if job_ld else None
+    title = (job_ld.get("title") if job_ld else None) or base.og_title(html) or base.fallback_title(html)
+    company_name = (
+        clean_text(hiring_org.get("name")) if isinstance(hiring_org, dict) else base.og_site_name(html)
+    )
+    salary_min, salary_max, salary_currency = base.job_ld_salary(job_ld) if job_ld else (None, None, None)
+    return ScanResult(
+        success=True,
+        title=clean_text(title),
+        description=fields.description,
+        company_name=company_name,
+        company_url=hiring_org_url(job_ld),
+        location=fields.location,
+        workplace_type=WorkplaceType.UNKNOWN,
+        employment_type=base.job_ld_employment_type(job_ld) if job_ld else EmploymentType.UNKNOWN,
+        salary_min=salary_min,
+        salary_max=salary_max,
+        salary_currency=salary_currency,
+        posted_at=base.job_ld_posted_at(job_ld) if job_ld else None,
+        raw_html_excerpt=html[:20_000],
+        full_html=html,
+    )
+
+
 def scan_job_url(url: str) -> ScanResult | None:
+    if _VIEW_JOB_URL_RE.search(url):
+        return _scan_view_job(url)
     if not _JOB_DETAIL_URL_RE.search(url):
         return None
     html = _fetch_job_detail_html(url)

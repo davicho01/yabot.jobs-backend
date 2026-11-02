@@ -199,3 +199,69 @@ def test_scan_job_url_uses_json_ld_for_title_but_dom_for_description_and_locatio
     assert "Benefits and Perks" in result.description
     assert "401k and great pay" in result.description
     assert str(result.posted_at) == "2026-09-14"
+
+
+# --- redesigned job page: /careers/Job-Description?folderId=N (maximus) ---
+
+_VIEW_URL = "https://maximus.avature.net/careers/Job-Description?folderId=44594"
+_VIEW_PAGE = """<html><head><meta name="avature.portal.id" content="4">
+<script type="application/ld+json">{"@type": "JobPosting", "title": "Technician 1 - Help Desk Support",
+"description": "Intro only.", "hiringOrganization": {"@type": "Organization", "name": "Maximus"},
+"datePosted": "2026-10-30", "employmentType": "FULL_TIME"}</script></head><body></body></html>"""
+_VIEWS = [
+    {"sections": [{"title": "Job Posting Title", "fields": [{"name": "", "value": "<h1>Technician 1</h1>"}]}]},
+    {
+        "sections": [
+            {
+                "title": "General information",
+                "fields": [
+                    {"name": "Date", "value": "Friday, October 30, 2026"},
+                    {"name": "City", "value": "Remote"},
+                    {"name": "Country", "value": "United States"},
+                    {"name": "Working time", "value": "Full-time"},
+                ],
+            },
+            {"title": "Description & Requirements", "fields": [{"name": "", "value": "<div>Intro paragraph.</div>"}]},
+            {
+                "title": "",
+                "fields": [
+                    {"name": "", "value": "<p>Duties:<br>- One</br>- Two</p>"},
+                    {"name": "Minimum Requirements", "value": "<br>- High School diploma"},
+                    {"name": "Empty", "value": ""},
+                ],
+            },
+        ]
+    },
+]
+
+
+def test_view_job_url_shape_is_recognized():
+    assert avature._VIEW_JOB_URL_RE.search(_VIEW_URL)
+    assert avature._VIEW_JOB_URL_RE.search("https://x.avature.net/careers/Job-Description?foo=1&folderId=7")
+    assert not avature._VIEW_JOB_URL_RE.search("https://x.avature.net/careers/JobDetail/Title/123")
+    assert not avature._VIEW_JOB_URL_RE.search("https://x.avature.net/careers/Job-Description")
+
+
+def test_extract_view_builds_sections_and_location_from_general_information():
+    fields = avature.extract_view(_VIEWS)
+    assert fields.location == "Remote, United States"
+    assert fields.description == (
+        "Intro paragraph.\n\nDuties:\n- One\n- Two\n\n## Minimum Requirements\n\n- High School diploma"
+    )
+
+
+def test_scan_job_url_reads_the_full_description_from_the_view_endpoint(monkeypatch):
+    monkeypatch.setattr(avature, "_fetch_view_job_with_hard_timeout", lambda _url: (_VIEW_PAGE, _VIEWS))
+    result = avature.scan_job_url(_VIEW_URL)
+    assert result.success
+    assert result.title == "Technician 1 - Help Desk Support"
+    assert result.company_name == "Maximus"
+    assert result.location == "Remote, United States"
+    assert "## Minimum Requirements" in result.description
+    assert result.employment_type.value == "full_time"
+
+
+@pytest.mark.parametrize("fetched", [None, ("<html></html>", [{"sections": [{"title": "", "fields": []}]}])])
+def test_view_job_falls_back_to_the_generic_scan_when_nothing_usable(monkeypatch, fetched):
+    monkeypatch.setattr(avature, "_fetch_view_job_with_hard_timeout", lambda _url: fetched)
+    assert avature.scan_job_url(_VIEW_URL) is None
