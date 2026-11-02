@@ -41,7 +41,15 @@ def send_push(db: Session, user_id: uuid.UUID, title: str, body: str, data: dict
     """Pushes to every device the user has registered; returns how many
     messages Expo accepted. Tokens Expo says are dead (DeviceNotRegistered)
     are deleted."""
-    tokens = list(db.scalars(select(DeviceToken.token).where(DeviceToken.user_id == user_id)))
+    # In a savepoint: a database error here (e.g. the table not migrated yet)
+    # must not leave the caller's transaction aborted — the alert sweep that
+    # calls this has emails and last_alerted_at updates riding on it.
+    try:
+        with db.begin_nested():
+            tokens = list(db.scalars(select(DeviceToken.token).where(DeviceToken.user_id == user_id)))
+    except Exception:
+        logger.exception("Couldn't look up device tokens for user %s.", user_id)
+        return 0
     accepted = 0
     for start in range(0, len(tokens), BATCH_SIZE):
         batch = tokens[start : start + BATCH_SIZE]
@@ -57,7 +65,11 @@ def send_push(db: Session, user_id: uuid.UUID, title: str, body: str, data: dict
             if ticket.get("status") == "ok":
                 accepted += 1
             elif (ticket.get("details") or {}).get("error") == "DeviceNotRegistered":
-                db.execute(delete(DeviceToken).where(DeviceToken.token == token))
+                try:
+                    with db.begin_nested():
+                        db.execute(delete(DeviceToken).where(DeviceToken.token == token))
+                except Exception:
+                    logger.exception("Couldn't remove dead device token for user %s.", user_id)
             else:
                 logger.warning("Expo push rejected for user %s: %s", user_id, ticket.get("message"))
     return accepted

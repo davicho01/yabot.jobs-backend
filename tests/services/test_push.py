@@ -83,3 +83,11 @@ def test_send_push_without_devices_makes_no_request(db):
     with patch("app.services.push.httpx.post") as post:
         assert push.send_push(db, user.id, "title", "body") == 0
     post.assert_not_called()
+
+
+def test_send_push_survives_a_missing_table():
+    # Before the migration has run, the lookup errors; that must come back as
+    # "0 sent", not an exception that takes the alert sweep down with it.
+    engine = create_engine("sqlite:///:memory:")
+    session = sessionmaker(bind=engine, autoflush=False)()
+    assert push.send_push(session, uuid.uuid4(), "title", "body") == 0
