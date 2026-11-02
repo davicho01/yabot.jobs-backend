@@ -175,10 +175,11 @@ def sign_in_with_google(db: Session, credential: str) -> User:
     account, via get_or_create_user. Safe only because Google has verified
     the address, hence the email_verified check.
     """
+    audiences = [settings.google_client_id] + [
+        client_id.strip() for client_id in settings.google_mobile_client_ids.split(",") if client_id.strip()
+    ]
     try:
-        claims = google_id_token.verify_oauth2_token(
-            credential, GoogleAuthRequest(), settings.google_client_id
-        )
+        claims = google_id_token.verify_oauth2_token(credential, GoogleAuthRequest(), audiences)
     except ValueError as exc:
         raise AuthError("Google sign-in failed. Try again.") from exc
     if not claims.get("email") or not claims.get("email_verified"):

@@ -3,6 +3,7 @@ from app.models.auth import MagicLinkToken, PersonalAccessToken, UserSession
 from app.models.auto_score_run import AutoScoreRun
 from app.models.company import Company
 from app.models.crawl_source import CrawlSource
+from app.models.device_token import DeviceToken
 from app.models.feedback import Feedback
 from app.models.free_trial_job import FreeTrialJob
 from app.models.job_application import UserJobApplication

@@ -19,7 +19,8 @@ CLIENT_ID = "test-client.apps.googleusercontent.com"
 @pytest.fixture
 def db() -> Session:
     engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine, tables=[m.User.__table__, m.UserSession.__table__])
+    Base.metadata.create_all(engine, tables=[m.User.__table__, m.UserSession.__table__, m.PersonalAccessToken.__table__]
+    )
     session = sessionmaker(bind=engine, autoflush=False)()
     yield session
     session.close()
@@ -37,7 +38,7 @@ def google_claims(monkeypatch):
     claims = {"email": "Ada@Gmail.com", "email_verified": True, "name": "Ada Lovelace"}
 
     def fake_verify(credential, _request, audience):
-        assert audience == CLIENT_ID
+        assert audience == [CLIENT_ID]
         if credential == "bad":
             raise ValueError("Token used too late")
         return claims
@@ -64,6 +65,36 @@ def test_new_user_is_created_active_with_a_session(db, google_claims):
     assert user.last_login_at is not None
     assert db.scalar(select(m.UserSession)).user_id == user.id
     assert settings.session_cookie_name in response.headers["set-cookie"]
+
+
+def test_mobile_client_gets_a_bearer_token_instead_of_a_cookie(db, google_claims, monkeypatch):
+    monkeypatch.setattr(settings, "google_mobile_client_ids", "ios.apps.googleusercontent.com, android.apps.googleusercontent.com")
+    seen = []
+
+    def fake_verify(credential, _request, audience):
+        seen.append(audience)
+        return google_claims
+
+    monkeypatch.setattr(auth_service.google_id_token, "verify_oauth2_token", fake_verify)
+    response = Response()
+    request = SimpleNamespace(headers={"user-agent": "pytest"}, client=SimpleNamespace(host="127.0.0.1"))
+
+    result = sign_in_with_google(GoogleSignInRequest(credential="good"), request, response, db, client="mobile")
+
+    assert seen == [[CLIENT_ID, "ios.apps.googleusercontent.com", "android.apps.googleusercontent.com"]]
+    assert result.token
+    assert "set-cookie" not in response.headers
+    db.flush()
+    user = db.scalar(select(m.User))
+    pat = db.scalar(select(m.PersonalAccessToken))
+    assert pat.user_id == user.id
+    assert pat.token_hash == auth_service.hash_token(result.token)
+    assert db.scalar(select(m.UserSession)) is None
+
+
+def test_web_client_gets_no_token(db, google_claims):
+    result, _ = _sign_in(db)
+    assert result.token is None
 
 
 def test_existing_email_user_gets_the_same_account(db, google_claims):

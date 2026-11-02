@@ -16,6 +16,7 @@ from app.api.routes import (
     auto_score,
     billing,
     crawl_sources,
+    devices,
     feedback,
     jobs,
     oauth,
@@ -66,6 +67,7 @@ app.include_router(crawl_sources.router)
 app.include_router(resumes.router)
 app.include_router(auto_score.router)
 app.include_router(saved_searches.router)
+app.include_router(devices.router)
 app.include_router(feedback.router)
 app.include_router(onboarding.router)
 app.include_router(billing.router)
