@@ -26,8 +26,13 @@ def can_crawl_uncapped(ats_type: str) -> bool:
 # tell that an older job came down: their boards are uncapped from the start
 # (a daily full read, see crawl_schedule.full_read_due), which is what lets
 # their closed jobs close at all. Migration b8e3d1f6a2c4 switched on the ones
-# that already existed.
-UNCAPPED_BY_DEFAULT_ATS_TYPES = frozenset({"workday", "oracle_fusion", "amazon", "apple", "talentreef"})
+# that already existed. TalentBrew, iCIMS and Eightfold joined after the
+# 2026-11-01 audit found 77% of their open jobs unseen for 3+ days: their
+# capped crawls list only a slice of a board, so none of their jobs could
+# close either (migration f7c2a9d4b6e1).
+UNCAPPED_BY_DEFAULT_ATS_TYPES = frozenset(
+    {"workday", "oracle_fusion", "amazon", "apple", "talentreef", "talentbrew", "icims", "eightfold"}
+)
 
 
 def uncapped_by_default(ats_type: str | None) -> bool:
