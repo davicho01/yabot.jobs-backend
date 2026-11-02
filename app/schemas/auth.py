@@ -38,6 +38,9 @@ class UserUpdate(BaseModel):
 
 class AuthResponse(BaseModel):
     user: UserRead
+    # Bearer token, only when the client asked for one (?client=mobile);
+    # the web gets its session as a cookie instead.
+    token: str | None = None
 
 
 class PersonalAccessTokenCreate(BaseModel):

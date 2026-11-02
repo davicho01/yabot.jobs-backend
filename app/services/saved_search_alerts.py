@@ -16,6 +16,7 @@ from app.models.job_url import JobPostingUrl
 from app.models.saved_search import SavedSearch
 from app.models.user import User
 from app.services import geo
+from app.services import push as push_service
 from app.services.email import send_saved_search_digest_email
 from app.services.jobs import build_job_search_statement, to_job_detail
 
@@ -132,5 +133,13 @@ def _sweep_one(db: Session, saved_search: SavedSearch, now: datetime) -> bool:
         board_url=_saved_search_board_url(saved_search),
     )
     saved_search.last_alerted_at = now
+    # Best-effort: send_push logs and swallows its own failures.
+    push_service.send_push(
+        db,
+        saved_search.user_id,
+        title=f"{len(matches)} new job{'s' if len(matches) != 1 else ''}",
+        body=saved_search.name or "Saved search",
+        data={"url": _saved_search_board_url(saved_search)},
+    )
     logger.info("Sent digest for saved search %s (%d match(es)).", saved_search.id, len(matches))
     return True

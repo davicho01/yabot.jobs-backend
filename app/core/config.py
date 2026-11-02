@@ -216,6 +216,11 @@ class Settings(BaseSettings):
     # (POST /auth/google). Unset disables that endpoint; it's not a secret
     # — the frontend embeds the same ID as VITE_GOOGLE_CLIENT_ID.
     google_client_id: str = ""
+    # Comma-separated extra OAuth client IDs (iOS / Android) whose ID tokens
+    # POST /auth/google also accepts, for the mobile app. Not secrets.
+    google_mobile_client_ids: str = ""
+    # Lifetime of the bearer token the mobile app gets at sign-in.
+    mobile_token_ttl_days: int = 365
 
     # Throttles against magic-link abuse (SES send cost, spam to one inbox,
     # one client cycling through many addresses) — see

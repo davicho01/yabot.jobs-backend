@@ -32,6 +32,24 @@ def _set_session_cookie(response: Response, raw_token: str) -> None:
     )
 
 
+def _start_session(
+    db: Session, user: User, request: Request, response: Response, client: str | None
+) -> AuthResponse:
+    """Signs the user in: a session cookie for the web, or — for the mobile
+    app (?client=mobile), which has no cookie jar to lean on — a bearer token
+    (a personal access token, accepted by get_current_user_optional)."""
+    if client == "mobile":
+        _, raw_token = auth_service.create_personal_access_token(
+            db, user, "mobile app", settings.mobile_token_ttl_days
+        )
+        return AuthResponse(user=UserRead.model_validate(user), token=raw_token)
+    session_token = auth_service.create_session(
+        db, user, user_agent=request.headers.get("user-agent"), ip_address=request.client.host if request.client else None
+    )
+    _set_session_cookie(response, session_token)
+    return AuthResponse(user=UserRead.model_validate(user))
+
+
 @router.post("/request-link", status_code=status.HTTP_202_ACCEPTED)
 def request_magic_link(payload: MagicLinkRequest, request: Request, db: Session = Depends(get_db)) -> dict[str, str]:
     user = auth_service.get_or_create_user(db, payload.email)
@@ -68,6 +86,7 @@ def verify_login_code(
     request: Request,
     response: Response,
     db: Session = Depends(get_db),
+    client: str | None = None,
 ) -> AuthResponse:
     try:
         user = auth_service.verify_login_code(db, payload.email, payload.code)
@@ -76,11 +95,7 @@ def verify_login_code(
         db.commit()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    session_token = auth_service.create_session(
-        db, user, user_agent=request.headers.get("user-agent"), ip_address=request.client.host if request.client else None
-    )
-    _set_session_cookie(response, session_token)
-    return AuthResponse(user=UserRead.model_validate(user))
+    return _start_session(db, user, request, response, client)
 
 
 @router.post("/verify", response_model=AuthResponse)
@@ -108,6 +123,7 @@ def sign_in_with_google(
     request: Request,
     response: Response,
     db: Session = Depends(get_db),
+    client: str | None = None,
 ) -> AuthResponse:
     if not settings.google_client_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Google sign-in isn't enabled.")
@@ -116,11 +132,7 @@ def sign_in_with_google(
     except auth_service.AuthError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    session_token = auth_service.create_session(
-        db, user, user_agent=request.headers.get("user-agent"), ip_address=request.client.host if request.client else None
-    )
-    _set_session_cookie(response, session_token)
-    return AuthResponse(user=UserRead.model_validate(user))
+    return _start_session(db, user, request, response, client)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
