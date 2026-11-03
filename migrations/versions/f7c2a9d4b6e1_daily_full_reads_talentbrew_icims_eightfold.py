@@ -1,7 +1,7 @@
 """Daily full reads for TalentBrew, iCIMS and Eightfold boards
 
 Revision ID: f7c2a9d4b6e1
-Revises: e6b1c4d8f2a3
+Revises: e8b2f4a6c1d9
 Create Date: 2026-11-01 00:00:00.000000
 
 Switches on the uncapped crawl (a daily full read, see
@@ -11,8 +11,11 @@ first max_jobs_per_crawl), so a job that came down was never recorded as
 missing and never closed: a 2026-11-01 audit found 104,131 open jobs on these
 three platforms, 80,154 of them not seen on their board for 3+ days.
 
-Mayo Clinic and Eaton were switched on by hand on 2026-11-01 as a pilot; this
-sets the rest and is a no-op for those two. Closing stays throttled by
+Mayo Clinic and Eaton were switched on by hand on 2026-11-01 as a pilot. Eaton
+read its whole board and closed correctly; Mayo's sitemap lists only 500 of its
+~1,900 jobs, so Mayo was switched back off by hand and this turns it on again
+only because the TalentBrew adapter now reports a 500-URL sitemap as a cut-off
+board (no closing). This is a no-op for Eaton. Closing stays throttled by
 record_board_presence's daily limit (20% of a source's open jobs per day).
 """
 from typing import Sequence, Union
@@ -21,7 +24,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = 'f7c2a9d4b6e1'
-down_revision: Union[str, Sequence[str], None] = 'e6b1c4d8f2a3'
+down_revision: Union[str, Sequence[str], None] = 'e8b2f4a6c1d9'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
