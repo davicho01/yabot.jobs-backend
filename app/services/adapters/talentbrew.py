@@ -7,11 +7,12 @@ import httpx
 
 from app.models.enums import AtsType
 from app.services.adapters import base
-from app.services.adapters.base import TIMEOUT, AtsAdapter, ScanResult, get_with_retry, max_jobs_per_crawl
+from app.services.adapters.base import TIMEOUT, AtsAdapter, BoardListing, ScanResult, get_with_retry, max_jobs_per_crawl
 from app.services.adapters.text import clean_text, extract_balanced_div, html_to_formatted_text
 
 _TALENTBREW_SIGNATURE = "tbcdn.talentbrew.com"
 _TALENTBREW_RECORDS_PER_PAGE = 15
+_SITEMAP_URL_LIMIT = 500  # TalentBrew's sitemap.xml lists at most this many jobs
 # Some tenants' job hrefs carry a locale prefix (Walgreens: "/en/job/..."),
 # others don't (Ford: "/job/..." bare) — verified live across five tenants,
 # accept either.
@@ -70,7 +71,7 @@ _TALENTBREW_RESULTS_PARAMS = {
 }
 
 
-def _fetch_jobs(host: str) -> list[str]:
+def _fetch_jobs(host: str) -> "list[str] | BoardListing":
     # robots.txt on 8 of the 9 tenants crawled as of 2026-10-07 (Cargill,
     # CHS, Ford, Intuit, Mayo Clinic, Spectrum, Tenet, UnitedHealth) says
     # "Disallow: /search-jobs/" — the search-results endpoint below — while
@@ -79,7 +80,12 @@ def _fetch_jobs(host: str) -> list[str]:
     # endpoint is only a fallback, and only where robots.txt permits it.
     urls = _sitemap_job_urls(host)
     if urls or not _search_allowed(host):
-        return urls[:max_jobs_per_crawl()]
+        # TalentBrew sitemaps stop at 500 job URLs (Mayo Clinic lists 500 of
+        # ~1,900 open jobs, 2026-11-02), so a sitemap that long is a cut-off
+        # board, not a whole one: a URL missing from it may still be open.
+        # Reporting it complete would let a daily full read close live jobs.
+        complete = len(urls) < _SITEMAP_URL_LIMIT
+        return BoardListing(urls[:max_jobs_per_crawl()], complete=complete)
     return _search_job_urls(host)
 
 

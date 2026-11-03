@@ -29,7 +29,7 @@ def test_jobs_come_from_the_sitemap_newest_first(monkeypatch):
         (f'https://{HOST}/category/nursing-jobs/33647/8337232/1', '2026-10-07T00:00:00Z'),
         (f'https://{HOST}/en/job/phoenix/desk-operations-specialist/33647/2', '2026-10-07T04:00:00Z'),
     ))
-    assert talentbrew._fetch_jobs(HOST) == [
+    assert talentbrew._fetch_jobs(HOST).urls == [
         f'https://{HOST}/en/job/phoenix/desk-operations-specialist/33647/2',
         f'https://{HOST}/job/rochester/rn/33647/1',
     ]
@@ -37,9 +37,26 @@ def test_jobs_come_from_the_sitemap_newest_first(monkeypatch):
 
 def test_no_search_fallback_where_robots_disallows_it(monkeypatch):
     _fake(monkeypatch, _sitemap())
-    assert talentbrew._fetch_jobs(HOST) == []
+    assert talentbrew._fetch_jobs(HOST).urls == []
 
 
 def test_search_fallback_where_robots_allows_it(monkeypatch):
     _fake(monkeypatch, _sitemap(), robots='User-agent: *\nDisallow:', search_html='<a href="/en/job/x/y/1/2">')
     assert talentbrew._fetch_jobs(HOST) == [f'https://{HOST}/en/job/x/y/1/2']
+
+
+def _job_entries(count: int) -> tuple[tuple[str, str], ...]:
+    return tuple((f'https://{HOST}/job/city/title-{n}/33647/{n}', f'2026-10-01T00:00:{n % 60:02d}Z') for n in range(count))
+
+
+def test_a_sitemap_cut_off_at_500_jobs_is_not_the_whole_board(monkeypatch):
+    # TalentBrew sitemaps stop at 500 job URLs; a URL missing from one may still be open.
+    _fake(monkeypatch, _sitemap(*_job_entries(500)))
+    listing = talentbrew._fetch_jobs(HOST)
+    assert len(listing.urls) == 500 and listing.complete is False
+
+
+def test_a_sitemap_under_500_jobs_is_the_whole_board(monkeypatch):
+    _fake(monkeypatch, _sitemap(*_job_entries(499)))
+    listing = talentbrew._fetch_jobs(HOST)
+    assert len(listing.urls) == 499 and listing.complete is True
